@@ -211,7 +211,7 @@ AI_CAST_CHANCE = 0.5
 
 
 def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, inputs=None, user=HOST,
-             behind_libero=()) -> Rally:
+             behind_libero=(), auto=False) -> Rally:
     """Plays one rally. court = rallygen.Court (stance, jobs, positions); battle = skills.Battle
     (optional) runs the players' skills and buffs around every touch. inputs = the user team's
     choices for this rally: {"hand": 1..3, "ults": {window index: [(player, skill)]},
@@ -276,7 +276,7 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
                   dfn: battle.options(dfn, "block", court.front(dfn))
                   + battle.options(dfn, "catch", [p for p in court.stance[dfn] if p not in court.front(dfn)])}
         for team, opts in offers.items():
-            if team == user:
+            if team == user and not auto:  # auto play: the user's team casts by itself like the AI
                 idx = windows[0]
                 windows[0] += 1
                 set_step.window = (idx, "spike" if team == atk else "defense", opts)

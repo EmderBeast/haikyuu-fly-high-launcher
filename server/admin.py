@@ -203,7 +203,7 @@ def apply_pending(acc):
 def apply_power(acc, team):
     """Scale / set the stats of the cards in a match team (PVPTeamInfo) by the Admin Mode settings."""
     mods = (getattr(acc, "admin_flags", None) or {}).get("power") or {}
-    if not mods:
+    if not mods or not enabled():  # off on a multiplayer server (and without admin.json)
         return
     import matches
     stat_types = {t for t, _, _ in matches.STATS}

@@ -166,6 +166,9 @@ def _measured(prefixes, word=None) -> list[str]:
 def _anim_for(f, kind, rng) -> str:
     if kind == "fail":
         return rng.choice(ANIMS.get((f, "fail")) or [FAIL_ANIM])
+    if kind == "scramble":
+        names = [n for n in ("save_front_situcatch", "save_foot") if n in ANIM_TABLE]
+        return rng.choice(names) if names else rng.choice(ANIMS[(SAVE, "ok")])
     if f == BLOCK and kind == "notouch":
         return rng.choice(ANIMS[(BLOCK, "notouch")])
     word = {"touch": "onetouch", "stuff": "blockback"}.get(kind) if f == BLOCK else None
@@ -215,6 +218,11 @@ def touches_from(court: Court, serve_team: int, steps: list, rng=random) -> list
         kind = "ok"
         if f == SERVE:  # contact = the server's spot behind the baseline + his animation's reach
             x, z = SERVER_SPOT[0] * -t, SERVER_SPOT[1] * -t
+        elif f == SAVE and link in (3, 4) and st.result <= 2:
+            # a scrambled save (the ball deviates again or just goes over as a free ball): Garena plays
+            # its save animations, chasing the ball away from the net - not a set or a spike
+            x, z = rng.uniform(-3.0, 3.0), t * rng.uniform(4.5, 6.5)
+            kind = "scramble"
         elif f == SET or (f == SAVE and link == 3):
             x, z = rng.uniform(-1.2, 1.2), t * rng.uniform(1.7, 2.3)
             kind = "ok" if f == SET else "set"
@@ -360,21 +368,29 @@ def _ball_curve(f, start: tuple, end: tuple, g0: int, g1: int, flight_s: float):
     fc.a, fc.b, fc.c = a, b, c
 
 
-def _move_type(dx: float, dz: float) -> int:
-    """Garena's locomotion styles (MoveCurveData.move_type, from the captured runs; dx/dz in the
-    player's frame, dz = towards the net): small steps 10/9/12/11 (forward/back/right/left), side
-    shuffles 22/21, backpedal 19 (short) / 6 (long), plain run 2. Shuffles and backpedals keep the
-    body facing the net, so the player never spins round for a short way back or to the side."""
-    d = math.hypot(dx, dz)
-    if d < 0.6:
-        if abs(dz) >= abs(dx):
-            return 10 if dz > 0 else 9
-        return 12 if dx > 0 else 11
-    if abs(dx) > 2 * abs(dz) and d < 2.5:
-        return 22 if dx > 0 else 21
-    if dz < 0 and abs(dz) >= abs(dx):
-        return 19 if d < 2.5 else 6
-    return 2
+MOVE_TABLE_PATH = Path(__file__).parent / "data" / "move_table.json"
+MOVE_TABLE = json.loads(MOVE_TABLE_PATH.read_text()) if MOVE_TABLE_PATH.exists() else {"types": {}, "speed": {}}
+RUN = 2  # plain run (5 m/s in Garena's rallies)
+
+
+def _move_type(dx: float, dz: float) -> tuple[int, float]:
+    """Garena's locomotion style and its speed for a run of (dx, dz) in the player's frame (dz = towards
+    the net): the style Garena used most for that direction and distance (data/move_table.json: small
+    steps 0.8 m/s, side shuffles 2.5, backpedal 3.3-3.5, run 5 ...). Every style is an animation made
+    for its own speed; played at another speed the player glides over the floor."""
+    cell = MOVE_TABLE.get("cell", 0.5)
+    cx, cz = round(dx / cell), round(dz / cell)
+    types = MOVE_TABLE["types"]
+    kind = types.get(f"{cx},{cz}")
+    if kind is None:  # nearest measured cell
+        best = None
+        for key, t in types.items():
+            kx, kz = map(int, key.split(","))
+            d = (kx - cx) ** 2 + (kz - cz) ** 2
+            if best is None or d < best[0]:
+                best = (d, t)
+        kind = best[1] if best else RUN
+    return kind, MOVE_TABLE["speed"].get(str(kind), 4.0)
 
 
 def _move(f, court: Court, pid: int, target: tuple, g0: int, frames_avail: int,
@@ -398,17 +414,20 @@ def _move(f, court: Court, pid: int, target: tuple, g0: int, frames_avail: int,
         return 0
     acc, dec = 15.0, 10.0
     t_avail = max(frames_avail, 2) / FPS
-    v = 4.0
+    fwd = 1.0 if team_of(pid) == HOST else -1.0
+    kind, v = _move_type((x1 - x0) * fwd, (z1 - z0) * fwd)
     t_ramp = v / (2 * acc) + v / (2 * dec)
-    if dist / v + t_ramp > t_avail:  # faster run to make it in time (Garena's runs stay under 9 m/s)
-        v = dist / max(t_avail - t_ramp, 0.1)
+    if dist / v + t_ramp > t_avail * 1.05:  # that style is too slow to make it in time: he runs
+        kind, v = RUN, max(MOVE_TABLE["speed"].get(str(RUN), 5.0), 4.0)
+        t_ramp = v / (2 * acc) + v / (2 * dec)
+        if dist / v + t_ramp > t_avail:  # faster run (Garena's runs stay under 9 m/s)
+            v = dist / max(t_avail - t_ramp, 0.1)
     if dist < v * t_ramp:  # too short for full speed
         v = math.sqrt(dist / (1 / (2 * acc) + 1 / (2 * dec)))
     v = min(v, MAX_RUN)
     t1 = v / acc
     t2 = t1 + max(dist - v * (v / (2 * acc) + v / (2 * dec)), 0) / v
     t3 = t2 + v / dec
-    fwd = 1.0 if team_of(pid) == HOST else -1.0
     frames = math.ceil(t3 * FPS)
     p = f.player_data.add()
     p.player_id = pid
@@ -420,8 +439,7 @@ def _move(f, court: Court, pid: int, target: tuple, g0: int, frames_avail: int,
     mc = cd.move_curve_data
     mc.bezier.p0.x, mc.bezier.p0.y = x0, z0
     mc.bezier.p1.x, mc.bezier.p1.y = x1, z1
-    kind = _move_type((x1 - x0) * fwd, (z1 - z0) * fwd)
-    if kind == 2:  # a real run leaves forwards first, like Garena's curves
+    if kind == RUN:  # a real run leaves forwards first, like Garena's curves
         mc.bezier.c0.x, mc.bezier.c0.y = x0, z0 + 0.5 * fwd
     else:  # steps and shuffles go straight
         mc.bezier.c0.x, mc.bezier.c0.y = x0 + (x1 - x0) * 0.02, z0 + (z1 - z0) * 0.02

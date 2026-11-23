@@ -161,6 +161,9 @@ def build_team(acc, insts: list[int], gid: int, name: str, icon=(0, 0)) -> P.PVP
         else:
             team.formation.players.add()
     team.power = sum(p.power for p in team.formation.players[:COURT])
+    import admin  # Admin Mode: per-card power changes (no-op without any)
+    admin.apply_power(acc, team)
+    team.power = sum(p.power for p in team.formation.players[:COURT])
     return team
 
 

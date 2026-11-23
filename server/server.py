@@ -876,6 +876,34 @@ async def handle_match_input(client: GameClient, pb_data: bytes, msg_id: int):
     await client.send_packet(msg_id, msg.SerializeToString(), compress=True)
 
 
+async def handle_flag_set(client: GameClient, pb_data: bytes):
+    """0x0203 MainFlagSetC2S{units FlagUnit{flag, open}}: client switches such as auto play, auto serve
+    and match speed. The client takes its state from the reply, so echo what it asked for (the captured
+    reply had them all off, which is why auto play would not switch on)."""
+    P = matches.P
+    req = P.MainFlagSetC2S.FromString(pb_data)
+    rep = P.MainFlagSetS2C()
+    for u in req.units:
+        rep.units.add(flag=u.flag, open=u.open)
+    log.info(f"  FLAGS {[(P.FlagUnit.DESCRIPTOR.fields_by_name['flag'].enum_type.values_by_number[u.flag].name, u.open) for u in req.units]}")
+    await client.send_packet(0x0203, rep.SerializeToString())
+
+
+async def handle_match_setting(client: GameClient, pb_data: bytes):
+    """0x030C PVPMatchSettingC2S: auto play in a match. With auto_release_driving_skill the server
+    releases the user's ultimates itself from the next rally on (no ultimate windows)."""
+    P = matches.P
+    req = P.PVPMatchSettingC2S.FromString(pb_data)
+    live = _live(client)
+    rep = P.PVPMatchSettingS2C(auto_release_driving_skill=req.auto_release_driving_skill,
+                               auto_hander_serve=req.auto_hander_serve)
+    if live:
+        live.auto_skill = req.auto_release_driving_skill
+        rep.session = live.info.session
+    log.info(f"  MATCH SETTING auto skill={req.auto_release_driving_skill} auto serve={req.auto_hander_serve}")
+    await client.send_packet(0x030C, rep.SerializeToString())
+
+
 async def handle_formation_change(client: GameClient, pb_data: bytes):
     """0x0309 PVPFormationChangeC2S: substitutions during a live match (next rally)."""
     live = _live(client)
@@ -969,6 +997,8 @@ MESSAGE_HANDLERS = {
     0x030A: lambda c, pb: handle_match_input(c, pb, 0x030A),
     0x030B: lambda c, pb: handle_match_input(c, pb, 0x030B),
     0x0309: handle_formation_change,
+    0x030C: handle_match_setting,
+    0x0203: handle_flag_set,
     0x1103: handle_tokyo_reward,
 }
 
