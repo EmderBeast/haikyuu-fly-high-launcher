@@ -114,6 +114,9 @@ class Court:
     stance: dict  # team -> [6 player ids]
     jobs: dict  # player id -> job
     pos: dict = field(default_factory=dict)  # player id -> (x, z)
+    home: dict = field(default_factory=dict)  # player id -> (x, z) rotation spot he returns to
+    returning: dict = field(default_factory=dict)  # player id -> his scheduled way back (see _return)
+    g: int = 0  # global frame offset of the rally being built
 
     def setter(self, team: int) -> int:
         ids = self.stance[team]
@@ -174,12 +177,22 @@ def geometry(anim: str, formula: int) -> tuple[float, float, float, int | None, 
     """(dx, dz, y, lead, dur) of an animation: where the ball meets the player relative to his spot at
     animation start, and its timing (data/anim_table.json, measured from Garena's rallies)."""
     e = ANIM_TABLE.get(anim)
-    if e is None and "_notouch" in anim:  # no-touch blocks: same jump as the touched ones
-        e = ANIM_TABLE.get(anim.replace("_notouch", "_blockback")) or ANIM_TABLE.get(anim.replace("_notouch", "_onetouch"))
-    if e:
+    if (e is None or "dx" not in e) and "_notouch" in anim:  # no-touch blocks: same jump as the touched ones
+        twin = (ANIM_TABLE.get(anim.replace("_notouch", "_blockback"))
+                or ANIM_TABLE.get(anim.replace("_notouch", "_onetouch")))
+        if twin and "dx" in twin:
+            return twin["dx"], twin["dz"], twin["y"], twin.get("lead"), (e or twin).get("dur")
+    if e and "dx" in e:
         return e["dx"], e["dz"], e["y"], e.get("lead"), e.get("dur")
     dx, dz, y = DEFAULT_GEOM.get(formula, (0.0, 0.5, 1.0))
     return dx, dz, y, None, None
+
+
+def end_offset(anim: str) -> tuple[float, float]:
+    """Root motion of an animation in the team frame: where the player stands when it is over,
+    relative to where it started (a spike carries him 4-5.5 m forward, a block jump 1-2.7 m sideways)."""
+    e = ANIM_TABLE.get(anim) or {}
+    return e.get("ex", 0.0), e.get("ez", 0.0)
 
 
 def stand_for(contact: tuple, anim: str, formula: int, team: int) -> tuple[float, float]:
@@ -220,6 +233,10 @@ def touches_from(court: Court, serve_team: int, steps: list, rng=random) -> list
         if not st.touch_ball and f != BLOCK:
             kind = "fail"
         anim = _anim_for(f, kind, rng)
+        if f not in (SERVE, BLOCK) and kind != "fail":  # the animation must end on the own side of the net
+            need = 0.4 + end_offset(anim)[1] - geometry(anim, f)[1]
+            if abs(z) < need:
+                z = t * need
         y = 0.0 if kind == "fail" else geometry(anim, f)[2]
         if f == SERVE:
             dx, dz = geometry(anim, f)[:2]
@@ -365,6 +382,14 @@ def _move(f, court: Court, pid: int, target: tuple, g0: int, frames_avail: int,
     """MOVE_CURVE from the player's spot to target (x, z), done within frames_avail frames. With fr and
     local frame, a standby (NONE_CURVE, the given stance) follows when he arrives, as Garena sends it
     after nearly every run; without it the client keeps the running pose."""
+    ret = court.returning.pop(pid, None)
+    if ret and g0 - court.g < ret["end"]:  # called before his way back is over: he goes from where he is
+        for frame, entry in ret["entries"]:
+            for i, e in enumerate(frame.player_data):
+                if e == entry:
+                    del frame.player_data[i]
+                    break
+        court.pos[pid] = ret["from"]
     x0, z0 = court.pos[pid]
     x1, z1 = target
     dist = math.hypot(x1 - x0, z1 - z0)
@@ -436,6 +461,8 @@ def _anim(f, court: Court, pid: int, name: str, g0: int, frames: int):
     fx, fz = anim_forward(name)
     face = 1.0 if team_of(pid) == HOST else -1.0
     p.forward.x, p.forward.z = fx * face, fz * face
+    ex, ez = end_offset(name)
+    court.pos[pid] = (x + ex * face, z + ez * face)
     cd = p.curve_data
     cd.start_frame, cd.end_frame = g0, g0 + frames
     cd.anim_curve_data.anim_name = name
@@ -490,6 +517,45 @@ def _formation(fr, court: Court, team: int, phase: str, frame: int, g: int, fram
                 _move(fr(frame), court, pid, target, g + frame, max(frames_avail, 8), fr, frame, state)
 
 
+def _return(fr, court: Court, pid: int, local: int, g: int, state: int | None = None):
+    """After an animation the player walks back to his rotation spot (Garena sends this run one frame
+    after nearly every animation). A later run that starts earlier replaces it."""
+    here = court.pos[pid]
+    home = court.home.get(pid)
+    if not home or math.hypot(here[0] - home[0], here[1] - home[1]) < 0.3:
+        return
+    state = state if state is not None else P.PLAYER_PRECATCH_BLOCK
+    frames = _move(fr(local), court, pid, home, g + local, 30, fr, local, state)
+    if frames:
+        court.returning[pid] = {"end": local + frames, "from": here, "entries": [
+            (fr(local), fr(local).player_data[-1]), (fr(local + frames), fr(local + frames).player_data[-1])]}
+
+
+def _feint(fr, court: Court, t: Touch, lead: int, g: int, busy: dict, prev_announce: int):
+    """A front-row teammate of the spiker runs a fake attack (Garena: about 0.7 feints per spike)."""
+    team = team_of(t.player)
+    face = 1 if team == HOST else -1
+    name = "feignattack_runnear_swipearm"
+    e = ANIM_TABLE.get(name)
+    if not e:
+        return
+    start = t.frame - lead - 2
+    setter = court.setter(team)
+    pool = [p for p in court.front(team) if p not in (t.player, setter) and court.jobs.get(p) != JOB_LIBERO
+            and busy.get(p, 0) <= prev_announce]
+    if not pool or start - prev_announce < 6:
+        return
+    pid = max(pool, key=lambda p: abs(court.pos[p][0] - t.pos[0]))  # the one away from the real attack
+    lane = max(-3.6, min(3.6, court.pos[pid][0]))
+    dist = 1.0 + e["ez"]  # he lands about 1 m from the net
+    spot = (lane - e.get("ex", 0.0) * face, -dist * face)
+    _move(fr(prev_announce), court, pid, spot, g + prev_announce, start - prev_announce)
+    dur = int(e.get("dur") or 26)
+    _anim(fr(start), court, pid, name, g + start, dur)
+    busy[pid] = start + dur
+    _return(fr, court, pid, start + dur + 1, g)
+
+
 def _assist_block(fr, court: Court, t: Touch, ann: int, lead: int, dur: int, g: int, busy: dict):
     """Front-row teammates next to the blocker jump with him (Garena's blocks are mostly two or three
     players); they close in beside him and play a no-touch block jump at the same moment."""
@@ -498,17 +564,29 @@ def _assist_block(fr, court: Court, t: Touch, ann: int, lead: int, dur: int, g: 
     mates = [p for p in court.front(team) if p != t.player and court.jobs.get(p) != JOB_LIBERO
              and busy.get(p, 0) <= ann and abs(court.pos.get(p, (99, 0))[0] - stand[0]) < 3.2]
     mates.sort(key=lambda p: abs(court.pos[p][0] - stand[0]))
+    face = 1 if team == HOST else -1
     used = {}
     for pid in mates[:2]:
-        side_ = 1 if court.pos[pid][0] >= stand[0] else -1
+        side_ = 1 if court.pos[pid][0] >= t.pos[0] else -1
         if side_ in used:  # both on the same side: the second one goes to the other side
             side_ = -side_
         used[side_] = pid
-        target = (stand[0] + 0.95 * side_, stand[1])
+        land_x = t.pos[0] + 0.95 * side_  # he comes down beside the blocker
+        # a jump that slides towards the ball from his side (block jumps carry the player 1-2.7 m sideways)
+        want = -side_ * face  # sign of the sideways motion in the team frame
+        names = [n for n, e in ANIM_TABLE.items() if n.startswith("block_") and n.endswith("_notouch")
+                 and e.get("ne", 0) >= 5 and e.get("ex", 0) * want > 0]
+        if not names:
+            continue
+        name = min(names, key=lambda n: abs(ANIM_TABLE[n]["ex"]))
+        ex, ez = end_offset(name)
+        target = (land_x - ex * face, stand[1])
         start = t.frame - lead
         _move(fr(ann), court, pid, target, g + ann, max(start - ann, 2))
-        _anim(fr(start), court, pid, rng_choice(ANIMS[(BLOCK, "notouch")], pid), g + start, dur)
-        busy[pid] = start + dur
+        adur = int(ANIM_TABLE[name].get("dur") or dur)
+        _anim(fr(start), court, pid, name, g + start, adur)
+        busy[pid] = start + adur
+        _return(fr, court, pid, start + adur + 1, g, P.PLAYER_PREBLOCK)
 
 
 def rng_choice(names: list, salt: int) -> str:
@@ -525,9 +603,8 @@ def place(court: Court, serve_team: int, libero: dict):
             court.pos[pid] = (x * -s, z * -s)
         if team == serve_team:
             court.pos[court.stance[team][0]] = (SERVER_SPOT[0] * -s, SERVER_SPOT[1] * -s)
-        lib = libero.get(team)
-        if lib is not None:
-            court.pos[lib] = (4.8 * -s, 6.0 * s)
+        # a libero who is not in for someone stays off the court: Garena's setup frame only has the
+        # six players on court (he used to stand at the side line as a seventh player)
 
 
 def build(court: Court, serve_team: int, touches: list[Touch], g: int, start: dict,
@@ -536,6 +613,10 @@ def build(court: Court, serve_team: int, touches: list[Touch], g: int, start: di
     local frame. g = global frame offset of this rally (sum of earlier rallies' last frames);
     start = positions at rally start (from place(), before plan() moved anyone)."""
     court.pos = dict(start)
+    court.g, court.returning = g, {}
+    court.home = dict(start)
+    hx, hz = SLOTS[0]
+    court.home[court.stance[serve_team][0]] = (hx * -side(serve_team), hz * -side(serve_team))
     frames: dict[int, P.FrameData] = {}
 
     def fr(i: int) -> P.FrameData:
@@ -575,6 +656,7 @@ def build(court: Court, serve_team: int, touches: list[Touch], g: int, start: di
     lead, dur = int(g_lead or ACTIONS[SERVE][5]), int(g_dur or ACTIONS[SERVE][6])
     serve.frame = anim_start + lead
     _anim(fr(anim_start + 1), court, serve.player, serve.anim or ACTIONS[SERVE][4], g + anim_start, dur)
+    _return(fr, court, serve.player, anim_start + dur + 1, g)
     fr(announce).round_data.events.extend([3, 4])
     _hit_data(fr(announce).round_data.action_data, serve)
     _skills(fr(announce), serve.casts, serve.buffs)
@@ -600,6 +682,7 @@ def build(court: Court, serve_team: int, touches: list[Touch], g: int, start: di
                   fr, mv, TOUCH_STANCE.get(t.formula) if t.frame - lead - mv > 6 else None)
             busy[t.player] = t.frame - lead + dur
             _anim(fr(t.frame - lead), court, t.player, t.anim or anim, g + t.frame - lead, dur)
+            _return(fr, court, t.player, t.frame - lead + dur + 1, g, P.PLAYER_PREBLOCK)
             _assist_block(fr, court, t, ann, lead, dur, g, busy)
             fr(ann).round_data.events.extend(ANNOUNCE_EVENTS[BLOCK])
             _hit_data(fr(ann).round_data.action_data, t)
@@ -642,6 +725,9 @@ def build(court: Court, serve_team: int, touches: list[Touch], g: int, start: di
         if t.formula in START_EVENTS or (t.formula == SAVE and (t.link or 2) == 2):
             fr(t.frame - lead).round_data.events.extend(START_EVENTS.get(t.formula, [9]))
         _anim(fr(t.frame - lead + 1), court, t.player, t.anim or anim, g + t.frame - lead, dur)
+        _return(fr, court, t.player, t.frame - lead + dur + 1, g)
+        if t.formula == SPIKE:
+            _feint(fr, court, t, lead, g, busy, prev_announce)
         _hit_data(fr(t.frame).round_data.hit_data, t)
         if t.formula == SET:
             fr(t.frame).round_data.events.append(14)
@@ -664,5 +750,5 @@ def build(court: Court, serve_team: int, touches: list[Touch], g: int, start: di
     e.round_data.events.append(21)
     e.game_data.id = 1
     _skills(e, *skill_end)
-    out = [frames[i] for i in sorted(frames)]
+    out = [frames[i] for i in sorted(frames) if i <= end_frame]  # runs back after the end are dropped
     return out, end_frame

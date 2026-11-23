@@ -620,6 +620,10 @@ async def handle_rank_self(client, pb: bytes):
 async def handle_quick(client, pb: bytes):
     """0x0306 PVPQuickBattleC2S: decided at once (own team clearly stronger)."""
     req = P.PVPQuickBattleC2S.FromString(pb)
+    if req.args.pvp_type == P.FIGHT_PEAK:  # Triple Clash: one game of a best-of-three series
+        import peak
+        await peak.handle_quick(client, pb)
+        return
     if req.args.pvp_type != P.FIGHT_ARENA:
         await HOOKS["generic"](client, pb, MSG_QUICK)
         return

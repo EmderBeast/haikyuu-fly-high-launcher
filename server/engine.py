@@ -29,7 +29,11 @@ TEAM_IDS = 13
 K_ADVANTAGE = 0.8
 MAX_CROSS = 20
 JOB_LIBERO = 4  # battleconstant MaxCrossNetNum
-BLOCK_CHANCE = 0.85  # a spike meets a block (captures: 202 of 243 spikes)
+# receives / digs / saves weigh in as if ~4.5x stronger (ln 1.5): Garena's digs came up perfect far more
+# often than the raw spike-vs-dig power suggests (best fit on the captured touches, scratch fit3.py)
+CATCH_BIAS = 1.5
+DIG_ROW = 4
+BLOCK_CHANCE = 1.0  # every captured dig after a spike came after a block attempt
 
 # attribute (proto AttrType) used by each formula, and whether it uses the attack or defence crit stats
 ATTR = {SERVE: 5, DIG_SERVE: 4, SAVE: 6, SET: 2, SPIKE: 1, BLOCK: 3, DIG_SPIKE: 4, DIG_NO_ATTACK: 4}
@@ -47,6 +51,7 @@ def _table(name):
 
 
 MAPPING = _table("formulamapping")
+LIMIT = {r["Formula"]: r["Limit"] / 100 for r in _table("formulafactor") if r.get("Level1") == 71}
 STANDARD = _table("standardresult")
 
 
@@ -87,10 +92,16 @@ def roll_result(formula: int, last_result: int, link: int, x: float, rng=random)
     return rng.choices(range(len(out)), weights=out)[0]
 
 
-def advantage(own: float, opp: float) -> float:
+def advantage(own: float, opp: float, formula: int = 0) -> float:
+    """Shift of the result weights towards the toucher's good results (+) or bad ones (-), capped at
+    the formula's formulafactor.Limit (10 serve, 43 receive, 40 block/dig/save: percentage points).
+    The cap is what makes Garena's digs still come up perfect against far stronger spikes; it fits
+    the captured touches better than an uncapped curve (calibration: log-likelihood -563 vs -608)."""
     if own <= 0 or opp <= 0:
         return 0.0
-    return math.tanh(K_ADVANTAGE * math.log(own / opp))
+    cap = LIMIT.get(formula, 0.40)
+    bias = CATCH_BIAS if formula in (DIG_SERVE, SAVE, DIG_SPIKE, DIG_NO_ATTACK) else 0.0
+    return max(-cap, min(cap, K_ADVANTAGE * math.log(own / opp) + bias))
 
 
 # ---------------------------------------------------------------- player stats and power
@@ -234,7 +245,7 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
                 ctx.hand = inputs["hand"]
         pw = power(stats, pid, formula, rng, multiplier=mult, battle=battle)
         ref = opp_ball if opp_ball is not None else (opp.ball if opp else None)
-        x = advantage(pw.ball, ref) if ref else 0.0
+        x = advantage(pw.ball, ref, formula) if ref else 0.0
         result = forced if forced is not None else roll_result(formula, last_result, link, x, rng)
         if formula == SPIKE:
             result = min(max(result, 3), 6)
@@ -337,7 +348,10 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
             if prev.formula == BLOCK and prev.result == 2:  # the block softened the spike
                 opp = Power(opp.value * 0.6, opp.ball * 0.6, opp.crit, opp.des)
             forced = 0 if crosses >= MAX_CROSS else None
-            last = last_spike_result if last_spike_result != NONE else 4
+            # Garena's digs follow standardresult row LastResult 4 whatever the spike's result was: that
+            # row fits the captured digs far better than the spike result's own row (log-likelihood
+            # -138 vs -245 over 92 digs; scratch fit5.py)
+            last = DIG_ROW
             pid = want[0] if want and want[0] != prev.player else pick(team, DIG_SPIKE, exclude=(prev.player,))
             st = add(DIG_SPIKE, pid, 2, opp, last, forced)
         elif formula == DIG_SERVE:

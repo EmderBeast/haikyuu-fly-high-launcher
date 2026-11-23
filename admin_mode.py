@@ -7,6 +7,7 @@ what it did in server/accounts/admin_done/<gid>.json.
 """
 import json
 import re
+import sys
 import time
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -49,6 +50,7 @@ class GameData:
                     name += " %"
                 self.attr[r["AttrID"]] = name
         self.vice_pools = {r["ID"]: r["Viceattr"] for r in load("specialtyviceattr")}
+        self.card_names = {r["ID"]: (de(r.get("Intro")) or str(r["ID"])) for r in load("playerlist")}
         self.specialty = {}  # (suit, rare, position) -> row
         for r in load("specialty"):
             self.specialty[(r["SuitID"], r["Rare"], r.get("Position") or 0)] = r
@@ -60,6 +62,9 @@ class GameData:
     def id_of(label):
         m = re.search(r"\((\d+)\)\s*$", label or "")
         return int(m.group(1)) if m else None
+
+    def card_name(self, conf):
+        return self.card_names.get(conf) or f"Karte {conf}"
 
     def mains(self, row):
         m = row["MainattrID"]
@@ -75,6 +80,7 @@ class AdminWindow:
         self.base = launcher.base
         self.data = GameData(self.base)
         self.pending_specs = []
+        self.pending_power = {}
 
         self.win = tk.Toplevel(launcher.root)
         self.win.title("Admin Mode")
@@ -99,6 +105,7 @@ class AdminWindow:
         nb.add(self.tab_account(nb), text="Konto")
         nb.add(self.tab_cards(nb), text="Charaktere & Gegenstände")
         nb.add(self.tab_potentials(nb), text="Potentials")
+        nb.add(self.tab_power(nb), text="Stärke")
 
         bottom = tk.Frame(self.win, bg=BG)
         bottom.pack(fill="x", padx=14, pady=(0, 12))
@@ -300,6 +307,7 @@ class AdminWindow:
     def clear_specs(self):
         self.pending_specs.clear()
         self.spec_list.delete(0, "end")
+        self.pending_power.clear()
 
     def describe(self, s):
         d = self.data
@@ -309,6 +317,162 @@ class AdminWindow:
                 f"Stufe {row.get('Rare')} · Lv {s['level']} · {d.attr.get(s['main'], s['main'])} | {vice}")
 
     # --- apply ---------------------------------------------------------------------
+
+    # --- power (match strength per card) ------------------------------------------------
+
+    STAT_LABELS = [(0, "Schnellangriff"), (1, "Kraftangriff"), (2, "Zuspiel"), (3, "Block"),
+                   (4, "Annahme"), (5, "Aufschlag"), (6, "Retten")]
+
+    def load_cards(self):
+        """[(label, inst, conf, level, star, train)] of the chosen account, best cards first."""
+        server = str(self.base / "server")
+        if server not in sys.path:
+            sys.path.insert(0, server)
+        import starter
+        import wire
+        gid = int(self.gid.get() or 0)
+        base = starter.baseline_for(gid)
+        cards = dict(base.cards)
+        acc_dir = self.base / "server" / "accounts"
+        path = acc_dir / (f"{gid}.json" if base is starter.CAPTURED else f"{gid}-starter.json")
+        try:
+            d = json.loads(path.read_text("utf-8"))
+        except Exception:
+            d = {}
+        for h in d.get("cards", []):
+            raw = bytes.fromhex(h)
+            cards[wire.get(wire.parse(raw), 1)] = raw
+        for inst in d.get("removed_cards", []):
+            cards.pop(inst, None)
+        self.saved_power = (d.get("admin_flags") or {}).get("power", {})
+        out = []
+        for inst, raw in cards.items():
+            f = wire.parse(raw)
+            conf, level, star, train = (wire.get(f, n, 0) for n in (3, 4, 6, 7))
+            name = self.data.card_name(conf)
+            out.append((f"{name}  Lv.{level} \u2605{star}  ({inst})", inst, conf, level, star, train))
+        out.sort(key=lambda c: (-c[3], -c[4], c[0]))
+        return out
+
+    def base_stats(self, card):
+        try:
+            import matches
+            attrs = matches.card_attrs(card[2], card[3], card[4], card[5])
+            return {a.type: a.val // matches.SCALE for a in attrs}
+        except Exception:
+            return {}
+
+    def tab_power(self, nb):
+        f = self.frame(nb)
+        tk.Label(f, text="Stärke im Match: Prozent für alle Werte und/oder einzelne Werte direkt setzen "
+                         "(leer = unverändert). Gilt für Matches, nicht für die Anzeige im Kartenmenü.",
+                 bg=PANEL, fg="#aaaaaa", font=("Segoe UI", 9), wraplength=700, justify="left").pack(
+            anchor="w", padx=12, pady=(10, 4))
+        row = tk.Frame(f, bg=PANEL)
+        row.pack(anchor="w", padx=12, pady=4)
+        tk.Label(row, text="Karte:", bg=PANEL, fg=FG).pack(side="left")
+        self.card_var = tk.StringVar()
+        self.card_box = ttk.Combobox(row, textvariable=self.card_var, width=58)
+        self.card_box.pack(side="left", padx=6)
+        tk.Button(row, text="Laden", command=self.refresh_cards, bg="#0f3460", fg="white",
+                  relief="flat").pack(side="left")
+        self.card_var.trace_add("write", lambda *_: self.show_base())
+
+        grid = tk.Frame(f, bg=PANEL)
+        grid.pack(anchor="w", padx=12, pady=4)
+        tk.Label(grid, text="Alle Werte in %:", bg=PANEL, fg=FG).grid(row=0, column=0, sticky="w")
+        self.pct = tk.IntVar(value=100)
+        tk.Spinbox(grid, from_=1, to=10000, increment=10, textvariable=self.pct, width=7).grid(
+            row=0, column=1, sticky="w")
+        self.stat_vars = {}
+        self.base_labels = {}
+        for i, (t, name) in enumerate(self.STAT_LABELS):
+            tk.Label(grid, text=f"{name}:", bg=PANEL, fg=FG).grid(row=1 + i, column=0, sticky="w")
+            v = tk.StringVar()
+            tk.Entry(grid, textvariable=v, width=10).grid(row=1 + i, column=1, sticky="w", pady=1)
+            lbl = tk.Label(grid, text="", bg=PANEL, fg="#aaaaaa")
+            lbl.grid(row=1 + i, column=2, sticky="w", padx=8)
+            self.stat_vars[t] = v
+            self.base_labels[t] = lbl
+
+        btns = tk.Frame(f, bg=PANEL)
+        btns.pack(anchor="w", padx=12, pady=6)
+        tk.Button(btns, text="Hinzufügen", command=self.add_power, bg="#0f3460", fg="white",
+                  relief="flat").pack(side="left")
+        tk.Button(btns, text="Karte zurücksetzen", command=self.reset_power, bg="#53354a", fg="white",
+                  relief="flat").pack(side="left", padx=6)
+        self.power_list = tk.Listbox(f, height=6, bg="#0f0f23", fg="#00ff88", font=("Consolas", 9))
+        self.power_list.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+        self.cards = []
+        self.saved_power = {}
+        return f
+
+    def refresh_cards(self):
+        try:
+            self.cards = self.load_cards()
+        except Exception as e:
+            messagebox.showerror("Admin Mode", f"Karten konnten nicht geladen werden: {e}", parent=self.win)
+            return
+        self.card_box.configure(values=["Alle Karten (*)"] + [c[0] for c in self.cards])
+        self.card_var.set("Alle Karten (*)")
+        self.power_list.delete(0, "end")
+        for key, m in self.saved_power.items():
+            self.power_list.insert("end", "gespeichert: " + self.describe_power(key, m))
+
+    def selected_card(self):
+        label = self.card_var.get()
+        if label.startswith("Alle Karten"):
+            return "*", None
+        card = next((c for c in self.cards if c[0] == label), None)
+        if card is None and label.strip():  # typed text: first card whose name contains it
+            card = next((c for c in self.cards if label.strip().lower() in c[0].lower()), None)
+        return (str(card[1]), card) if card else (None, None)
+
+    def show_base(self):
+        key, card = self.selected_card()
+        stats = self.base_stats(card) if card else {}
+        for t, lbl in self.base_labels.items():
+            lbl.configure(text=f"normal: {stats[t]}" if t in stats else "")
+
+    def describe_power(self, key, m):
+        if m is None:
+            return f"{self.card_label(key)}: zurücksetzen"
+        names = dict(self.STAT_LABELS)
+        stats = ", ".join(f"{names.get(int(t), t)}={v}" for t, v in m.get("stats", {}).items())
+        return f"{self.card_label(key)}: {m.get('pct', 100)} %" + (f" | {stats}" if stats else "")
+
+    def card_label(self, key):
+        if key == "*":
+            return "Alle Karten"
+        card = next((c for c in self.cards if str(c[1]) == str(key)), None)
+        return card[0] if card else str(key)
+
+    def add_power(self):
+        key, card = self.selected_card()
+        if key is None:
+            messagebox.showerror("Admin Mode", "Erst „Laden“ drücken und eine Karte wählen.", parent=self.win)
+            return
+        stats = {}
+        for t, v in self.stat_vars.items():
+            text = v.get().strip().replace(".", "")
+            if text:
+                if not text.isdigit():
+                    messagebox.showerror("Admin Mode", f"Ungültiger Wert: {v.get()}", parent=self.win)
+                    return
+                stats[str(t)] = int(text)
+        m = {"pct": max(1, int(self.pct.get())), "stats": stats}
+        self.pending_power[key] = m
+        self.power_list.insert("end", self.describe_power(key, m))
+        self.pct.set(100)  # fresh fields for the next card
+        for v in self.stat_vars.values():
+            v.set("")
+
+    def reset_power(self):
+        key, _ = self.selected_card()
+        if key is None:
+            return
+        self.pending_power[key] = None
+        self.power_list.insert("end", self.describe_power(key, None))
 
     def collect(self):
         actions = []
@@ -331,6 +495,8 @@ class AdminWindow:
             actions.append({"max_cards": True})
         if self.items_on.get():
             actions.append({"items": int(self.items.get())})
+        if self.pending_power:
+            actions.append({"power": dict(self.pending_power)})
         if self.pending_specs:
             actions.append({"specialties": list(self.pending_specs)})
         return actions

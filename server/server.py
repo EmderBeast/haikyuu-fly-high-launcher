@@ -354,7 +354,8 @@ async def handle_login(client: GameClient, pb_data: bytes):
     await client.send_packet(MSG_TASK_CHANGE, client.missions.change_message(all_tasks=True))
     log.info(f"  ACCOUNT {gid}: {len(client.account.cards)} added cards, {len(client.account.items)} changed items")
     try:  # shared-server PvP: snapshot this player's team, arena info from this server's ladder
-        for mid, pb in pvp.on_login(client):
+        for mid, pb in (pvp.on_login(client) + peak.on_login(client) + teamcomp.on_login(client)
+                        + freedom.on_login(client)):
             await client.send_packet(mid, pb)
     except Exception as e:  # never block the login
         log.error(f"  PVP login update failed: {e!r}")
@@ -754,6 +755,9 @@ async def handle_pvp_create(client: GameClient, pb_data: bytes):
     client.room = None
     args_pb = wire.get(wire.parse(pb_data), 1, b"")
     room = (pvp.build_room(args_pb, client.account, client.gid, player_name(client))
+            or peak.build_room(args_pb, client.account, client.gid, player_name(client))
+            or teamcomp.build_room(args_pb, client.account, client.gid, player_name(client))
+            or freedom.build_room(args_pb, client.account, client.gid, player_name(client))
             or matches.build_room(args_pb, client.account, client.gid, player_name(client)))
     if room:
         client.room = room[1]
@@ -897,6 +901,26 @@ async def handle_pvp_result(client: GameClient, pb_data: bytes):
             log.info(f"  ARENA {'won' if room.won else 'lost'} vs {room.pvp.entry['gid']}: score {change:+d}")
             await mission_event(client, missions.FINISH_MATCH, 1, (room.info.room_args.pvp_type, 0))
             return
+        if getattr(room, "freedom", None):  # Freedom Championship: ladder score for score matches
+            h, a, change = await freedom.handle_result(client, room)
+            log.info(f"  FREEDOM vs {room.freedom.entry['gid']} ({'score' if room.freedom.pattern else 'training'}): "
+                     f"{h}-{a}, score {change:+d}")
+            await mission_event(client, missions.FINISH_MATCH, 1, (room.info.room_args.pvp_type, 0))
+            return
+        if getattr(room, "streak", None):  # Match Streak: stage of a competition, stars at its end
+            h, a, settled = await teamcomp.handle_result(client, room)
+            log.info(f"  STREAK comp {room.streak.comp} stage {room.streak.index + 1}: {h}-{a}"
+                     + (f", lead {settled['lead']} stars {settled['stars']}" if settled else ""))
+            await mission_event(client, missions.FINISH_MATCH, 1, (room.info.room_args.pvp_type, room.streak.stage))
+            return
+        if getattr(room, "peak", None):  # Triple Clash: one game of the series, ladder at its end
+            h, a, settled = await peak.handle_result(client, room)
+            log.info(f"  PEAK game {room.peak.team + 1} vs {room.peak.entry['gid']}: {h}-{a}"
+                     + (f", series {'won' if settled['won'] else 'lost'} {settled['change']:+d}" if settled else ""))
+            if settled:
+                await mission_event(client, missions.FINISH_MATCH, 1, (room.info.room_args.pvp_type, 0))
+                await mission_event(client, missions.PEAK_MATCH, 1)
+            return
         await handle_preset_result(client, room)
         return
     await handle_generic(client, pb_data, 0x0304)
@@ -953,6 +977,12 @@ MESSAGE_HANDLERS.update(admin.HANDLERS)
 
 import pvp  # noqa: E402  asynchronous PvP (arena) against the other players on this server
 MESSAGE_HANDLERS.update(pvp.HANDLERS)
+import peak  # noqa: E402  Triple Clash (three teams, best of three) against the other players
+MESSAGE_HANDLERS.update(peak.HANDLERS)
+import teamcomp  # noqa: E402  Match Streak (TeamCompetition): 2-3 stages in a row, stars for the lead
+MESSAGE_HANDLERS.update(teamcomp.HANDLERS)
+import freedom  # noqa: E402  Freedom Championship: matchmaking against the other players' line-ups
+MESSAGE_HANDLERS.update(freedom.HANDLERS)
 pvp.HOOKS.update(grant_rewards=grant_rewards, player_name=player_name, generic=handle_generic,
                  mission_event=mission_event)
 

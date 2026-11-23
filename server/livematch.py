@@ -9,6 +9,7 @@ Later stages replace the captured touches with simulated ones.
 """
 import json
 import random
+import time
 from pathlib import Path
 
 import engine
@@ -406,7 +407,10 @@ class LiveMatch:
         return 0
 
     def reply(self, frames: list[bytes]) -> bytes:
-        msg = P.PVPMatchDataS2C(session=self.info.session, order=self.order)
+        # start_time = server time of this rally (seconds); the client runs the countdown of timed
+        # modes (club boss, Specialty Trial) from it, as from Garena's replies
+        self.rally_start_time = int(time.time())
+        msg = P.PVPMatchDataS2C(session=self.info.session, order=self.order, start_time=self.rally_start_time)
         msg.frames.extend(frames)
         self.order += 1
         return msg.SerializeToString()

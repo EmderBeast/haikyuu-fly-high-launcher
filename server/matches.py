@@ -177,6 +177,8 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
         team.formation.coach_card.CopyFrom(template.formation.coach_card)
         team.formation.fetter_id_levels.extend(template.formation.fetter_id_levels)
         team.skill_extras.extend(template.skill_extras)
+    import admin  # Admin Mode: per-card power changes (no-op without any)
+    admin.apply_power(acc, team)
     return team
 
 

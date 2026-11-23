@@ -22,6 +22,10 @@ Queue entries (list, applied in order):
   {"flags": {"infinite_stamina": true}}
   {"specialties": [{"conf": 3051045, "level": 12, "main": 1023,
                     "vices": [[2010, 2], [2023, 1], ...], "count": 1}]}
+  {"power": {"<card inst or *>": {"pct": 150, "stats": {"<attr type>": value}} | null}}
+      match strength per card ("*" = every card): all 7 stats in percent and/or single stats
+      set to a value as shown in game; null removes it. Applied when the team for a match is
+      built (matches.home_team -> apply_power), so the match engine uses it.
 """
 import hashlib
 import json
@@ -144,6 +148,16 @@ def _apply(acc, action: dict) -> list[str]:
             acc.set_item(item_id, count)
             n += 1
         done.append(f"{n} Gegenstände auf {count}")
+    for key, value in action.get("power", {}).items():
+        mods = acc.admin_flags.setdefault("power", {})
+        if value is None:
+            mods.pop(str(key), None)
+            done.append(f"Stärke {key} zurückgesetzt")
+        else:
+            mods[str(key)] = {"pct": int(value.get("pct", 100)),
+                              "stats": {str(t): int(v) for t, v in value.get("stats", {}).items()}}
+            done.append(f"Stärke {key}: {mods[str(key)]['pct']} %"
+                        + (f", {len(mods[str(key)]['stats'])} Werte gesetzt" if mods[str(key)]["stats"] else ""))
     for key, value in action.get("flags", {}).items():
         acc.admin_flags[key] = bool(value)
         done.append(f"{key} = {bool(value)}")
@@ -184,6 +198,31 @@ def apply_pending(acc):
     (DONE / f"{acc.gid}.json").write_text(json.dumps({"time": time.time(), "done": report},
                                                      ensure_ascii=False, indent=1), encoding="utf-8")
     log.info(f"  ADMIN applied for {acc.gid}: {report}")
+
+
+def apply_power(acc, team):
+    """Scale / set the stats of the cards in a match team (PVPTeamInfo) by the Admin Mode settings."""
+    mods = (getattr(acc, "admin_flags", None) or {}).get("power") or {}
+    if not mods:
+        return
+    import matches
+    stat_types = {t for t, _, _ in matches.STATS}
+    for p in team.formation.players:
+        m = mods.get(str(p.info.inst_id)) or mods.get("*")
+        if not m:
+            continue
+        before = matches.card_power(p.attr)
+        for a in p.attr:
+            if a.type not in stat_types:
+                continue
+            if str(a.type) in m.get("stats", {}):
+                a.val = int(m["stats"][str(a.type)]) * matches.SCALE
+            elif m.get("pct", 100) != 100:
+                a.val = a.val * int(m["pct"]) // 100
+        # captured cards' power also counts potentials/bonds: scale it with the stat sum
+        after = matches.card_power(p.attr)
+        p.power = p.power * after // before if before else after
+    team.power = sum(p.power for p in team.formation.players[:7])
 
 
 # --- message handlers -------------------------------------------------------------

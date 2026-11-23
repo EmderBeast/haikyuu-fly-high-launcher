@@ -69,11 +69,35 @@ def build():
             table.setdefault(h.hit_anim, []).append(
                 ((h.hit_ball_pos.x - a[2]) * s, (h.hit_ball_pos.z - a[3]) * s, h.hit_ball_pos.y,
                  lead, a[1] - a[0], a[4] * s, a[5] * s))
+    # root motion: where the player stands when the animation is over = start of his next run
+    ends = {}
+    for r in L.library():
+        pend = {}
+        for f in r.frames:
+            for p in f.player_data:
+                cd = p.curve_data
+                sgn = 1 if p.player_id < 13 else -1
+                if p.player_id in pend and cd.curve_type == P.MOVE_CURVE:
+                    a = pend.pop(p.player_id)
+                    b = cd.move_curve_data.bezier
+                    ends.setdefault(a[0], []).append(((b.p0.x - a[1]) * sgn, (b.p0.y - a[2]) * sgn,
+                                                      a[4] - a[3]))
+                if cd.HasField("anim_curve_data") and cd.anim_curve_data.anim_name:
+                    pend[p.player_id] = (cd.anim_curve_data.anim_name, p.position.x, p.position.z,
+                                         cd.start_frame, cd.end_frame)
     out = {}
+    for name, v in ends.items():  # animations never seen with a ball contact (no-touch blocks, feints)
+        if name not in table:
+            out[name] = {"n": 0, "ex": round(st.median(x[0] for x in v), 3), "ez": round(st.median(x[1] for x in v), 3),
+                         "dur": st.median(x[2] for x in v), "ne": len(v)}
     for name, v in table.items():
         med = lambda k: st.median([x[k] for x in v if x[k] is not None]) if any(x[k] is not None for x in v) else None
         out[name] = {"dx": round(med(0), 3), "dz": round(med(1), 3), "y": round(med(2), 3),
                      "lead": med(3), "dur": med(4), "fx": round(med(5), 3), "fz": round(med(6), 3), "n": len(v)}
+        e = ends.get(name)
+        if e:
+            out[name].update(ex=round(st.median(x[0] for x in e), 3), ez=round(st.median(x[1] for x in e), 3),
+                             ne=len(e))
     OUT.write_text(json.dumps(out, indent=1, sort_keys=True))
     return out
 
