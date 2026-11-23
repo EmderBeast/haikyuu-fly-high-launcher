@@ -98,7 +98,8 @@ class AdminWindow:
         self.gid_box = ttk.Combobox(top, textvariable=self.gid, values=gids, state="readonly", width=14)
         self.gid_box.pack(side="left")
         if gids:
-            self.gid.set(gids[-1])
+            owner = str(self.admins().get("owner") or "")
+            self.gid.set(owner if owner in gids else gids[-1])
 
         nb = ttk.Notebook(self.win)
         nb.pack(fill="both", expand=True, padx=14, pady=6)
@@ -106,6 +107,8 @@ class AdminWindow:
         nb.add(self.tab_cards(nb), text="Charaktere & Gegenstände")
         nb.add(self.tab_potentials(nb), text="Potentials")
         nb.add(self.tab_power(nb), text="Stärke")
+        if self.shared():
+            nb.add(self.tab_rights(nb), text="Rechte")
 
         bottom = tk.Frame(self.win, bg=BG)
         bottom.pack(fill="x", padx=14, pady=(0, 12))
@@ -121,10 +124,53 @@ class AdminWindow:
     # --- files --------------------------------------------------------------------
 
     def unlocked(self):
+        """Accounts to edit: admins, and on a shared server every player the server knows."""
+        acc_dir = self.base / "server" / "accounts"
+        out = {}
         try:
-            return json.loads((self.base / "server" / "accounts" / "admin_unlocked.json").read_text("utf-8"))
+            out.update(json.loads((acc_dir / "admin_unlocked.json").read_text("utf-8")))
         except Exception:
-            return {}
+            pass
+        st = self.admins()
+        if st.get("owner"):
+            out[str(st["owner"])] = "owner"
+        out.update({g: "admin" for g in st["admins"]})
+        if self.shared():
+            out.update({g: n for g, n in self.players().items() if g not in out})
+        return out
+
+    def shared(self):
+        import os
+        return (self.base / "server" / "multiplayer.json").exists() or \
+            os.environ.get("HFH_MULTIPLAYER", "") not in ("", "0")
+
+    def players(self):
+        """gid -> name from the server's account files and PvP snapshots."""
+        acc_dir = self.base / "server" / "accounts"
+        out = {}
+        for f in acc_dir.glob("*.json"):
+            gid = f.stem.split("-")[0]
+            if gid.isdigit():
+                out[gid] = ""
+        try:
+            pvp = json.loads((acc_dir / "pvp.json").read_text("utf-8"))
+            for g, snap in pvp.get("snapshots", {}).items():
+                out[g] = snap.get("name", "") or out.get(g, "")
+        except Exception:
+            pass
+        return out
+
+    def admins_file(self):
+        return self.base / "server" / "accounts" / "admins.json"
+
+    def admins(self):
+        try:
+            st = json.loads(self.admins_file().read_text("utf-8"))
+        except Exception:
+            st = {}
+        st.setdefault("owner", None)
+        st.setdefault("admins", {})
+        return st
 
     def last_report(self):
         try:
@@ -537,6 +583,66 @@ class AdminWindow:
         else:
             self.status.set(self.last_report())
 
+    # --- rights (shared server) -------------------------------------------------------------
+
+    def tab_rights(self, nb):
+        f = self.frame(nb)
+        tk.Label(f, text="Gemeinsamer Server: nur der Besitzer und die hier angehakten Spieler haben "
+                         "Admin-Rechte. Alle anderen spielen normal. Spieler mit Rechten können im Spiel "
+                         "unter Gift Code Befehle eingeben, z. B. /gold 100000, /allcards, /power 200, "
+                         "/gold 5000 @Name.",
+                 bg=PANEL, fg="#aaaaaa", font=("Segoe UI", 9), wraplength=700, justify="left").pack(
+            anchor="w", padx=12, pady=(10, 4))
+        self.owner_var = tk.StringVar()
+        tk.Label(f, textvariable=self.owner_var, bg=PANEL, fg=GOLD, font=("Segoe UI", 10, "bold")).pack(
+            anchor="w", padx=12, pady=(4, 6))
+        holder = tk.Frame(f, bg=PANEL)
+        holder.pack(fill="both", expand=True, padx=12, pady=4)
+        canvas = tk.Canvas(holder, bg=PANEL, highlightthickness=0)
+        bar = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview)
+        self.rights_frame = tk.Frame(canvas, bg=PANEL)
+        self.rights_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=self.rights_frame, anchor="nw")
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+        row = tk.Frame(f, bg=PANEL)
+        row.pack(anchor="w", padx=12, pady=8)
+        tk.Button(row, text="Rechte speichern", command=self.save_rights, bg="#0f3460", fg="white",
+                  relief="flat").pack(side="left")
+        tk.Button(row, text="Neu laden", command=self.fill_rights, bg="#53354a", fg="white",
+                  relief="flat").pack(side="left", padx=6)
+        self.right_vars = {}
+        self.fill_rights()
+        return f
+
+    def fill_rights(self):
+        for w in self.rights_frame.winfo_children():
+            w.destroy()
+        st = self.admins()
+        owner = str(st.get("owner") or "")
+        players = self.players()
+        self.owner_var.set(f"Besitzer: {players.get(owner) or ''} ({owner})" if owner else
+                           "Noch kein Besitzer: im Spiel das Admin-Passwort als Gift Code eingeben.")
+        self.right_vars = {}
+        for gid in sorted(players, key=lambda g: (players[g] or "~").lower()):
+            if gid == owner:
+                continue
+            var = tk.BooleanVar(value=gid in st["admins"])
+            tk.Checkbutton(self.rights_frame, text=f"{players[gid] or '(ohne Namen)'}  ({gid})", variable=var,
+                           bg=PANEL, fg=FG, selectcolor=BG, activebackground=PANEL, anchor="w").pack(
+                fill="x", anchor="w")
+            self.right_vars[gid] = var
+
+    def save_rights(self):
+        st = self.admins()
+        players = self.players()
+        st["admins"] = {g: players.get(g, "") for g, v in self.right_vars.items() if v.get()}
+        self.admins_file().parent.mkdir(parents=True, exist_ok=True)
+        self.admins_file().write_text(json.dumps(st, indent=1, ensure_ascii=False), encoding="utf-8")
+        self.status.set(f"Rechte gespeichert: {len(st['admins'])} Admin(s) neben dem Besitzer.")
+        self.l.log(f"Admin-Rechte gespeichert ({len(st['admins'])} Admins).")
+
     def lock(self):
         f = self.base / "server" / "accounts" / "admin_unlocked.json"
         try:
@@ -545,5 +651,9 @@ class AdminWindow:
             f.write_text(json.dumps(state, indent=1), encoding="utf-8")
         except Exception:
             pass
+        if self.shared():  # a granted admin loses the rights (the owner stays owner)
+            st = self.admins()
+            if st["admins"].pop(self.gid.get(), None) is not None:
+                self.admins_file().write_text(json.dumps(st, indent=1, ensure_ascii=False), encoding="utf-8")
         self.l.log("Admin Mode gesperrt (neu freischalten: Passwort im Spiel als Geschenkcode).")
         self.win.destroy()

@@ -339,6 +339,9 @@ async def handle_login(client: GameClient, pb_data: bytes):
     await client.send_packet(0x0101, response)
 
     for m in client.account.b.sync:
+        if m["msg_id"].upper() == "0X0B01" and client.account.team:  # line-ups saved since the baseline
+            await client.send_packet(0x0B01, client.account.team)
+            continue
         await client.send_raw(int(m["msg_id"], 16), m["flags"], bytes.fromhex(m["body_hex"]))
     kind = "captured" if client.account.b is CAPTURED else "starter"
     log.info(f"  SYNC sent {len(client.account.b.sync)} {kind} baseline messages, "
@@ -837,6 +840,8 @@ def _live(client: GameClient):
 async def handle_match_data(client: GameClient, pb_data: bytes):
     """0x0303 PVPMatchDataC2S: next rally of a live match."""
     live = _live(client)
+    if live and live.rally_no == 0 and client.account.flags:  # auto play left on from the last match
+        live.auto_skill = bool(client.account.flags & 1)
     if not live:
         await handle_generic(client, pb_data, 0x0303)
         return
@@ -883,8 +888,14 @@ async def handle_flag_set(client: GameClient, pb_data: bytes):
     P = matches.P
     req = P.MainFlagSetC2S.FromString(pb_data)
     rep = P.MainFlagSetS2C()
+    acc = client.account
     for u in req.units:
         rep.units.add(flag=u.flag, open=u.open)
+        acc.flags = ((acc.flags or 0) | (1 << u.flag)) if u.open else ((acc.flags or 0) & ~(1 << u.flag))
+    acc.save()  # kept over restarts and sent again at login
+    live = _live(client)
+    if live:
+        live.auto_skill = bool(acc.flags & 1)
     log.info(f"  FLAGS {[(P.FlagUnit.DESCRIPTOR.fields_by_name['flag'].enum_type.values_by_number[u.flag].name, u.open) for u in req.units]}")
     await client.send_packet(0x0203, rep.SerializeToString())
 
@@ -965,6 +976,29 @@ async def handle_pvp_result(client: GameClient, pb_data: bytes):
         await mission_event(client, missions.PEAK_MATCH, 1)
 
 
+async def handle_pause(client: GameClient, pb_data: bytes):
+    """0x030F PVPPauseC2S{1=is_pause}: echo the asked state with this match's session (the captured
+    reply always said "paused" for another session)."""
+    is_pause = wire.get(wire.parse(pb_data), 1, 0)
+    live = _live(client)
+    room = getattr(client, "room", None)
+    session = live.info.session if live else (room.info.session if room is not None else 0)
+    await client.send_packet(0x030F, wire.build([(2, 0, session), (3, 0, is_pause)]))
+
+
+async def handle_team_save(client: GameClient, pb_data: bytes):
+    """0x0B02 TeamFormationSaveC2S{1=formation 2=module}: keeps the line-up (players, libero preset,
+    auto switch); matches are built from it."""
+    fields = wire.parse(pb_data)
+    formation = wire.get(fields, 1, b"")
+    if formation:
+        client.account.save_formation(formation)
+        f = matches.P.TeamFormation.FromString(formation)
+        log.info(f"  TEAM line-up {f.lineup} saved: {len(f.inst_ids)} players, libero preset "
+                 f"{f.libero_replace_type}, auto switch {f.auto_replace}")
+    await client.send_packet(0x0B02, wire.build([(2, 0, wire.get(fields, 2, 0))]))
+
+
 async def handle_generic(client: GameClient, pb_data: bytes, msg_id: int):
     """Reply with the captured real-server reply for this ID, else an empty one."""
     reply = REPLIES.get(f"0x{msg_id:04X}")
@@ -999,6 +1033,8 @@ MESSAGE_HANDLERS = {
     0x0309: handle_formation_change,
     0x030C: handle_match_setting,
     0x0203: handle_flag_set,
+    0x0B02: handle_team_save,
+    0x030F: handle_pause,
     0x1103: handle_tokyo_reward,
 }
 
@@ -1027,7 +1063,7 @@ async def main():
     addrs = ", ".join(str(s.getsockname()) for s in server.sockets)
     log.info(f"Haikyuu Fly High Private Server running on {addrs}")
     if admin.multiplayer():
-        log.info("Multiplayer server: Admin Mode is disabled")
+        log.info("Multiplayer server: admin rights only for the owner and granted admins")
     async with server:
         await server.serve_forever()
 

@@ -296,6 +296,13 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
             st.casts += casts
             st.buffs += buffs
 
+    def in_air() -> tuple:
+        """Players who cannot take the next ball: the last toucher, and after a block the spiker too."""
+        out = [prev.player]
+        if prev.formula == BLOCK:
+            out += [s.player for s in rally.steps[-3:] if s.formula == SPIKE]
+        return tuple(out)
+
     def finish(winner: int) -> Rally:
         rally.winner = winner
         if battle:
@@ -315,9 +322,9 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
         if formula == SET:
             return setter if setter not in exclude else rng.choice(ids)
         if formula == SPIKE:
-            front = [p for p in court.front(team) if p not in exclude and p != setter
-                     and court.jobs.get(p) != JOB_LIBERO]
-            pool = front or [p for p in ids if p != setter] or ids
+            # Garena lets the back row attack as well: 67 of 121 captured spikes came from players
+            # outside the front row (check_match.py), so everyone but the setter and the libero may spike
+            pool = [p for p in ids if p != setter] or ids
             weights_ = [stats.get(p, {}).get(ATTR[SPIKE], 1) + 1 for p in pool]
             return rng.choices(pool, weights=weights_)[0]
         if formula == BLOCK:
@@ -352,7 +359,9 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
             # row fits the captured digs far better than the spike result's own row (log-likelihood
             # -138 vs -245 over 92 digs; scratch fit5.py)
             last = DIG_ROW
-            pid = want[0] if want and want[0] != prev.player else pick(team, DIG_SPIKE, exclude=(prev.player,))
+            # after a block the blocker and the spiker are still in the air: someone else digs
+            air = in_air()
+            pid = want[0] if want and want[0] not in air else pick(team, DIG_SPIKE, exclude=air)
             st = add(DIG_SPIKE, pid, 2, opp, last, forced)
         elif formula == DIG_SERVE:
             st = add(DIG_SERVE, pick(team, DIG_SERVE), 2, attack.power, NONE)
@@ -360,11 +369,14 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
             st = add(SET, pick(team, SET, exclude=(prev.player,)), 3, None, prev.result)
             window(st)
         elif formula == SPIKE:
-            pid = want[0] if want and want[0] != prev.player else pick(team, SPIKE, exclude=(prev.player,))
+            # the receiver is still getting up from his dig: a teammate attacks (unless the user chose him)
+            busy = tuple(s.player for s in rally.steps[-2:] if team_of(s.player) == team)
+            pid = want[0] if want and want[0] != prev.player else pick(team, SPIKE, exclude=busy)
             st = add(SPIKE, pid, 4, None, prev.result)
         elif formula == SAVE:
             opp = attack.power if prev.formula == BLOCK else None
-            st = add(SAVE, pick(team, SAVE, exclude=(prev.player,)), link, opp, NONE)
+            air = in_air()
+            st = add(SAVE, pick(team, SAVE, exclude=air), link, opp, NONE)
         else:  # DIG_NO_ATTACK
             st = add(DIG_NO_ATTACK, pick(team, DIG_NO_ATTACK), 2, attack.power, NONE)
 

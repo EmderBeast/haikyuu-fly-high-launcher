@@ -790,10 +790,21 @@ class Launcher:
 
 
 def admin_unlocked(base: Path) -> dict:
+    """Accounts with admin rights: password-unlocked (own server) and owner/granted (shared server)."""
+    acc_dir = base / "server" / "accounts"
+    out = {}
     try:
-        return json.loads((base / "server" / "accounts" / "admin_unlocked.json").read_text(encoding="utf-8"))
+        out.update(json.loads((acc_dir / "admin_unlocked.json").read_text(encoding="utf-8")))
     except Exception:
-        return {}
+        pass
+    try:
+        st = json.loads((acc_dir / "admins.json").read_text(encoding="utf-8"))
+        if st.get("owner"):
+            out[str(st["owner"])] = "owner"
+        out.update({g: "admin" for g in st.get("admins", {})})
+    except Exception:
+        pass
+    return out
 
 
 def main():

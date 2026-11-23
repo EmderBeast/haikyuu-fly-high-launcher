@@ -23,6 +23,8 @@ MSGS = Path(__file__).parent.parent / "decoded" / "match_msgs.json"  # made by d
 STORE = Path(__file__).parent / "data" / "rallies.bin"  # gzip: [first u8][n u16][len u32 frame]*n per rally
 HOST, GUEST = 0, 1
 JOB_MB = 2
+# LIBERO_REPLACE_TYPE (WS 1, OP 2, MB 3, S 4) -> player job (WS 1, MB 2, S 3, L 4, OP 5)
+LIBERO_REPLACES = {1: 1, 2: 5, 3: 2, 4: 3}
 SUBS_PER_SET = 4  # "Substitutions Left This Set: 4"
 CLASSES = {"0x0303": P.PVPMatchDataS2C, "0x0307": P.PVPHandleServeS2C,
            "0x030A": P.PVPUltimateSkillS2C, "0x030B": P.PVPMoraleSkillS2C}
@@ -174,6 +176,10 @@ class LiveMatch:
                 if p.info.conf_id:
                     self.jobs[team * 13 + i] = (gameconfig.PLAYERS.get(p.info.conf_id) or {}).get("Job")
         self.lib_for = {HOST: None, GUEST: None}  # player the libero is in for right now
+        # "Preset Sub Position" of each line-up: the job the libero replaces in the back row (None = all
+        # switches off, the libero stays on the bench)
+        self.lib_job = {HOST: LIBERO_REPLACES.get(info.home.formation.libero_replace_type),
+                        GUEST: LIBERO_REPLACES.get(info.away.formation.libero_replace_type)}
         self.subs_left = {HOST: SUBS_PER_SET, GUEST: SUBS_PER_SET}
         self.pending_subs: list[tuple[int, int, int]] = []  # (team, on, off) for the next rally
         self.auto_skill = False  # auto play (0x030C): the server releases the user's ultimates itself
@@ -260,11 +266,12 @@ class LiveMatch:
         slot 1 when the team receives) and leaves when that player rotates to the front or to serve.
         Returns the team's players on court and the swaps for frame 1 (team, on, off), as Garena sent."""
         lib, base = self.libero[team], self.stance[team]
-        if lib is None:
+        job = self.lib_job[team]
+        if lib is None or (job is None and self.lib_for[team] is None):
             return list(base), []
         back = [5, 4] + ([0] if team != self.serve else [])
         cur = self.lib_for[team]
-        eligible = [base[i] for i in back if self.jobs.get(base[i]) == JOB_MB]
+        eligible = [base[i] for i in back if job is not None and self.jobs.get(base[i]) == job]
         target = cur if cur in eligible else (eligible[0] if eligible else None)
         changes = []
         if cur != target:

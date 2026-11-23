@@ -138,12 +138,17 @@ def card_entry(card: P.PlayerCard, stage: dict | None = None) -> P.PlayerCardInf
 
 
 # --- teams ----------------------------------------------------------------
-def _lineup(acc, fight_type: int) -> list[int]:
+def _formation(acc, fight_type: int):
+    """The line-up (TeamFormation) the account uses for this fight type."""
     team = P.TeamInfoS2C()
-    team.ParseFromString(acc.b.pb("0x0B01"))
+    team.ParseFromString(acc.team_info())
     chosen = next((c.line_up_chosen for c in team.fight_line_up_chosens if c.fight_type == fight_type), None)
     forms = list(team.formations)
-    form = next((f for f in forms if f.lineup == chosen), forms[0] if forms else None)
+    return next((f for f in forms if f.lineup == chosen), forms[0] if forms else None)
+
+
+def _lineup(acc, fight_type: int) -> list[int]:
+    form = _formation(acc, fight_type)
     return list(form.inst_ids) if form else []
 
 
@@ -157,6 +162,10 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
     team.formation.ClearField("coach_card")
     del team.formation.fetter_id_levels[:]
     captured = {p.info.inst_id: p for p in template.formation.players}
+    form = _formation(acc, fight_type)
+    if form:  # "Preset Sub Position": who the libero replaces (none = he stays on the bench)
+        team.formation.libero_replace_type = form.libero_replace_type
+        team.formation.auto_replace = form.auto_replace
     for inst in _lineup(acc, fight_type)[:TEAM_SIZE]:
         raw = acc.get_card(inst)
         if not raw:

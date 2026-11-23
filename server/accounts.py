@@ -26,6 +26,7 @@ ACCOUNTS = Path(__file__).parent / "accounts"
 
 MSG_CARD_CHANGE = 0x0902
 MSG_ITEM_CHANGE = 0x0802
+MSG_FLAGS = 0x0403  # NotifyFlagsS2C{1=flags}: GAMER_FLAGS bit mask
 MSG_CURRENCY_CHANGE = 0x0405  # NotifyCurrencyChangeS2C: repeated ItemCurrency{1=conf_id, 2=number}
 MSG_LOTTERY_UPDATE = 0x0F05  # LotteryUpdateS2C: repeated LotteryUnit (field 1)
 # LotteryUnit: 1=id 2=all_count 3=today_count 7=ten_num
@@ -159,6 +160,8 @@ class Account:
         # potentials added or changed on top of the baseline (inst_id -> PlayerSpecialty bytes)
         self.specialties = {int(k): bytes.fromhex(v) for k, v in d.get("specialties", {}).items()}
         self.admin_flags = d.get("admin_flags", {})  # Admin Mode switches, e.g. infinite_stamina
+        self.team = bytes.fromhex(d["team"]) if d.get("team") else None  # TeamInfoS2C with saved line-ups
+        self.flags = d.get("flags")  # GAMER_FLAGS bit mask (auto skill 1, auto serve 2, speed 4); None = baseline
         self._regen_stamina()
         import admin  # Admin Mode: apply changes queued by the launcher (no-op without admin.json)
         admin.apply_pending(self)
@@ -185,6 +188,8 @@ class Account:
             "tokyo_rewards": self.tokyo_rewards,
             "specialties": {str(k): v.hex() for k, v in self.specialties.items()},
             "admin_flags": self.admin_flags,
+            "team": self.team.hex() if self.team else None,
+            "flags": self.flags,
         }, indent=1), encoding="utf-8")
 
     def add_player_exp(self, amount: int) -> list[int]:
@@ -383,6 +388,26 @@ class Account:
         cards = {**self.b.cards, **{wire.get(wire.parse(c), 1): c for c in self.cards}}
         return {wire.get(wire.parse(c), 3) for i, c in cards.items() if i not in self.removed_cards}
 
+    def team_info(self) -> bytes:
+        """0x0B01 TeamInfoS2C: the baseline line-ups with the ones saved since (0x0B02)."""
+        return self.team or self.b.pb("0x0B01")
+
+    def save_formation(self, formation: bytes):
+        """Stores a TeamFormation (0x0B02) in place of the line-up with the same number (field 1)."""
+        lineup = wire.get(wire.parse(formation), 1, 0)
+        out, done = [], False
+        for num, wt, v in wire.parse(self.team_info()):
+            if num == 1 and wire.get(wire.parse(v), 1, 0) == lineup:
+                if not done:
+                    out.append((1, 2, formation))
+                done = True
+            else:
+                out.append((num, wt, v))
+        if not done:
+            out.insert(0, (1, 2, formation))
+        self.team = wire.build(out)
+        self.save()
+
     def login_updates(self) -> list[tuple[int, bytes]]:
         """Update messages that re-apply this account's changes after the baseline sync."""
         out = []
@@ -419,6 +444,8 @@ class Account:
                         + wire.build([(3, 0, 2)])))
         if self.specialties:
             out.append((MSG_SPECIALTY_UPDATE, b"".join(wire.build([(1, 2, s)]) for s in self.specialties.values())))
+        if self.flags is not None:  # NotifyFlagsS2C{1=flags}: auto play / auto serve / speed switches
+            out.append((MSG_FLAGS, wire.build([(1, 0, self.flags)])))
         if self.contest is not None:
             out.append((MSG_CONTEST_UPDATE, wire.build([(1, 2, self.contest_data())])))
         if self.stages or self.tokyo_rewards:

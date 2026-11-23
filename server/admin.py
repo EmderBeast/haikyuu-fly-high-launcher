@@ -2,13 +2,25 @@
 Admin Mode: give yourself characters, currencies, items and potentials.
 
 Only active when server/admin.json exists ({"pw_sha256": "<sha256 of the password>"}),
-i.e. in the admin build of the launcher package, and never on a shared multiplayer server
-(server/multiplayer.json exists or HFH_MULTIPLAYER=1): there the gift code does nothing, queued
-changes are not applied and account flags such as infinite stamina are ignored. The player unlocks it in game:
-Settings -> gift code -> the admin password (0x2403 SettingGiftCodeC2S). The
-launcher then shows its "Admin Mode" window, which queues changes in
-accounts/admin_queue/<gid>.json; they are applied at the next login
+i.e. in the admin build of the launcher package.
+
+Who is admin:
+- own (local) server: whoever enters the admin password in game (Settings -> gift code,
+  0x2403 SettingGiftCodeC2S); kept in accounts/admin_unlocked.json.
+- shared multiplayer server (server/multiplayer.json or HFH_MULTIPLAYER=1): only the OWNER and
+  the players the owner made admin (accounts/admins.json). The first player who enters the
+  password becomes the owner; after that the password does nothing. Everybody else is a normal
+  player: admin switches on their account (infinite stamina, strength) are ignored.
+
+Changes are queued in accounts/admin_queue/<gid>.json (by the launcher's "Admin Mode" window on
+the server PC, or by in-game commands), applied at the player's next login
 (Account.__init__ -> apply_pending) and reported in accounts/admin_done/<gid>.json.
+
+In-game commands for admins: the gift code field takes "/command [value] [@player]"
+(player = name or id, default yourself; applied at that player's next login):
+  /gold N  /diamonds N  /exp N  /stamina N  /level N  /items N  /allcards  /maxcards
+  /infinite on|off  /power N|off  (all cards' match strength in percent)
+Owner only (shared server): /admin <player>  /unadmin <player>
 
 Potentials (PlayerSpecialty) can also be put on / taken off cards in game
 (0x1804 / 0x1805), for the baseline ones as well as the created ones.
@@ -44,6 +56,7 @@ CONFIG = HERE / "admin.json"
 MULTIPLAYER = HERE / "multiplayer.json"  # marks a shared server: Admin Mode is off there
 ACCOUNTS = HERE / "accounts"
 UNLOCKED = ACCOUNTS / "admin_unlocked.json"
+ADMINS = ACCOUNTS / "admins.json"  # shared server: {"owner": "<gid>", "admins": {"<gid>": "<name>"}}
 QUEUE = ACCOUNTS / "admin_queue"
 DONE = ACCOUNTS / "admin_done"
 
@@ -60,12 +73,39 @@ def multiplayer() -> bool:
 
 
 def enabled() -> bool:
-    return CONFIG.exists() and not multiplayer()
+    """Admin Mode exists on this server (admin build: server/admin.json)."""
+    return CONFIG.exists()
+
+
+def admins_state() -> dict:
+    st = _json(ADMINS, {})
+    st.setdefault("owner", None)
+    st.setdefault("admins", {})
+    return st
+
+
+def save_admins(st: dict):
+    ACCOUNTS.mkdir(exist_ok=True)
+    ADMINS.write_text(json.dumps(st, indent=1, ensure_ascii=False), encoding="utf-8")
+
+
+def is_owner(gid) -> bool:
+    return enabled() and multiplayer() and str(gid) == str(admins_state().get("owner"))
+
+
+def is_admin(gid) -> bool:
+    """Admin rights: password-unlocked on an own server, owner/granted on a shared server."""
+    if not enabled() or not gid:
+        return False
+    if multiplayer():
+        st = admins_state()
+        return str(gid) == str(st.get("owner")) or str(gid) in st["admins"]
+    return str(gid) in unlocked()
 
 
 def flag(acc, key: str) -> bool:
-    """An Admin Mode account switch, only honoured while Admin Mode is enabled."""
-    return enabled() and bool(acc.admin_flags.get(key))
+    """An Admin Mode account switch, only honoured for admins."""
+    return is_admin(acc.gid) and bool(acc.admin_flags.get(key))
 
 
 def _json(path: Path, default):
@@ -80,7 +120,7 @@ def unlocked() -> dict:
 
 
 def is_unlocked(gid: int) -> bool:
-    return enabled() and str(gid) in unlocked()
+    return is_admin(gid)
 
 
 def check_password(code: str) -> bool:
@@ -179,8 +219,11 @@ def _apply(acc, action: dict) -> list[str]:
 
 
 def apply_pending(acc):
-    """Apply the launcher's queued Admin Mode changes for this account (called at login)."""
-    if not is_unlocked(acc.gid):
+    """Apply the queued Admin Mode changes for this account (called at login).
+
+    Only admins can queue (launcher on the server PC or in-game commands), so the target itself
+    need not be admin; admin-only switches stay without effect for normal players (flag())."""
+    if not enabled():
         return
     path = QUEUE / f"{acc.gid}.json"
     actions = _json(path, None)
@@ -203,7 +246,7 @@ def apply_pending(acc):
 def apply_power(acc, team):
     """Scale / set the stats of the cards in a match team (PVPTeamInfo) by the Admin Mode settings."""
     mods = (getattr(acc, "admin_flags", None) or {}).get("power") or {}
-    if not mods or not enabled():  # off on a multiplayer server (and without admin.json)
+    if not mods or not is_admin(getattr(acc, "gid", None)):  # normal players: no effect
         return
     import matches
     stat_types = {t for t, _, _ in matches.STATS}
@@ -227,20 +270,117 @@ def apply_power(acc, team):
 
 # --- message handlers -------------------------------------------------------------
 
+def player_names() -> dict:
+    """gid -> name of the players this server knows (PvP snapshots, granted admins)."""
+    names = {}
+    try:
+        import pvp
+        names.update({g: s.get("name", "") for g, s in pvp.state().get("snapshots", {}).items()})
+    except Exception:
+        pass
+    for g, n in admins_state()["admins"].items():
+        names.setdefault(g, n)
+    return names
+
+
+def find_player(text: str) -> str | None:
+    """gid for "12345" or a player name (exact, else unique start, case-insensitive)."""
+    text = text.strip().lstrip("@")
+    if text.isdigit():
+        return text
+    names = player_names()
+    low = text.lower()
+    exact = [g for g, n in names.items() if (n or "").lower() == low]
+    if len(exact) == 1:
+        return exact[0]
+    start = [g for g, n in names.items() if (n or "").lower().startswith(low)]
+    return start[0] if len(start) == 1 else None
+
+
+def queue(gid, actions: list):
+    QUEUE.mkdir(parents=True, exist_ok=True)
+    path = QUEUE / f"{gid}.json"
+    old = _json(path, [])
+    path.write_text(json.dumps((old if isinstance(old, list) else [old]) + actions, indent=1),
+                    encoding="utf-8")
+
+
+CURRENCY_CMDS = {"/gold": 100, "/diamonds": 108, "/diamanten": 108, "/exp": 102, "/erf": 102,
+                 "/stamina": 105, "/ausdauer": 105}
+
+
+def command(gid, code: str) -> str:
+    """Run an admin command from the gift code field; returns a log line."""
+    parts = code.split()
+    target = str(gid)
+    if len(parts) > 1 and parts[-1].startswith("@"):
+        target = find_player(parts.pop())
+        if target is None:
+            return f"unknown player in {code!r}"
+    cmd, args = parts[0].lower(), parts[1:]
+    num = int(args[0]) if args and args[0].isdigit() else None
+
+    if cmd in ("/admin", "/unadmin"):
+        if not is_owner(gid):
+            return f"{cmd}: only the owner of a shared server"
+        who = find_player(" ".join(args)) if args else None
+        if who is None:
+            return f"{cmd}: unknown player {' '.join(args)!r}"
+        st = admins_state()
+        if cmd == "/admin":
+            st["admins"][who] = player_names().get(who, "")
+        else:
+            st["admins"].pop(who, None)
+        save_admins(st)
+        return f"{cmd} {who} ({st['admins'].get(who, '')})"
+
+    if cmd in CURRENCY_CMDS and num is not None:
+        action = {"currency": {str(CURRENCY_CMDS[cmd]): num}}
+    elif cmd == "/level" and num is not None:
+        action = {"level": num}
+    elif cmd == "/items" and num is not None:
+        action = {"items": num}
+    elif cmd == "/allcards":
+        action = {"all_cards": True}
+    elif cmd == "/maxcards":
+        action = {"max_cards": True}
+    elif cmd == "/infinite" and args and args[0].lower() in ("on", "an", "off", "aus"):
+        action = {"flags": {"infinite_stamina": args[0].lower() in ("on", "an")}}
+    elif cmd == "/power" and args and (num is not None or args[0].lower() in ("off", "aus")):
+        action = {"power": {"*": None if num is None else {"pct": num}}}
+    else:
+        return f"unknown command {code!r}"
+    queue(target, [action])
+    return f"{code!r} queued for {target}"
+
+
 async def handle_gift_code(client, pb_data: bytes):
-    """0x2403 SettingGiftCodeC2S{1=code}: the admin password unlocks Admin Mode for this gid."""
+    """0x2403 SettingGiftCodeC2S{1=code}: admin password or "/command" for admins."""
     code = wire.get(wire.parse(pb_data), 1, b"")
-    code = code.decode("utf-8", errors="replace") if isinstance(code, bytes) else str(code)
+    code = (code.decode("utf-8", errors="replace") if isinstance(code, bytes) else str(code)).strip()
     gid = getattr(client, "gid", None)
-    if enabled() and gid and check_password(code):
-        state = unlocked()
-        state[str(gid)] = time.time()
-        ACCOUNTS.mkdir(exist_ok=True)
-        UNLOCKED.write_text(json.dumps(state, indent=1), encoding="utf-8")
-        log.info(f"  ADMIN MODE unlocked for {gid}")
-        await client.send_packet(MSG_GIFT_CODE, wire.build([]))
-        return
-    log.info(f"  Gift code {code!r} (no effect)")
+    if enabled() and gid and code.startswith("/"):
+        if is_admin(gid):
+            log.info(f"  ADMIN command from {gid}: {command(gid, code)}")
+        else:
+            log.info(f"  ADMIN command {code!r} from {gid} ignored (no admin rights)")
+    elif enabled() and gid and check_password(code):
+        if multiplayer():
+            st = admins_state()
+            if not st.get("owner"):
+                st["owner"] = str(gid)
+                save_admins(st)
+                log.info(f"  ADMIN owner of this shared server: {gid}")
+            else:
+                log.info(f"  admin password from {gid} ignored (owner is {st['owner']})")
+        else:
+            state = unlocked()
+            state[str(gid)] = time.time()
+            ACCOUNTS.mkdir(exist_ok=True)
+            UNLOCKED.write_text(json.dumps(state, indent=1), encoding="utf-8")
+            log.info(f"  ADMIN MODE unlocked for {gid}")
+    else:
+        log.info(f"  Gift code {code!r} (no effect)")
     await client.send_packet(MSG_GIFT_CODE, wire.build([]))
 
 
