@@ -283,9 +283,9 @@ class LiveMatch:
             frame = m.base.frame_index
             # the client names the window by its frame; a choice for a window that the current
             # version of the rally no longer has (an earlier choice changed it) is dropped
-            # the client sends the window's frame or one a few frames later (captures: window 104,
-            # request 105): take the closest window within 4 frames before the request
-            near = [(frame - f, i) for i, f in self.windows if 0 <= frame - f <= 4]
+            # the client names the window by a frame next to it (captures: window 104, request 105; our
+            # rallies: window 86, request 85): take the closest window within 4 frames
+            near = [(abs(frame - f), i) for i, f in self.windows if abs(frame - f) <= 4]
             idx = min(near)[1] if near else None
             self.input_note = f"ult request frame {frame}, windows {self.windows} -> {idx}"
             if idx is not None:
