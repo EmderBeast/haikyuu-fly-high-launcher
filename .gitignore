@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.log
+build/
+dist/
+gamedata/
+server/accounts/
+server/proto_gen/
+server/admin.json
+server/owners.json
+server/starter_debug.json
+launcher_defaults.json

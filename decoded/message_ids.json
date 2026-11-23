@@ -1,0 +1,3572 @@
+[
+ {
+  "msg_id": "0x0101",
+  "name": "LoginBySession",
+  "c2s_type": "Protol.LoginBySessionC2S",
+  "s2c_type": "Protol.LoginBySessionS2C"
+ },
+ {
+  "msg_id": "0x0102",
+  "name": "LoginSyncDataEnd",
+  "c2s_type": null,
+  "s2c_type": "Protol.LoginSyncDataEndS2C"
+ },
+ {
+  "msg_id": "0x0103",
+  "name": "LoginTencentHope",
+  "c2s_type": "Protol.LoginTencentHopeC2S",
+  "s2c_type": "Protol.LoginTencentHopeS2C"
+ },
+ {
+  "msg_id": "0x0201",
+  "name": "MainGm",
+  "c2s_type": "Protol.MainGmC2S",
+  "s2c_type": "Protol.MainGmS2C"
+ },
+ {
+  "msg_id": "0x0203",
+  "name": "MainFlagSet",
+  "c2s_type": "Protol.MainFlagSetC2S",
+  "s2c_type": "Protol.MainFlagSetS2C"
+ },
+ {
+  "msg_id": "0x0204",
+  "name": "MainTencentAce",
+  "c2s_type": "Protol.MainTencentAceC2S",
+  "s2c_type": "Protol.MainTencentAceS2C"
+ },
+ {
+  "msg_id": "0x0205",
+  "name": "MainSwitchList",
+  "c2s_type": null,
+  "s2c_type": "Protol.MainSwitchListS2C"
+ },
+ {
+  "msg_id": "0x0206",
+  "name": "MainCosPresigned",
+  "c2s_type": "Protol.MainCosPresignedC2S",
+  "s2c_type": "Protol.MainCosPresignedS2C"
+ },
+ {
+  "msg_id": "0x0207",
+  "name": "MainTencentReport",
+  "c2s_type": "Protol.MainTencentReportC2S",
+  "s2c_type": "Protol.MainTencentReportS2C"
+ },
+ {
+  "msg_id": "0x0208",
+  "name": "MainGuestDel",
+  "c2s_type": "Protol.MainGuestDelC2S",
+  "s2c_type": "Protol.MainGuestDelS2C"
+ },
+ {
+  "msg_id": "0x0301",
+  "name": "PVPPing",
+  "c2s_type": "Protol.PVPPingC2S",
+  "s2c_type": "Protol.PVPPingS2C"
+ },
+ {
+  "msg_id": "0x0302",
+  "name": "PVPCreate",
+  "c2s_type": "Protol.PVPCreateC2S",
+  "s2c_type": "Protol.PVPCreateS2C"
+ },
+ {
+  "msg_id": "0x0303",
+  "name": "PVPMatchData",
+  "c2s_type": "Protol.PVPMatchDataC2S",
+  "s2c_type": "Protol.PVPMatchDataS2C"
+ },
+ {
+  "msg_id": "0x0304",
+  "name": "PVPResult",
+  "c2s_type": "Protol.PVPResultC2S",
+  "s2c_type": "Protol.PVPResultS2C"
+ },
+ {
+  "msg_id": "0x0305",
+  "name": "PVPClose",
+  "c2s_type": "Protol.PVPCloseC2S",
+  "s2c_type": "Protol.PVPCloseS2C"
+ },
+ {
+  "msg_id": "0x0306",
+  "name": "PVPQuickBattle",
+  "c2s_type": "Protol.PVPQuickBattleC2S",
+  "s2c_type": "Protol.PVPQuickBattleS2C"
+ },
+ {
+  "msg_id": "0x0307",
+  "name": "PVPHandleServe",
+  "c2s_type": "Protol.PVPHandleServeC2S",
+  "s2c_type": "Protol.PVPHandleServeS2C"
+ },
+ {
+  "msg_id": "0x0308",
+  "name": "PVPLineupConfirm",
+  "c2s_type": "Protol.PVPLineupConfirmC2S",
+  "s2c_type": "Protol.PVPLineupConfirmS2C"
+ },
+ {
+  "msg_id": "0x0309",
+  "name": "PVPFormationChange",
+  "c2s_type": "Protol.PVPFormationChangeC2S",
+  "s2c_type": "Protol.PVPFormationChangeS2C"
+ },
+ {
+  "msg_id": "0x030A",
+  "name": "PVPUltimateSkill",
+  "c2s_type": "Protol.PVPUltimateSkillC2S",
+  "s2c_type": "Protol.PVPUltimateSkillS2C"
+ },
+ {
+  "msg_id": "0x030B",
+  "name": "PVPMoraleSkill",
+  "c2s_type": "Protol.PVPMoraleSkillC2S",
+  "s2c_type": "Protol.PVPMoraleSkillS2C"
+ },
+ {
+  "msg_id": "0x030C",
+  "name": "PVPMatchSetting",
+  "c2s_type": "Protol.PVPMatchSettingC2S",
+  "s2c_type": "Protol.PVPMatchSettingS2C"
+ },
+ {
+  "msg_id": "0x030D",
+  "name": "PVPMatchModify",
+  "c2s_type": "Protol.PVPMatchModifyC2S",
+  "s2c_type": "Protol.PVPMatchModifyS2C"
+ },
+ {
+  "msg_id": "0x030E",
+  "name": "PVPChangeTactics",
+  "c2s_type": "Protol.PVPChangeTacticsC2S",
+  "s2c_type": "Protol.PVPChangeTacticsS2C"
+ },
+ {
+  "msg_id": "0x030F",
+  "name": "PVPPause",
+  "c2s_type": "Protol.PVPPauseC2S",
+  "s2c_type": "Protol.PVPPauseS2C"
+ },
+ {
+  "msg_id": "0x0332",
+  "name": "PVPReservesJoin",
+  "c2s_type": "Protol.PVPReservesJoinC2S",
+  "s2c_type": "Protol.PVPReservesJoinS2C"
+ },
+ {
+  "msg_id": "0x0333",
+  "name": "PVPReservesQuit",
+  "c2s_type": "Protol.PVPReservesQuitC2S",
+  "s2c_type": "Protol.PVPReservesQuitS2C"
+ },
+ {
+  "msg_id": "0x0335",
+  "name": "PVPReservesFrame",
+  "c2s_type": "Protol.PVPReservesFrameC2S",
+  "s2c_type": "Protol.PVPReservesFrameS2C"
+ },
+ {
+  "msg_id": "0x0336",
+  "name": "PVPReservesEvent",
+  "c2s_type": "Protol.PVPReservesEventC2S",
+  "s2c_type": "Protol.PVPReservesEventS2C"
+ },
+ {
+  "msg_id": "0x0401",
+  "name": "NotifyKick",
+  "c2s_type": null,
+  "s2c_type": "Protol.NotifyKickS2C"
+ },
+ {
+  "msg_id": "0x0402",
+  "name": "NotifyOnlineState",
+  "c2s_type": null,
+  "s2c_type": "Protol.NotifyOnlineStateS2C"
+ },
+ {
+  "msg_id": "0x0403",
+  "name": "NotifyFlags",
+  "c2s_type": null,
+  "s2c_type": "Protol.NotifyFlagsS2C"
+ },
+ {
+  "msg_id": "0x0404",
+  "name": "NotifyRewards",
+  "c2s_type": null,
+  "s2c_type": "Protol.NotifyRewardsS2C"
+ },
+ {
+  "msg_id": "0x0405",
+  "name": "NotifyCurrencyChange",
+  "c2s_type": null,
+  "s2c_type": "Protol.NotifyCurrencyChangeS2C"
+ },
+ {
+  "msg_id": "0x0406",
+  "name": "NotifyLevelChange",
+  "c2s_type": null,
+  "s2c_type": "Protol.NotifyLevelChangeS2C"
+ },
+ {
+  "msg_id": "0x0407",
+  "name": "NotifyCurrencyInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.NotifyCurrencyInfoS2C"
+ },
+ {
+  "msg_id": "0x0408",
+  "name": "NotifyStatistics",
+  "c2s_type": null,
+  "s2c_type": "Protol.NotifyStatisticsS2C"
+ },
+ {
+  "msg_id": "0x0409",
+  "name": "NotifyNotice",
+  "c2s_type": null,
+  "s2c_type": "Protol.NotifyNoticeS2C"
+ },
+ {
+  "msg_id": "0x040B",
+  "name": "NotifyGlobalFlagsSync",
+  "c2s_type": null,
+  "s2c_type": "Protol.NotifyGlobalFlagsSyncS2C"
+ },
+ {
+  "msg_id": "0x040C",
+  "name": "NotifyOpenPlayers",
+  "c2s_type": null,
+  "s2c_type": "Protol.NotifyOpenPlayersS2C"
+ },
+ {
+  "msg_id": "0x0601",
+  "name": "AuthLogin",
+  "c2s_type": "Protol.AuthLoginC2S",
+  "s2c_type": "Protol.AuthLoginS2C"
+ },
+ {
+  "msg_id": "0x0603",
+  "name": "AuthUseRole",
+  "c2s_type": "Protol.AuthUseRoleC2S",
+  "s2c_type": "Protol.AuthUseRoleS2C"
+ },
+ {
+  "msg_id": "0x0604",
+  "name": "AuthNotice",
+  "c2s_type": "Protol.AuthNoticeC2S",
+  "s2c_type": "Protol.AuthNoticeS2C"
+ },
+ {
+  "msg_id": "0x0605",
+  "name": "AuthRecord",
+  "c2s_type": "Protol.AuthRecordC2S",
+  "s2c_type": "Protol.AuthRecordS2C"
+ },
+ {
+  "msg_id": "0x0606",
+  "name": "AuthCheck",
+  "c2s_type": "Protol.AuthCheckC2S",
+  "s2c_type": "Protol.AuthCheckS2C"
+ },
+ {
+  "msg_id": "0x0607",
+  "name": "AuthResVersion",
+  "c2s_type": "Protol.AuthResVersionC2S",
+  "s2c_type": "Protol.AuthResVersionS2C"
+ },
+ {
+  "msg_id": "0x0608",
+  "name": "AuthCleanUpAccount",
+  "c2s_type": "Protol.AuthCleanUpAccountC2S",
+  "s2c_type": "Protol.AuthCleanUpAccountS2C"
+ },
+ {
+  "msg_id": "0x0609",
+  "name": "AuthLockZone",
+  "c2s_type": "Protol.AuthLockZoneC2S",
+  "s2c_type": "Protol.AuthLockZoneS2C"
+ },
+ {
+  "msg_id": "0x060A",
+  "name": "AuthChooseZone",
+  "c2s_type": "Protol.AuthChooseZoneC2S",
+  "s2c_type": "Protol.AuthChooseZoneS2C"
+ },
+ {
+  "msg_id": "0x060B",
+  "name": "AuthGuestSwap",
+  "c2s_type": "Protol.AuthGuestSwapC2S",
+  "s2c_type": "Protol.AuthGuestSwapS2C"
+ },
+ {
+  "msg_id": "0x060C",
+  "name": "AuthPlatBind",
+  "c2s_type": "Protol.AuthPlatBindC2S",
+  "s2c_type": "Protol.AuthPlatBindS2C"
+ },
+ {
+  "msg_id": "0x060D",
+  "name": "AuthLogoutAll",
+  "c2s_type": "Protol.AuthLogoutAllC2S",
+  "s2c_type": "Protol.AuthLogoutAllS2C"
+ },
+ {
+  "msg_id": "0x060E",
+  "name": "AuthResetVerified",
+  "c2s_type": "Protol.AuthResetVerifiedC2S",
+  "s2c_type": "Protol.AuthResetVerifiedS2C"
+ },
+ {
+  "msg_id": "0x0614",
+  "name": "AuthRuYiCreateOrder",
+  "c2s_type": "Protol.AuthRuYiCreateOrderC2S",
+  "s2c_type": "Protol.AuthRuYiCreateOrderS2C"
+ },
+ {
+  "msg_id": "0x0615",
+  "name": "AuthPayTencentCreate",
+  "c2s_type": "Protol.AuthPayTencentCreateC2S",
+  "s2c_type": "Protol.AuthPayTencentCreateS2C"
+ },
+ {
+  "msg_id": "0x0616",
+  "name": "AuthFriendList",
+  "c2s_type": "Protol.AuthFriendListC2S",
+  "s2c_type": "Protol.AuthFriendListS2C"
+ },
+ {
+  "msg_id": "0x0617",
+  "name": "AuthArkShare",
+  "c2s_type": "Protol.AuthArkShareC2S",
+  "s2c_type": "Protol.AuthArkShareS2C"
+ },
+ {
+  "msg_id": "0x0618",
+  "name": "AuthCenterQuery",
+  "c2s_type": "Protol.AuthCenterQueryC2S",
+  "s2c_type": "Protol.AuthCenterQueryS2C"
+ },
+ {
+  "msg_id": "0x0619",
+  "name": "AuthOpenidToUid",
+  "c2s_type": "Protol.AuthOpenidToUidC2S",
+  "s2c_type": "Protol.AuthOpenidToUidS2C"
+ },
+ {
+  "msg_id": "0x061A",
+  "name": "AuthCancelOrder",
+  "c2s_type": "Protol.AuthCancelOrderC2S",
+  "s2c_type": "Protol.AuthCancelOrderS2C"
+ },
+ {
+  "msg_id": "0x0801",
+  "name": "PackItemInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.PackItemInfoS2C"
+ },
+ {
+  "msg_id": "0x0802",
+  "name": "PackItemChange",
+  "c2s_type": null,
+  "s2c_type": "Protol.PackItemChangeS2C"
+ },
+ {
+  "msg_id": "0x0803",
+  "name": "PackItemSale",
+  "c2s_type": "Protol.PackItemSaleC2S",
+  "s2c_type": "Protol.PackItemSaleS2C"
+ },
+ {
+  "msg_id": "0x0804",
+  "name": "PackItemCompose",
+  "c2s_type": "Protol.PackItemComposeC2S",
+  "s2c_type": "Protol.PackItemComposeS2C"
+ },
+ {
+  "msg_id": "0x0805",
+  "name": "PackItemUse",
+  "c2s_type": "Protol.PackItemUseC2S",
+  "s2c_type": "Protol.PackItemUseS2C"
+ },
+ {
+  "msg_id": "0x0806",
+  "name": "PackSpecialtyItemUse",
+  "c2s_type": "Protol.PackSpecialtyItemUseC2S",
+  "s2c_type": "Protol.PackSpecialtyItemUseS2C"
+ },
+ {
+  "msg_id": "0x0807",
+  "name": "PackUpgradeItemUse",
+  "c2s_type": "Protol.PackUpgradeItemUseC2S",
+  "s2c_type": "Protol.PackUpgradeItemUseS2C"
+ },
+ {
+  "msg_id": "0x0901",
+  "name": "PlayerCardPack",
+  "c2s_type": null,
+  "s2c_type": "Protol.PlayerCardPackS2C"
+ },
+ {
+  "msg_id": "0x0902",
+  "name": "PlayerCardChange",
+  "c2s_type": null,
+  "s2c_type": "Protol.PlayerCardChangeS2C"
+ },
+ {
+  "msg_id": "0x0903",
+  "name": "PlayerCardCompose",
+  "c2s_type": "Protol.PlayerCardComposeC2S",
+  "s2c_type": "Protol.PlayerCardComposeS2C"
+ },
+ {
+  "msg_id": "0x0904",
+  "name": "PlayerCardDecompose",
+  "c2s_type": "Protol.PlayerCardDecomposeC2S",
+  "s2c_type": "Protol.PlayerCardDecomposeS2C"
+ },
+ {
+  "msg_id": "0x0905",
+  "name": "PlayerCardLevelUp",
+  "c2s_type": "Protol.PlayerCardLevelUpC2S",
+  "s2c_type": "Protol.PlayerCardLevelUpS2C"
+ },
+ {
+  "msg_id": "0x0906",
+  "name": "PlayerCardUpGradeStar",
+  "c2s_type": "Protol.PlayerCardUpGradeStarC2S",
+  "s2c_type": "Protol.PlayerCardUpGradeStarS2C"
+ },
+ {
+  "msg_id": "0x0907",
+  "name": "PlayerCardUpGradeSkill",
+  "c2s_type": "Protol.PlayerCardUpGradeSkillC2S",
+  "s2c_type": "Protol.PlayerCardUpGradeSkillS2C"
+ },
+ {
+  "msg_id": "0x0908",
+  "name": "PlayerCardTrain",
+  "c2s_type": "Protol.PlayerCardTrainC2S",
+  "s2c_type": "Protol.PlayerCardTrainS2C"
+ },
+ {
+  "msg_id": "0x0909",
+  "name": "PlayerCardLock",
+  "c2s_type": "Protol.PlayerCardLockC2S",
+  "s2c_type": "Protol.PlayerCardLockS2C"
+ },
+ {
+  "msg_id": "0x090B",
+  "name": "PlayerCardSkillResonanceUnlock",
+  "c2s_type": "Protol.PlayerCardSkillResonanceUnlockC2S",
+  "s2c_type": "Protol.PlayerCardSkillResonanceUnlockS2C"
+ },
+ {
+  "msg_id": "0x090C",
+  "name": "PlayerCardCultivate",
+  "c2s_type": "Protol.PlayerCardCultivateC2S",
+  "s2c_type": "Protol.PlayerCardCultivateS2C"
+ },
+ {
+  "msg_id": "0x090D",
+  "name": "PlayerCardAutoResolve",
+  "c2s_type": "Protol.PlayerCardAutoResolveC2S",
+  "s2c_type": "Protol.PlayerCardAutoResolveS2C"
+ },
+ {
+  "msg_id": "0x0A01",
+  "name": "StoryInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.StoryInfoS2C"
+ },
+ {
+  "msg_id": "0x0A02",
+  "name": "StoryPassSectionStart",
+  "c2s_type": "Protol.StoryPassSectionStartC2S",
+  "s2c_type": "Protol.StoryPassSectionStartS2C"
+ },
+ {
+  "msg_id": "0x0A03",
+  "name": "StoryPassSectionSuc",
+  "c2s_type": "Protol.StoryPassSectionSucC2S",
+  "s2c_type": "Protol.StoryPassSectionSucS2C"
+ },
+ {
+  "msg_id": "0x0B01",
+  "name": "TeamInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.TeamInfoS2C"
+ },
+ {
+  "msg_id": "0x0B02",
+  "name": "TeamFormationSave",
+  "c2s_type": "Protol.TeamFormationSaveC2S",
+  "s2c_type": "Protol.TeamFormationSaveS2C"
+ },
+ {
+  "msg_id": "0x0B03",
+  "name": "TeamUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.TeamUpdateS2C"
+ },
+ {
+  "msg_id": "0x0B04",
+  "name": "TeamTacticUp",
+  "c2s_type": "Protol.TeamTacticUpC2S",
+  "s2c_type": "Protol.TeamTacticUpS2C"
+ },
+ {
+  "msg_id": "0x0B05",
+  "name": "TeamName",
+  "c2s_type": "Protol.TeamNameC2S",
+  "s2c_type": "Protol.TeamNameS2C"
+ },
+ {
+  "msg_id": "0x0B06",
+  "name": "TeamExtraLineUpChosen",
+  "c2s_type": "Protol.TeamExtraLineUpChosenC2S",
+  "s2c_type": "Protol.TeamExtraLineUpChosenS2C"
+ },
+ {
+  "msg_id": "0x0B07",
+  "name": "TeamSeePlayer",
+  "c2s_type": "Protol.TeamSeePlayerC2S",
+  "s2c_type": "Protol.TeamSeePlayerS2C"
+ },
+ {
+  "msg_id": "0x0B08",
+  "name": "TeamSeeOther",
+  "c2s_type": "Protol.TeamSeeOtherC2S",
+  "s2c_type": "Protol.TeamSeeOtherS2C"
+ },
+ {
+  "msg_id": "0x0C01",
+  "name": "MailInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.MailInfoS2C"
+ },
+ {
+  "msg_id": "0x0C02",
+  "name": "MailUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.MailUpdateS2C"
+ },
+ {
+  "msg_id": "0x0C03",
+  "name": "MailRead",
+  "c2s_type": "Protol.MailReadC2S",
+  "s2c_type": "Protol.MailReadS2C"
+ },
+ {
+  "msg_id": "0x0C04",
+  "name": "MailGetItem",
+  "c2s_type": "Protol.MailGetItemC2S",
+  "s2c_type": "Protol.MailGetItemS2C"
+ },
+ {
+  "msg_id": "0x0C05",
+  "name": "MailRemove",
+  "c2s_type": "Protol.MailRemoveC2S",
+  "s2c_type": "Protol.MailRemoveS2C"
+ },
+ {
+  "msg_id": "0x0D01",
+  "name": "SignInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.SignInfoS2C"
+ },
+ {
+  "msg_id": "0x0D02",
+  "name": "SignSave",
+  "c2s_type": "Protol.SignSaveC2S",
+  "s2c_type": "Protol.SignSaveS2C"
+ },
+ {
+  "msg_id": "0x0D03",
+  "name": "SignReward",
+  "c2s_type": "Protol.SignRewardC2S",
+  "s2c_type": "Protol.SignRewardS2C"
+ },
+ {
+  "msg_id": "0x0E01",
+  "name": "TaskInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.TaskInfoS2C"
+ },
+ {
+  "msg_id": "0x0E02",
+  "name": "TaskChange",
+  "c2s_type": null,
+  "s2c_type": "Protol.TaskChangeS2C"
+ },
+ {
+  "msg_id": "0x0E03",
+  "name": "TaskReceiveRewards",
+  "c2s_type": "Protol.TaskReceiveRewardsC2S",
+  "s2c_type": "Protol.TaskReceiveRewardsS2C"
+ },
+ {
+  "msg_id": "0x0E04",
+  "name": "TaskReceiveActivationRewards",
+  "c2s_type": "Protol.TaskReceiveActivationRewardsC2S",
+  "s2c_type": "Protol.TaskReceiveActivationRewardsS2C"
+ },
+ {
+  "msg_id": "0x0E05",
+  "name": "TaskReceiveOneKey",
+  "c2s_type": "Protol.TaskReceiveOneKeyC2S",
+  "s2c_type": "Protol.TaskReceiveOneKeyS2C"
+ },
+ {
+  "msg_id": "0x0E07",
+  "name": "TaskActiveExtractPhysical",
+  "c2s_type": "Protol.TaskActiveExtractPhysicalC2S",
+  "s2c_type": "Protol.TaskActiveExtractPhysicalS2C"
+ },
+ {
+  "msg_id": "0x0E08",
+  "name": "TaskReceiveAchievementRewards",
+  "c2s_type": "Protol.TaskReceiveAchievementRewardsC2S",
+  "s2c_type": "Protol.TaskReceiveAchievementRewardsS2C"
+ },
+ {
+  "msg_id": "0x0E09",
+  "name": "TaskPlanSkip",
+  "c2s_type": "Protol.TaskPlanSkipC2S",
+  "s2c_type": "Protol.TaskPlanSkipS2C"
+ },
+ {
+  "msg_id": "0x0E0A",
+  "name": "TaskYcReceiveRewards",
+  "c2s_type": "Protol.TaskYcReceiveRewardsC2S",
+  "s2c_type": "Protol.TaskYcReceiveRewardsS2C"
+ },
+ {
+  "msg_id": "0x0F01",
+  "name": "LotteryInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.LotteryInfoS2C"
+ },
+ {
+  "msg_id": "0x0F02",
+  "name": "LotteryDo",
+  "c2s_type": "Protol.LotteryDoC2S",
+  "s2c_type": "Protol.LotteryDoS2C"
+ },
+ {
+  "msg_id": "0x0F03",
+  "name": "LotteryBuy",
+  "c2s_type": "Protol.LotteryBuyC2S",
+  "s2c_type": "Protol.LotteryBuyS2C"
+ },
+ {
+  "msg_id": "0x0F04",
+  "name": "LotteryGetGift",
+  "c2s_type": "Protol.LotteryGetGiftC2S",
+  "s2c_type": "Protol.LotteryGetGiftS2C"
+ },
+ {
+  "msg_id": "0x0F05",
+  "name": "LotteryUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.LotteryUpdateS2C"
+ },
+ {
+  "msg_id": "0x0F06",
+  "name": "LotteryPreConfirm",
+  "c2s_type": "Protol.LotteryPreConfirmC2S",
+  "s2c_type": "Protol.LotteryPreConfirmS2C"
+ },
+ {
+  "msg_id": "0x0F07",
+  "name": "LotterySupportInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.LotterySupportInfoS2C"
+ },
+ {
+  "msg_id": "0x0F08",
+  "name": "LotterySupportDo",
+  "c2s_type": "Protol.LotterySupportDoC2S",
+  "s2c_type": "Protol.LotterySupportDoS2C"
+ },
+ {
+  "msg_id": "0x0F09",
+  "name": "LotterySupportWish",
+  "c2s_type": "Protol.LotterySupportWishC2S",
+  "s2c_type": "Protol.LotterySupportWishS2C"
+ },
+ {
+  "msg_id": "0x0F0A",
+  "name": "LotteryRecallInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.LotteryRecallInfoS2C"
+ },
+ {
+  "msg_id": "0x0F0B",
+  "name": "LotteryRecallDo",
+  "c2s_type": "Protol.LotteryRecallDoC2S",
+  "s2c_type": "Protol.LotteryRecallDoS2C"
+ },
+ {
+  "msg_id": "0x0F0C",
+  "name": "LotteryRecallWish",
+  "c2s_type": "Protol.LotteryRecallWishC2S",
+  "s2c_type": "Protol.LotteryRecallWishS2C"
+ },
+ {
+  "msg_id": "0x0F0D",
+  "name": "LotteryWish",
+  "c2s_type": "Protol.LotteryWishC2S",
+  "s2c_type": "Protol.LotteryWishS2C"
+ },
+ {
+  "msg_id": "0x0F0E",
+  "name": "LotteryWishList",
+  "c2s_type": "Protol.LotteryWishListC2S",
+  "s2c_type": "Protol.LotteryWishListS2C"
+ },
+ {
+  "msg_id": "0x0F0F",
+  "name": "LotteryDIYGachaInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.LotteryDIYGachaInfoS2C"
+ },
+ {
+  "msg_id": "0x0F10",
+  "name": "LotteryDIYGachaDo",
+  "c2s_type": "Protol.LotteryDIYGachaDoC2S",
+  "s2c_type": "Protol.LotteryDIYGachaDoS2C"
+ },
+ {
+  "msg_id": "0x0F11",
+  "name": "LotteryDIYGachaWish",
+  "c2s_type": "Protol.LotteryDIYGachaWishC2S",
+  "s2c_type": "Protol.LotteryDIYGachaWishS2C"
+ },
+ {
+  "msg_id": "0x0F12",
+  "name": "LotteryDIYGachaWishGift",
+  "c2s_type": "Protol.LotteryDIYGachaWishGiftC2S",
+  "s2c_type": "Protol.LotteryDIYGachaWishGiftS2C"
+ },
+ {
+  "msg_id": "0x0F13",
+  "name": "LotterySupportGetGift",
+  "c2s_type": "Protol.LotterySupportGetGiftC2S",
+  "s2c_type": "Protol.LotterySupportGetGiftS2C"
+ },
+ {
+  "msg_id": "0x1001",
+  "name": "FriendInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.FriendInfoS2C"
+ },
+ {
+  "msg_id": "0x1002",
+  "name": "FriendDataUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.FriendDataUpdateS2C"
+ },
+ {
+  "msg_id": "0x1003",
+  "name": "FriendInviteDataUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.FriendInviteDataUpdateS2C"
+ },
+ {
+  "msg_id": "0x1004",
+  "name": "FriendSearch",
+  "c2s_type": "Protol.FriendSearchC2S",
+  "s2c_type": "Protol.FriendSearchS2C"
+ },
+ {
+  "msg_id": "0x1005",
+  "name": "FriendRecommendUpdate",
+  "c2s_type": "Protol.FriendRecommendUpdateC2S",
+  "s2c_type": "Protol.FriendRecommendUpdateS2C"
+ },
+ {
+  "msg_id": "0x1006",
+  "name": "FriendApply",
+  "c2s_type": "Protol.FriendApplyC2S",
+  "s2c_type": "Protol.FriendApplyS2C"
+ },
+ {
+  "msg_id": "0x1007",
+  "name": "FriendApplyHandle",
+  "c2s_type": "Protol.FriendApplyHandleC2S",
+  "s2c_type": "Protol.FriendApplyHandleS2C"
+ },
+ {
+  "msg_id": "0x1008",
+  "name": "FriendRemove",
+  "c2s_type": "Protol.FriendRemoveC2S",
+  "s2c_type": "Protol.FriendRemoveS2C"
+ },
+ {
+  "msg_id": "0x1009",
+  "name": "FriendBlackHandle",
+  "c2s_type": "Protol.FriendBlackHandleC2S",
+  "s2c_type": "Protol.FriendBlackHandleS2C"
+ },
+ {
+  "msg_id": "0x100A",
+  "name": "FriendshipSend",
+  "c2s_type": "Protol.FriendshipSendC2S",
+  "s2c_type": "Protol.FriendshipSendS2C"
+ },
+ {
+  "msg_id": "0x100B",
+  "name": "FriendshipGet",
+  "c2s_type": "Protol.FriendshipGetC2S",
+  "s2c_type": "Protol.FriendshipGetS2C"
+ },
+ {
+  "msg_id": "0x100C",
+  "name": "FriendshipUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.FriendshipUpdateS2C"
+ },
+ {
+  "msg_id": "0x100D",
+  "name": "FriendQQOrWechatList",
+  "c2s_type": "Protol.FriendQQOrWechatListC2S",
+  "s2c_type": "Protol.FriendQQOrWechatListS2C"
+ },
+ {
+  "msg_id": "0x1101",
+  "name": "FightTokyoInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.FightTokyoInfoS2C"
+ },
+ {
+  "msg_id": "0x1102",
+  "name": "FightTokyoUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.FightTokyoUpdateS2C"
+ },
+ {
+  "msg_id": "0x1103",
+  "name": "FightTokyoReward",
+  "c2s_type": "Protol.FightTokyoRewardC2S",
+  "s2c_type": "Protol.FightTokyoRewardS2C"
+ },
+ {
+  "msg_id": "0x1201",
+  "name": "CurrencyExchange",
+  "c2s_type": "Protol.CurrencyExchangeC2S",
+  "s2c_type": "Protol.CurrencyExchangeS2C"
+ },
+ {
+  "msg_id": "0x1301",
+  "name": "RankList",
+  "c2s_type": "Protol.RankListC2S",
+  "s2c_type": "Protol.RankListS2C"
+ },
+ {
+  "msg_id": "0x1302",
+  "name": "RankSelf",
+  "c2s_type": "Protol.RankSelfC2S",
+  "s2c_type": "Protol.RankSelfS2C"
+ },
+ {
+  "msg_id": "0x1303",
+  "name": "RankHistorySeasonPush",
+  "c2s_type": null,
+  "s2c_type": "Protol.RankHistorySeasonPushS2C"
+ },
+ {
+  "msg_id": "0x1401",
+  "name": "FightArenaInfo",
+  "c2s_type": "Protol.FightArenaInfoC2S",
+  "s2c_type": "Protol.FightArenaInfoS2C"
+ },
+ {
+  "msg_id": "0x1402",
+  "name": "FightArenaChallengeUp",
+  "c2s_type": "Protol.FightArenaChallengeUpC2S",
+  "s2c_type": "Protol.FightArenaChallengeUpS2C"
+ },
+ {
+  "msg_id": "0x1403",
+  "name": "FightArenaGift",
+  "c2s_type": "Protol.FightArenaGiftC2S",
+  "s2c_type": "Protol.FightArenaGiftS2C"
+ },
+ {
+  "msg_id": "0x1404",
+  "name": "FightArenaRecord",
+  "c2s_type": "Protol.FightArenaRecordC2S",
+  "s2c_type": "Protol.FightArenaRecordS2C"
+ },
+ {
+  "msg_id": "0x1405",
+  "name": "FightArenaChallengeBuy",
+  "c2s_type": "Protol.FightArenaChallengeBuyC2S",
+  "s2c_type": "Protol.FightArenaChallengeBuyS2C"
+ },
+ {
+  "msg_id": "0x1406",
+  "name": "FightArenaPlayerLineup",
+  "c2s_type": "Protol.FightArenaPlayerLineupC2S",
+  "s2c_type": "Protol.FightArenaPlayerLineupS2C"
+ },
+ {
+  "msg_id": "0x1501",
+  "name": "FightSourceInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.FightSourceInfoS2C"
+ },
+ {
+  "msg_id": "0x1502",
+  "name": "FightSourceUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.FightSourceUpdateS2C"
+ },
+ {
+  "msg_id": "0x1601",
+  "name": "ShopInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ShopInfoS2C"
+ },
+ {
+  "msg_id": "0x1602",
+  "name": "ShopGoodsChange",
+  "c2s_type": null,
+  "s2c_type": "Protol.ShopGoodsChangeS2C"
+ },
+ {
+  "msg_id": "0x1603",
+  "name": "ShopBuy",
+  "c2s_type": "Protol.ShopBuyC2S",
+  "s2c_type": "Protol.ShopBuyS2C"
+ },
+ {
+  "msg_id": "0x1604",
+  "name": "ShopRefresh",
+  "c2s_type": "Protol.ShopRefreshC2S",
+  "s2c_type": "Protol.ShopRefreshS2C"
+ },
+ {
+  "msg_id": "0x1605",
+  "name": "ShopAddRed",
+  "c2s_type": "Protol.ShopAddRedC2S",
+  "s2c_type": "Protol.ShopAddRedS2C"
+ },
+ {
+  "msg_id": "0x1606",
+  "name": "ShopRed",
+  "c2s_type": null,
+  "s2c_type": "Protol.ShopRedS2C"
+ },
+ {
+  "msg_id": "0x1607",
+  "name": "ShopVersionInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ShopVersionInfoS2C"
+ },
+ {
+  "msg_id": "0x1608",
+  "name": "ShopVersionAward",
+  "c2s_type": "Protol.ShopVersionAwardC2S",
+  "s2c_type": "Protol.ShopVersionAwardS2C"
+ },
+ {
+  "msg_id": "0x1609",
+  "name": "ShopLuckBagLottery",
+  "c2s_type": "Protol.ShopLuckBagLotteryC2S",
+  "s2c_type": "Protol.ShopLuckBagLotteryS2C"
+ },
+ {
+  "msg_id": "0x160A",
+  "name": "ShopChainGiftInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ShopChainGiftInfoS2C"
+ },
+ {
+  "msg_id": "0x160B",
+  "name": "ShopChainGiftBuy",
+  "c2s_type": "Protol.ShopChainGiftBuyC2S",
+  "s2c_type": "Protol.ShopChainGiftBuyS2C"
+ },
+ {
+  "msg_id": "0x160C",
+  "name": "ShopKarasunoInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ShopKarasunoInfoS2C"
+ },
+ {
+  "msg_id": "0x160D",
+  "name": "ShopKarasunoBuy",
+  "c2s_type": "Protol.ShopKarasunoBuyC2S",
+  "s2c_type": "Protol.ShopKarasunoBuyS2C"
+ },
+ {
+  "msg_id": "0x160E",
+  "name": "ShopSaleHouseInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ShopSaleHouseInfoS2C"
+ },
+ {
+  "msg_id": "0x160F",
+  "name": "ShopSaleHouseBuy",
+  "c2s_type": "Protol.ShopSaleHouseBuyC2S",
+  "s2c_type": "Protol.ShopSaleHouseBuyS2C"
+ },
+ {
+  "msg_id": "0x1701",
+  "name": "FightConTestInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.FightConTestInfoS2C"
+ },
+ {
+  "msg_id": "0x1702",
+  "name": "FightConTestUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.FightConTestUpdateS2C"
+ },
+ {
+  "msg_id": "0x1704",
+  "name": "FightConTestHangUpReward",
+  "c2s_type": "Protol.FightConTestHangUpRewardC2S",
+  "s2c_type": "Protol.FightConTestHangUpRewardS2C"
+ },
+ {
+  "msg_id": "0x1801",
+  "name": "PlayerSpecialtyInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.PlayerSpecialtyInfoS2C"
+ },
+ {
+  "msg_id": "0x1802",
+  "name": "PlayerSpecialtyUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.PlayerSpecialtyUpdateS2C"
+ },
+ {
+  "msg_id": "0x1803",
+  "name": "PlayerSpecialtyUpLevel",
+  "c2s_type": "Protol.PlayerSpecialtyUpLevelC2S",
+  "s2c_type": "Protol.PlayerSpecialtyUpLevelS2C"
+ },
+ {
+  "msg_id": "0x1804",
+  "name": "PlayerSpecialtyOn",
+  "c2s_type": "Protol.PlayerSpecialtyOnC2S",
+  "s2c_type": "Protol.PlayerSpecialtyOnS2C"
+ },
+ {
+  "msg_id": "0x1805",
+  "name": "PlayerSpecialtyOff",
+  "c2s_type": "Protol.PlayerSpecialtyOffC2S",
+  "s2c_type": "Protol.PlayerSpecialtyOffS2C"
+ },
+ {
+  "msg_id": "0x1806",
+  "name": "PlayerSpecialtyLock",
+  "c2s_type": "Protol.PlayerSpecialtyLockC2S",
+  "s2c_type": "Protol.PlayerSpecialtyLockS2C"
+ },
+ {
+  "msg_id": "0x1807",
+  "name": "PlayerSpecialtyTempDraw",
+  "c2s_type": "Protol.PlayerSpecialtyTempDrawC2S",
+  "s2c_type": "Protol.PlayerSpecialtyTempDrawS2C"
+ },
+ {
+  "msg_id": "0x1808",
+  "name": "PlayerSpecialtyDecomp",
+  "c2s_type": "Protol.PlayerSpecialtyDecompC2S",
+  "s2c_type": "Protol.PlayerSpecialtyDecompS2C"
+ },
+ {
+  "msg_id": "0x1809",
+  "name": "PlayerSpecialtyDecompSet",
+  "c2s_type": "Protol.PlayerSpecialtyDecompSetC2S",
+  "s2c_type": "Protol.PlayerSpecialtyDecompSetS2C"
+ },
+ {
+  "msg_id": "0x180A",
+  "name": "PlayerSpecialtyFilterSeting",
+  "c2s_type": "Protol.PlayerSpecialtyFilterSetingC2S",
+  "s2c_type": "Protol.PlayerSpecialtyFilterSetingS2C"
+ },
+ {
+  "msg_id": "0x1901",
+  "name": "TreasureInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.TreasureInfoS2C"
+ },
+ {
+  "msg_id": "0x1902",
+  "name": "TreasureUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.TreasureUpdateS2C"
+ },
+ {
+  "msg_id": "0x1903",
+  "name": "TreasureInto",
+  "c2s_type": "Protol.TreasureIntoC2S",
+  "s2c_type": "Protol.TreasureIntoS2C"
+ },
+ {
+  "msg_id": "0x1904",
+  "name": "TreasureMove",
+  "c2s_type": "Protol.TreasureMoveC2S",
+  "s2c_type": "Protol.TreasureMoveS2C"
+ },
+ {
+  "msg_id": "0x1905",
+  "name": "TreasureEvent",
+  "c2s_type": "Protol.TreasureEventC2S",
+  "s2c_type": "Protol.TreasureEventS2C"
+ },
+ {
+  "msg_id": "0x1906",
+  "name": "TreasureFinish",
+  "c2s_type": "Protol.TreasureFinishC2S",
+  "s2c_type": "Protol.TreasureFinishS2C"
+ },
+ {
+  "msg_id": "0x1907",
+  "name": "TreasureUseProp",
+  "c2s_type": "Protol.TreasureUsePropC2S",
+  "s2c_type": "Protol.TreasureUsePropS2C"
+ },
+ {
+  "msg_id": "0x1908",
+  "name": "TreasureShopBuy",
+  "c2s_type": "Protol.TreasureShopBuyC2S",
+  "s2c_type": "Protol.TreasureShopBuyS2C"
+ },
+ {
+  "msg_id": "0x1A01",
+  "name": "ExamTickets",
+  "c2s_type": "Protol.ExamTicketsC2S",
+  "s2c_type": "Protol.ExamTicketsS2C"
+ },
+ {
+  "msg_id": "0x1A02",
+  "name": "ExamQuestions",
+  "c2s_type": "Protol.ExamQuestionsC2S",
+  "s2c_type": "Protol.ExamQuestionsS2C"
+ },
+ {
+  "msg_id": "0x1A03",
+  "name": "ExamReward",
+  "c2s_type": "Protol.ExamRewardC2S",
+  "s2c_type": "Protol.ExamRewardS2C"
+ },
+ {
+  "msg_id": "0x1B01",
+  "name": "ChatInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ChatInfoS2C"
+ },
+ {
+  "msg_id": "0x1B02",
+  "name": "ChatUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.ChatUpdateS2C"
+ },
+ {
+  "msg_id": "0x1B03",
+  "name": "ChatMsgSend",
+  "c2s_type": "Protol.ChatMsgSendC2S",
+  "s2c_type": "Protol.ChatMsgSendS2C"
+ },
+ {
+  "msg_id": "0x1B04",
+  "name": "ChatFriendRead",
+  "c2s_type": "Protol.ChatFriendReadC2S",
+  "s2c_type": "Protol.ChatFriendReadS2C"
+ },
+ {
+  "msg_id": "0x1B06",
+  "name": "ChatStart",
+  "c2s_type": "Protol.ChatStartC2S",
+  "s2c_type": "Protol.ChatStartS2C"
+ },
+ {
+  "msg_id": "0x1B07",
+  "name": "ChatRingLightUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.ChatRingLightUpdateS2C"
+ },
+ {
+  "msg_id": "0x1B08",
+  "name": "ChatCheckWord",
+  "c2s_type": "Protol.ChatCheckWordC2S",
+  "s2c_type": "Protol.ChatCheckWordS2C"
+ },
+ {
+  "msg_id": "0x1C01",
+  "name": "FavorInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.FavorInfoS2C"
+ },
+ {
+  "msg_id": "0x1C02",
+  "name": "FavorInfoUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.FavorInfoUpdateS2C"
+ },
+ {
+  "msg_id": "0x1C07",
+  "name": "FavorChangeStandSign",
+  "c2s_type": "Protol.FavorChangeStandSignC2S",
+  "s2c_type": "Protol.FavorChangeStandSignS2C"
+ },
+ {
+  "msg_id": "0x1D01",
+  "name": "IllustratedInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.IllustratedInfoS2C"
+ },
+ {
+  "msg_id": "0x1D02",
+  "name": "IllustratedReceiveRewards",
+  "c2s_type": "Protol.IllustratedReceiveRewardsC2S",
+  "s2c_type": "Protol.IllustratedReceiveRewardsS2C"
+ },
+ {
+  "msg_id": "0x1D03",
+  "name": "IllustratedFetterSee",
+  "c2s_type": "Protol.IllustratedFetterSeeC2S",
+  "s2c_type": "Protol.IllustratedFetterSeeS2C"
+ },
+ {
+  "msg_id": "0x1D04",
+  "name": "IllustratedCgSee",
+  "c2s_type": "Protol.IllustratedCgSeeC2S",
+  "s2c_type": "Protol.IllustratedCgSeeS2C"
+ },
+ {
+  "msg_id": "0x1D05",
+  "name": "IllustratedCollectRewards",
+  "c2s_type": "Protol.IllustratedCollectRewardsC2S",
+  "s2c_type": "Protol.IllustratedCollectRewardsS2C"
+ },
+ {
+  "msg_id": "0x1E01",
+  "name": "GmActivityConf",
+  "c2s_type": null,
+  "s2c_type": "Protol.GmActivityConfS2C"
+ },
+ {
+  "msg_id": "0x1E02",
+  "name": "GmActivityInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.GmActivityInfoS2C"
+ },
+ {
+  "msg_id": "0x1E03",
+  "name": "GmActivityReward",
+  "c2s_type": "Protol.GmActivityRewardC2S",
+  "s2c_type": "Protol.GmActivityRewardS2C"
+ },
+ {
+  "msg_id": "0x1E04",
+  "name": "GmActivityAutoFinish",
+  "c2s_type": "Protol.GmActivityAutoFinishC2S",
+  "s2c_type": "Protol.GmActivityAutoFinishS2C"
+ },
+ {
+  "msg_id": "0x1E05",
+  "name": "GmActivityAnswer",
+  "c2s_type": "Protol.GmActivityAnswerC2S",
+  "s2c_type": "Protol.GmActivityAnswerS2C"
+ },
+ {
+  "msg_id": "0x1E06",
+  "name": "GmActivityTask",
+  "c2s_type": "Protol.GmActivityTaskC2S",
+  "s2c_type": "Protol.GmActivityTaskS2C"
+ },
+ {
+  "msg_id": "0x1F01",
+  "name": "UserGuideInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.UserGuideInfoS2C"
+ },
+ {
+  "msg_id": "0x1F02",
+  "name": "UserGuideDone",
+  "c2s_type": "Protol.UserGuideDoneC2S",
+  "s2c_type": "Protol.UserGuideDoneS2C"
+ },
+ {
+  "msg_id": "0x2001",
+  "name": "RechargeInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.RechargeInfoS2C"
+ },
+ {
+  "msg_id": "0x2002",
+  "name": "RechargeTest",
+  "c2s_type": "Protol.RechargeTestC2S",
+  "s2c_type": "Protol.RechargeTestS2C"
+ },
+ {
+  "msg_id": "0x2003",
+  "name": "RechargeCardReward",
+  "c2s_type": "Protol.RechargeCardRewardC2S",
+  "s2c_type": "Protol.RechargeCardRewardS2C"
+ },
+ {
+  "msg_id": "0x2004",
+  "name": "RechargeOrderInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.RechargeOrderInfoS2C"
+ },
+ {
+  "msg_id": "0x2005",
+  "name": "RechargeLmdCreate",
+  "c2s_type": "Protol.RechargeLmdCreateC2S",
+  "s2c_type": "Protol.RechargeLmdCreateS2C"
+ },
+ {
+  "msg_id": "0x2006",
+  "name": "RechargeExtraLimitReceive",
+  "c2s_type": "Protol.RechargeExtraLimitReceiveC2S",
+  "s2c_type": "Protol.RechargeExtraLimitReceiveS2C"
+ },
+ {
+  "msg_id": "0x2007",
+  "name": "RechargeCardExtraReward",
+  "c2s_type": "Protol.RechargeCardExtraRewardC2S",
+  "s2c_type": "Protol.RechargeCardExtraRewardS2C"
+ },
+ {
+  "msg_id": "0x2008",
+  "name": "RechargeStartLog",
+  "c2s_type": "Protol.RechargeStartLogC2S",
+  "s2c_type": "Protol.RechargeStartLogS2C"
+ },
+ {
+  "msg_id": "0x2101",
+  "name": "PersonalInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.PersonalInfoS2C"
+ },
+ {
+  "msg_id": "0x2102",
+  "name": "PersonalUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.PersonalUpdateS2C"
+ },
+ {
+  "msg_id": "0x2103",
+  "name": "PersonalSexSet",
+  "c2s_type": "Protol.PersonalSexSetC2S",
+  "s2c_type": "Protol.PersonalSexSetS2C"
+ },
+ {
+  "msg_id": "0x2104",
+  "name": "PersonalNameSet",
+  "c2s_type": "Protol.PersonalNameSetC2S",
+  "s2c_type": "Protol.PersonalNameSetS2C"
+ },
+ {
+  "msg_id": "0x2105",
+  "name": "PersonalIconSet",
+  "c2s_type": "Protol.PersonalIconSetC2S",
+  "s2c_type": "Protol.PersonalIconSetS2C"
+ },
+ {
+  "msg_id": "0x2106",
+  "name": "PersonalIconFrameSet",
+  "c2s_type": "Protol.PersonalIconFrameSetC2S",
+  "s2c_type": "Protol.PersonalIconFrameSetS2C"
+ },
+ {
+  "msg_id": "0x2107",
+  "name": "PersonalSentenceSet",
+  "c2s_type": "Protol.PersonalSentenceSetC2S",
+  "s2c_type": "Protol.PersonalSentenceSetS2C"
+ },
+ {
+  "msg_id": "0x2108",
+  "name": "PersonalShowPlayerListSet",
+  "c2s_type": "Protol.PersonalShowPlayerListSetC2S",
+  "s2c_type": "Protol.PersonalShowPlayerListSetS2C"
+ },
+ {
+  "msg_id": "0x2109",
+  "name": "PersonalBannerSet",
+  "c2s_type": "Protol.PersonalBannerSetC2S",
+  "s2c_type": "Protol.PersonalBannerSetS2C"
+ },
+ {
+  "msg_id": "0x210A",
+  "name": "PersonalBadgeSet",
+  "c2s_type": "Protol.PersonalBadgeSetC2S",
+  "s2c_type": "Protol.PersonalBadgeSetS2C"
+ },
+ {
+  "msg_id": "0x210B",
+  "name": "PersonalTitleSet",
+  "c2s_type": "Protol.PersonalTitleSetC2S",
+  "s2c_type": "Protol.PersonalTitleSetS2C"
+ },
+ {
+  "msg_id": "0x210C",
+  "name": "PersonalBirthSet",
+  "c2s_type": "Protol.PersonalBirthSetC2S",
+  "s2c_type": "Protol.PersonalBirthSetS2C"
+ },
+ {
+  "msg_id": "0x210D",
+  "name": "PersonalOther",
+  "c2s_type": "Protol.PersonalOtherC2S",
+  "s2c_type": "Protol.PersonalOtherS2C"
+ },
+ {
+  "msg_id": "0x210E",
+  "name": "PersonalTouch",
+  "c2s_type": "Protol.PersonalTouchC2S",
+  "s2c_type": "Protol.PersonalTouchS2C"
+ },
+ {
+  "msg_id": "0x210F",
+  "name": "PersonalWallpaperSet",
+  "c2s_type": "Protol.PersonalWallpaperSetC2S",
+  "s2c_type": "Protol.PersonalWallpaperSetS2C"
+ },
+ {
+  "msg_id": "0x2110",
+  "name": "PersonalWallpaperEquip",
+  "c2s_type": "Protol.PersonalWallpaperEquipC2S",
+  "s2c_type": "Protol.PersonalWallpaperEquipS2C"
+ },
+ {
+  "msg_id": "0x2111",
+  "name": "PersonalChatFrameSet",
+  "c2s_type": "Protol.PersonalChatFrameSetC2S",
+  "s2c_type": "Protol.PersonalChatFrameSetS2C"
+ },
+ {
+  "msg_id": "0x2201",
+  "name": "FurniturePackItemInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.FurniturePackItemInfoS2C"
+ },
+ {
+  "msg_id": "0x2202",
+  "name": "FurniturePackItemChange",
+  "c2s_type": null,
+  "s2c_type": "Protol.FurniturePackItemChangeS2C"
+ },
+ {
+  "msg_id": "0x2301",
+  "name": "HomeInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.HomeInfoS2C"
+ },
+ {
+  "msg_id": "0x2302",
+  "name": "HomeUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.HomeUpdateS2C"
+ },
+ {
+  "msg_id": "0x2303",
+  "name": "HomeLevelUp",
+  "c2s_type": "Protol.HomeLevelUpC2S",
+  "s2c_type": "Protol.HomeLevelUpS2C"
+ },
+ {
+  "msg_id": "0x2304",
+  "name": "HomeFurnitureEdit",
+  "c2s_type": "Protol.HomeFurnitureEditC2S",
+  "s2c_type": "Protol.HomeFurnitureEditS2C"
+ },
+ {
+  "msg_id": "0x2305",
+  "name": "HomeOutdoorSpaceExpand",
+  "c2s_type": "Protol.HomeOutdoorSpaceExpandC2S",
+  "s2c_type": "Protol.HomeOutdoorSpaceExpandS2C"
+ },
+ {
+  "msg_id": "0x2306",
+  "name": "HomeIndoorAreaLevelUp",
+  "c2s_type": "Protol.HomeIndoorAreaLevelUpC2S",
+  "s2c_type": "Protol.HomeIndoorAreaLevelUpS2C"
+ },
+ {
+  "msg_id": "0x2307",
+  "name": "HomeSchedulePlan",
+  "c2s_type": "Protol.HomeSchedulePlanC2S",
+  "s2c_type": "Protol.HomeSchedulePlanS2C"
+ },
+ {
+  "msg_id": "0x2308",
+  "name": "HomeScheduleReward",
+  "c2s_type": "Protol.HomeScheduleRewardC2S",
+  "s2c_type": "Protol.HomeScheduleRewardS2C"
+ },
+ {
+  "msg_id": "0x2309",
+  "name": "HomeFurnitureSaveTemplate",
+  "c2s_type": "Protol.HomeFurnitureSaveTemplateC2S",
+  "s2c_type": "Protol.HomeFurnitureSaveTemplateS2C"
+ },
+ {
+  "msg_id": "0x230A",
+  "name": "HomeFurnitureUseTemplate",
+  "c2s_type": "Protol.HomeFurnitureUseTemplateC2S",
+  "s2c_type": "Protol.HomeFurnitureUseTemplateS2C"
+ },
+ {
+  "msg_id": "0x230B",
+  "name": "HomeFriendMessage",
+  "c2s_type": "Protol.HomeFriendMessageC2S",
+  "s2c_type": "Protol.HomeFriendMessageS2C"
+ },
+ {
+  "msg_id": "0x230C",
+  "name": "HomeModifyMessage",
+  "c2s_type": "Protol.HomeModifyMessageC2S",
+  "s2c_type": "Protol.HomeModifyMessageS2C"
+ },
+ {
+  "msg_id": "0x230D",
+  "name": "HomeVisitSetting",
+  "c2s_type": "Protol.HomeVisitSettingC2S",
+  "s2c_type": "Protol.HomeVisitSettingS2C"
+ },
+ {
+  "msg_id": "0x230E",
+  "name": "HomeVisitPlayer",
+  "c2s_type": "Protol.HomeVisitPlayerC2S",
+  "s2c_type": "Protol.HomeVisitPlayerS2C"
+ },
+ {
+  "msg_id": "0x230F",
+  "name": "HomeLikeGamer",
+  "c2s_type": "Protol.HomeLikeGamerC2S",
+  "s2c_type": "Protol.HomeLikeGamerS2C"
+ },
+ {
+  "msg_id": "0x2311",
+  "name": "HomeUpdateGamer",
+  "c2s_type": null,
+  "s2c_type": "Protol.HomeUpdateGamerS2C"
+ },
+ {
+  "msg_id": "0x2312",
+  "name": "HomeShopBuy",
+  "c2s_type": "Protol.HomeShopBuyC2S",
+  "s2c_type": "Protol.HomeShopBuyS2C"
+ },
+ {
+  "msg_id": "0x2314",
+  "name": "HomeScheduleRewardRefresh",
+  "c2s_type": "Protol.HomeScheduleRewardRefreshC2S",
+  "s2c_type": "Protol.HomeScheduleRewardRefreshS2C"
+ },
+ {
+  "msg_id": "0x2315",
+  "name": "HomeComfortReward",
+  "c2s_type": "Protol.HomeComfortRewardC2S",
+  "s2c_type": "Protol.HomeComfortRewardS2C"
+ },
+ {
+  "msg_id": "0x2316",
+  "name": "HomeSchedulePlayerReward",
+  "c2s_type": "Protol.HomeSchedulePlayerRewardC2S",
+  "s2c_type": "Protol.HomeSchedulePlayerRewardS2C"
+ },
+ {
+  "msg_id": "0x2317",
+  "name": "HomeReward",
+  "c2s_type": "Protol.HomeRewardC2S",
+  "s2c_type": "Protol.HomeRewardS2C"
+ },
+ {
+  "msg_id": "0x2318",
+  "name": "HomeSchedulePlanAll",
+  "c2s_type": "Protol.HomeSchedulePlanAllC2S",
+  "s2c_type": "Protol.HomeSchedulePlanAllS2C"
+ },
+ {
+  "msg_id": "0x2319",
+  "name": "HomeGardenLand",
+  "c2s_type": "Protol.HomeGardenLandC2S",
+  "s2c_type": "Protol.HomeGardenLandS2C"
+ },
+ {
+  "msg_id": "0x231A",
+  "name": "HomeGardenLandWeed",
+  "c2s_type": "Protol.HomeGardenLandWeedC2S",
+  "s2c_type": "Protol.HomeGardenLandWeedS2C"
+ },
+ {
+  "msg_id": "0x231B",
+  "name": "HomeGardenLevelUp",
+  "c2s_type": "Protol.HomeGardenLevelUpC2S",
+  "s2c_type": "Protol.HomeGardenLevelUpS2C"
+ },
+ {
+  "msg_id": "0x231C",
+  "name": "HomeGardenOrderFinish",
+  "c2s_type": "Protol.HomeGardenOrderFinishC2S",
+  "s2c_type": "Protol.HomeGardenOrderFinishS2C"
+ },
+ {
+  "msg_id": "0x231D",
+  "name": "HomeGardenOrderWeekReward",
+  "c2s_type": "Protol.HomeGardenOrderWeekRewardC2S",
+  "s2c_type": "Protol.HomeGardenOrderWeekRewardS2C"
+ },
+ {
+  "msg_id": "0x231E",
+  "name": "HomeGardenShopSubmit",
+  "c2s_type": "Protol.HomeGardenShopSubmitC2S",
+  "s2c_type": "Protol.HomeGardenShopSubmitS2C"
+ },
+ {
+  "msg_id": "0x231F",
+  "name": "HomeGardenShopQuery",
+  "c2s_type": "Protol.HomeGardenShopQueryC2S",
+  "s2c_type": "Protol.HomeGardenShopQueryS2C"
+ },
+ {
+  "msg_id": "0x2320",
+  "name": "HomeGardenShopQueryParam",
+  "c2s_type": "Protol.HomeGardenShopQueryParamC2S",
+  "s2c_type": "Protol.HomeGardenShopQueryParamS2C"
+ },
+ {
+  "msg_id": "0x2321",
+  "name": "HomeGardenMachineEffectArea",
+  "c2s_type": "Protol.HomeGardenMachineEffectAreaC2S",
+  "s2c_type": "Protol.HomeGardenMachineEffectAreaS2C"
+ },
+ {
+  "msg_id": "0x2322",
+  "name": "HomeGardenFurnitureRepair",
+  "c2s_type": "Protol.HomeGardenFurnitureRepairC2S",
+  "s2c_type": "Protol.HomeGardenFurnitureRepairS2C"
+ },
+ {
+  "msg_id": "0x2323",
+  "name": "HomeFurnitureEditFinish",
+  "c2s_type": "Protol.HomeFurnitureEditFinishC2S",
+  "s2c_type": "Protol.HomeFurnitureEditFinishS2C"
+ },
+ {
+  "msg_id": "0x2401",
+  "name": "SettingInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.SettingInfoS2C"
+ },
+ {
+  "msg_id": "0x2402",
+  "name": "SettingModify",
+  "c2s_type": "Protol.SettingModifyC2S",
+  "s2c_type": "Protol.SettingModifyS2C"
+ },
+ {
+  "msg_id": "0x2403",
+  "name": "SettingGiftCode",
+  "c2s_type": "Protol.SettingGiftCodeC2S",
+  "s2c_type": "Protol.SettingGiftCodeS2C"
+ },
+ {
+  "msg_id": "0x2501",
+  "name": "PlayerSupportInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.PlayerSupportInfoS2C"
+ },
+ {
+  "msg_id": "0x2504",
+  "name": "PlayerSupportUpGradeStar",
+  "c2s_type": "Protol.PlayerSupportUpGradeStarC2S",
+  "s2c_type": "Protol.PlayerSupportUpGradeStarS2C"
+ },
+ {
+  "msg_id": "0x2505",
+  "name": "PlayerSupportUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.PlayerSupportUpdateS2C"
+ },
+ {
+  "msg_id": "0x2603",
+  "name": "DispatchReceive",
+  "c2s_type": "Protol.DispatchReceiveC2S",
+  "s2c_type": "Protol.DispatchReceiveS2C"
+ },
+ {
+  "msg_id": "0x2701",
+  "name": "FightTrainInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.FightTrainInfoS2C"
+ },
+ {
+  "msg_id": "0x2702",
+  "name": "FightTrainUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.FightTrainUpdateS2C"
+ },
+ {
+  "msg_id": "0x2703",
+  "name": "FightTrainChallenge",
+  "c2s_type": "Protol.FightTrainChallengeC2S",
+  "s2c_type": "Protol.FightTrainChallengeS2C"
+ },
+ {
+  "msg_id": "0x2704",
+  "name": "FightTrainRecord",
+  "c2s_type": "Protol.FightTrainRecordC2S",
+  "s2c_type": "Protol.FightTrainRecordS2C"
+ },
+ {
+  "msg_id": "0x2705",
+  "name": "FightTrainPlayerLineupCheck",
+  "c2s_type": "Protol.FightTrainPlayerLineupCheckC2S",
+  "s2c_type": "Protol.FightTrainPlayerLineupCheckS2C"
+ },
+ {
+  "msg_id": "0x2706",
+  "name": "FightTrainPlayerLineupSave",
+  "c2s_type": "Protol.FightTrainPlayerLineupSaveC2S",
+  "s2c_type": "Protol.FightTrainPlayerLineupSaveS2C"
+ },
+ {
+  "msg_id": "0x2707",
+  "name": "FightTrainWallOfFame",
+  "c2s_type": "Protol.FightTrainWallOfFameC2S",
+  "s2c_type": "Protol.FightTrainWallOfFameS2C"
+ },
+ {
+  "msg_id": "0x2708",
+  "name": "FightTrainAttackRecord",
+  "c2s_type": "Protol.FightTrainAttackRecordC2S",
+  "s2c_type": "Protol.FightTrainAttackRecordS2C"
+ },
+ {
+  "msg_id": "0x2801",
+  "name": "LocalActivityInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.LocalActivityInfoS2C"
+ },
+ {
+  "msg_id": "0x2802",
+  "name": "LocalActivityUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.LocalActivityUpdateS2C"
+ },
+ {
+  "msg_id": "0x2803",
+  "name": "LocalActivityReward",
+  "c2s_type": "Protol.LocalActivityRewardC2S",
+  "s2c_type": "Protol.LocalActivityRewardS2C"
+ },
+ {
+  "msg_id": "0x2806",
+  "name": "LocalActivityReturnInfo",
+  "c2s_type": "Protol.LocalActivityReturnInfoC2S",
+  "s2c_type": "Protol.LocalActivityReturnInfoS2C"
+ },
+ {
+  "msg_id": "0x2807",
+  "name": "LocalActivityReturnReward",
+  "c2s_type": "Protol.LocalActivityReturnRewardC2S",
+  "s2c_type": "Protol.LocalActivityReturnRewardS2C"
+ },
+ {
+  "msg_id": "0x2808",
+  "name": "LocalActivityReturnPointReward",
+  "c2s_type": "Protol.LocalActivityReturnPointRewardC2S",
+  "s2c_type": "Protol.LocalActivityReturnPointRewardS2C"
+ },
+ {
+  "msg_id": "0x2809",
+  "name": "LocalActivityDayTurntableDo",
+  "c2s_type": "Protol.LocalActivityDayTurntableDoC2S",
+  "s2c_type": "Protol.LocalActivityDayTurntableDoS2C"
+ },
+ {
+  "msg_id": "0x280A",
+  "name": "LocalActivityDayTurntableCountReward",
+  "c2s_type": "Protol.LocalActivityDayTurntableCountRewardC2S",
+  "s2c_type": "Protol.LocalActivityDayTurntableCountRewardS2C"
+ },
+ {
+  "msg_id": "0x280B",
+  "name": "LocalActivityDayTurntableReset",
+  "c2s_type": "Protol.LocalActivityDayTurntableResetC2S",
+  "s2c_type": "Protol.LocalActivityDayTurntableResetS2C"
+ },
+ {
+  "msg_id": "0x280C",
+  "name": "LocalActivityBeachInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.LocalActivityBeachInfoS2C"
+ },
+ {
+  "msg_id": "0x280D",
+  "name": "LocalActivityBeachDo",
+  "c2s_type": "Protol.LocalActivityBeachDoC2S",
+  "s2c_type": "Protol.LocalActivityBeachDoS2C"
+ },
+ {
+  "msg_id": "0x280E",
+  "name": "LocalActivityBeachCountReward",
+  "c2s_type": "Protol.LocalActivityBeachCountRewardC2S",
+  "s2c_type": "Protol.LocalActivityBeachCountRewardS2C"
+ },
+ {
+  "msg_id": "0x280F",
+  "name": "LocalActivityAceInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.LocalActivityAceInfoS2C"
+ },
+ {
+  "msg_id": "0x2810",
+  "name": "LocalActivityAceReward",
+  "c2s_type": "Protol.LocalActivityAceRewardC2S",
+  "s2c_type": "Protol.LocalActivityAceRewardS2C"
+ },
+ {
+  "msg_id": "0x2811",
+  "name": "LocalActivityAceLineupSave",
+  "c2s_type": "Protol.LocalActivityAceLineupSaveC2S",
+  "s2c_type": "Protol.LocalActivityAceLineupSaveS2C"
+ },
+ {
+  "msg_id": "0x2812",
+  "name": "LocalActivityAceStageRank",
+  "c2s_type": "Protol.LocalActivityAceStageRankC2S",
+  "s2c_type": "Protol.LocalActivityAceStageRankS2C"
+ },
+ {
+  "msg_id": "0x2901",
+  "name": "SpecificTrialInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.SpecificTrialInfoS2C"
+ },
+ {
+  "msg_id": "0x2902",
+  "name": "SpecificTrialUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.SpecificTrialUpdateS2C"
+ },
+ {
+  "msg_id": "0x2903",
+  "name": "SpecificTrialReward",
+  "c2s_type": "Protol.SpecificTrialRewardC2S",
+  "s2c_type": "Protol.SpecificTrialRewardS2C"
+ },
+ {
+  "msg_id": "0x2A01",
+  "name": "StageStarInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.StageStarInfoS2C"
+ },
+ {
+  "msg_id": "0x2B01",
+  "name": "ArderInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ArderInfoS2C"
+ },
+ {
+  "msg_id": "0x2B02",
+  "name": "ArderReward",
+  "c2s_type": "Protol.ArderRewardC2S",
+  "s2c_type": "Protol.ArderRewardS2C"
+ },
+ {
+  "msg_id": "0x2B03",
+  "name": "ArderResult",
+  "c2s_type": "Protol.ArderResultC2S",
+  "s2c_type": "Protol.ArderResultS2C"
+ },
+ {
+  "msg_id": "0x2B04",
+  "name": "ArderStarReward",
+  "c2s_type": "Protol.ArderStarRewardC2S",
+  "s2c_type": "Protol.ArderStarRewardS2C"
+ },
+ {
+  "msg_id": "0x2B09",
+  "name": "ArderGameClosed",
+  "c2s_type": null,
+  "s2c_type": "Protol.ArderGameClosedS2C"
+ },
+ {
+  "msg_id": "0x2C01",
+  "name": "BattlePassInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.BattlePassInfoS2C"
+ },
+ {
+  "msg_id": "0x2C02",
+  "name": "BattlePassUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.BattlePassUpdateS2C"
+ },
+ {
+  "msg_id": "0x2C03",
+  "name": "BattlePassTaskRefresh",
+  "c2s_type": "Protol.BattlePassTaskRefreshC2S",
+  "s2c_type": "Protol.BattlePassTaskRefreshS2C"
+ },
+ {
+  "msg_id": "0x2C04",
+  "name": "BattlePassTakeRewardLevel",
+  "c2s_type": "Protol.BattlePassTakeRewardLevelC2S",
+  "s2c_type": "Protol.BattlePassTakeRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x2C05",
+  "name": "BattlePassToNextRewardLevel",
+  "c2s_type": "Protol.BattlePassToNextRewardLevelC2S",
+  "s2c_type": "Protol.BattlePassToNextRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x2D01",
+  "name": "ShopEventInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ShopEventInfoS2C"
+ },
+ {
+  "msg_id": "0x2D02",
+  "name": "ShopEventFinish",
+  "c2s_type": "Protol.ShopEventFinishC2S",
+  "s2c_type": "Protol.ShopEventFinishS2C"
+ },
+ {
+  "msg_id": "0x2E01",
+  "name": "AssociationInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.AssociationInfoS2C"
+ },
+ {
+  "msg_id": "0x2E02",
+  "name": "AssociationList",
+  "c2s_type": "Protol.AssociationListC2S",
+  "s2c_type": "Protol.AssociationListS2C"
+ },
+ {
+  "msg_id": "0x2E03",
+  "name": "AssociationReview",
+  "c2s_type": "Protol.AssociationReviewC2S",
+  "s2c_type": "Protol.AssociationReviewS2C"
+ },
+ {
+  "msg_id": "0x2E04",
+  "name": "AssociationJoin",
+  "c2s_type": "Protol.AssociationJoinC2S",
+  "s2c_type": "Protol.AssociationJoinS2C"
+ },
+ {
+  "msg_id": "0x2E06",
+  "name": "AssociationAppoint",
+  "c2s_type": "Protol.AssociationAppointC2S",
+  "s2c_type": "Protol.AssociationAppointS2C"
+ },
+ {
+  "msg_id": "0x2E07",
+  "name": "AssociationCreate",
+  "c2s_type": "Protol.AssociationCreateC2S",
+  "s2c_type": "Protol.AssociationCreateS2C"
+ },
+ {
+  "msg_id": "0x2E08",
+  "name": "AssociationApply",
+  "c2s_type": "Protol.AssociationApplyC2S",
+  "s2c_type": "Protol.AssociationApplyS2C"
+ },
+ {
+  "msg_id": "0x2E09",
+  "name": "AssociationDeclaration",
+  "c2s_type": "Protol.AssociationDeclarationC2S",
+  "s2c_type": "Protol.AssociationDeclarationS2C"
+ },
+ {
+  "msg_id": "0x2E0A",
+  "name": "AssociationLv",
+  "c2s_type": "Protol.AssociationLvC2S",
+  "s2c_type": "Protol.AssociationLvS2C"
+ },
+ {
+  "msg_id": "0x2E0B",
+  "name": "AssociationDisband",
+  "c2s_type": "Protol.AssociationDisbandC2S",
+  "s2c_type": "Protol.AssociationDisbandS2C"
+ },
+ {
+  "msg_id": "0x2E0C",
+  "name": "AssociationExit",
+  "c2s_type": "Protol.AssociationExitC2S",
+  "s2c_type": "Protol.AssociationExitS2C"
+ },
+ {
+  "msg_id": "0x2E0E",
+  "name": "AssociationInvite",
+  "c2s_type": "Protol.AssociationInviteC2S",
+  "s2c_type": "Protol.AssociationInviteS2C"
+ },
+ {
+  "msg_id": "0x2E0F",
+  "name": "AssociationRecruit",
+  "c2s_type": "Protol.AssociationRecruitC2S",
+  "s2c_type": "Protol.AssociationRecruitS2C"
+ },
+ {
+  "msg_id": "0x2E10",
+  "name": "AssociationSelect",
+  "c2s_type": "Protol.AssociationSelectC2S",
+  "s2c_type": "Protol.AssociationSelectS2C"
+ },
+ {
+  "msg_id": "0x2E11",
+  "name": "AssociationVowInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.AssociationVowInfoS2C"
+ },
+ {
+  "msg_id": "0x2E12",
+  "name": "AssociationVowRecord",
+  "c2s_type": null,
+  "s2c_type": "Protol.AssociationVowRecordS2C"
+ },
+ {
+  "msg_id": "0x2E13",
+  "name": "AssociationVowThank",
+  "c2s_type": "Protol.AssociationVowThankC2S",
+  "s2c_type": "Protol.AssociationVowThankS2C"
+ },
+ {
+  "msg_id": "0x2E14",
+  "name": "AssociationVowReceive",
+  "c2s_type": "Protol.AssociationVowReceiveC2S",
+  "s2c_type": "Protol.AssociationVowReceiveS2C"
+ },
+ {
+  "msg_id": "0x2E15",
+  "name": "AssociationVowDonate",
+  "c2s_type": "Protol.AssociationVowDonateC2S",
+  "s2c_type": "Protol.AssociationVowDonateS2C"
+ },
+ {
+  "msg_id": "0x2E16",
+  "name": "AssociationVowWish",
+  "c2s_type": "Protol.AssociationVowWishC2S",
+  "s2c_type": "Protol.AssociationVowWishS2C"
+ },
+ {
+  "msg_id": "0x2E17",
+  "name": "AssociationDailyFree",
+  "c2s_type": "Protol.AssociationDailyFreeC2S",
+  "s2c_type": "Protol.AssociationDailyFreeS2C"
+ },
+ {
+  "msg_id": "0x2E18",
+  "name": "AssociationNotify",
+  "c2s_type": "Protol.AssociationNotifyC2S",
+  "s2c_type": "Protol.AssociationNotifyS2C"
+ },
+ {
+  "msg_id": "0x2E19",
+  "name": "AssociationIcon",
+  "c2s_type": "Protol.AssociationIconC2S",
+  "s2c_type": "Protol.AssociationIconS2C"
+ },
+ {
+  "msg_id": "0x2E1A",
+  "name": "AssociationRead",
+  "c2s_type": "Protol.AssociationReadC2S",
+  "s2c_type": "Protol.AssociationReadS2C"
+ },
+ {
+  "msg_id": "0x2E1B",
+  "name": "AssociationBossInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.AssociationBossInfoS2C"
+ },
+ {
+  "msg_id": "0x2E1C",
+  "name": "AssociationBossReceiveReward",
+  "c2s_type": "Protol.AssociationBossReceiveRewardC2S",
+  "s2c_type": "Protol.AssociationBossReceiveRewardS2C"
+ },
+ {
+  "msg_id": "0x2E1D",
+  "name": "AssociationBuffetInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.AssociationBuffetInfoS2C"
+ },
+ {
+  "msg_id": "0x2E1E",
+  "name": "AssociationBuffetDonate",
+  "c2s_type": "Protol.AssociationBuffetDonateC2S",
+  "s2c_type": "Protol.AssociationBuffetDonateS2C"
+ },
+ {
+  "msg_id": "0x2E1F",
+  "name": "AssociationBuffetOpen",
+  "c2s_type": "Protol.AssociationBuffetOpenC2S",
+  "s2c_type": "Protol.AssociationBuffetOpenS2C"
+ },
+ {
+  "msg_id": "0x2E20",
+  "name": "AssociationBuffetEat",
+  "c2s_type": "Protol.AssociationBuffetEatC2S",
+  "s2c_type": "Protol.AssociationBuffetEatS2C"
+ },
+ {
+  "msg_id": "0x2E21",
+  "name": "AssociationBuffetBuy",
+  "c2s_type": "Protol.AssociationBuffetBuyC2S",
+  "s2c_type": "Protol.AssociationBuffetBuyS2C"
+ },
+ {
+  "msg_id": "0x2E22",
+  "name": "AssociationIconBuy",
+  "c2s_type": "Protol.AssociationIconBuyC2S",
+  "s2c_type": "Protol.AssociationIconBuyS2C"
+ },
+ {
+  "msg_id": "0x2E23",
+  "name": "AssociationModifyName",
+  "c2s_type": "Protol.AssociationModifyNameC2S",
+  "s2c_type": "Protol.AssociationModifyNameS2C"
+ },
+ {
+  "msg_id": "0x2F01",
+  "name": "WeeklyActivityInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.WeeklyActivityInfoS2C"
+ },
+ {
+  "msg_id": "0x2F02",
+  "name": "WeeklyActivityTrain",
+  "c2s_type": "Protol.WeeklyActivityTrainC2S",
+  "s2c_type": "Protol.WeeklyActivityTrainS2C"
+ },
+ {
+  "msg_id": "0x2F03",
+  "name": "WeeklyActivityIntegralCost",
+  "c2s_type": null,
+  "s2c_type": "Protol.WeeklyActivityIntegralCostS2C"
+ },
+ {
+  "msg_id": "0x3001",
+  "name": "HonorInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.HonorInfoS2C"
+ },
+ {
+  "msg_id": "0x3002",
+  "name": "HonorReward",
+  "c2s_type": "Protol.HonorRewardC2S",
+  "s2c_type": "Protol.HonorRewardS2C"
+ },
+ {
+  "msg_id": "0x3003",
+  "name": "HonorRewardOneKey",
+  "c2s_type": "Protol.HonorRewardOneKeyC2S",
+  "s2c_type": "Protol.HonorRewardOneKeyS2C"
+ },
+ {
+  "msg_id": "0x3101",
+  "name": "AccountInfoInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.AccountInfoInfoS2C"
+ },
+ {
+  "msg_id": "0x3102",
+  "name": "AccountInfoUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.AccountInfoUpdateS2C"
+ },
+ {
+  "msg_id": "0x3103",
+  "name": "AccountInfoBirthRechargeSet",
+  "c2s_type": "Protol.AccountInfoBirthRechargeSetC2S",
+  "s2c_type": "Protol.AccountInfoBirthRechargeSetS2C"
+ },
+ {
+  "msg_id": "0x3201",
+  "name": "BannerInfo",
+  "c2s_type": "Protol.BannerInfoC2S",
+  "s2c_type": "Protol.BannerInfoS2C"
+ },
+ {
+  "msg_id": "0x3301",
+  "name": "AssistInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.AssistInfoS2C"
+ },
+ {
+  "msg_id": "0x3302",
+  "name": "AssistRefresh",
+  "c2s_type": "Protol.AssistRefreshC2S",
+  "s2c_type": "Protol.AssistRefreshS2C"
+ },
+ {
+  "msg_id": "0x3401",
+  "name": "AdvertInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.AdvertInfoS2C"
+ },
+ {
+  "msg_id": "0x3402",
+  "name": "AdvertClick",
+  "c2s_type": "Protol.AdvertClickC2S",
+  "s2c_type": "Protol.AdvertClickS2C"
+ },
+ {
+  "msg_id": "0x3501",
+  "name": "TimeLimitGiftInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.TimeLimitGiftInfoS2C"
+ },
+ {
+  "msg_id": "0x3502",
+  "name": "TimeLimitGiftBuy",
+  "c2s_type": "Protol.TimeLimitGiftBuyC2S",
+  "s2c_type": "Protol.TimeLimitGiftBuyS2C"
+ },
+ {
+  "msg_id": "0x3503",
+  "name": "TimeLimitGiftSee",
+  "c2s_type": "Protol.TimeLimitGiftSeeC2S",
+  "s2c_type": "Protol.TimeLimitGiftSeeS2C"
+ },
+ {
+  "msg_id": "0x3504",
+  "name": "TimeLimitGiftOddsInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.TimeLimitGiftOddsInfoS2C"
+ },
+ {
+  "msg_id": "0x3505",
+  "name": "TimeLimitGiftOddsBuy",
+  "c2s_type": "Protol.TimeLimitGiftOddsBuyC2S",
+  "s2c_type": "Protol.TimeLimitGiftOddsBuyS2C"
+ },
+ {
+  "msg_id": "0x3506",
+  "name": "TimeLimitGiftSelectInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.TimeLimitGiftSelectInfoS2C"
+ },
+ {
+  "msg_id": "0x3507",
+  "name": "TimeLimitGiftSelect",
+  "c2s_type": "Protol.TimeLimitGiftSelectC2S",
+  "s2c_type": "Protol.TimeLimitGiftSelectS2C"
+ },
+ {
+  "msg_id": "0x3601",
+  "name": "TacticTrainInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.TacticTrainInfoS2C"
+ },
+ {
+  "msg_id": "0x3602",
+  "name": "TacticTrainGetNotify",
+  "c2s_type": null,
+  "s2c_type": "Protol.TacticTrainGetNotifyS2C"
+ },
+ {
+  "msg_id": "0x3603",
+  "name": "TacticTrainLineupSave",
+  "c2s_type": "Protol.TacticTrainLineupSaveC2S",
+  "s2c_type": "Protol.TacticTrainLineupSaveS2C"
+ },
+ {
+  "msg_id": "0x3604",
+  "name": "TacticTrainCardCompose",
+  "c2s_type": "Protol.TacticTrainCardComposeC2S",
+  "s2c_type": "Protol.TacticTrainCardComposeS2C"
+ },
+ {
+  "msg_id": "0x3605",
+  "name": "TacticTrainReceiveSupportReward",
+  "c2s_type": "Protol.TacticTrainReceiveSupportRewardC2S",
+  "s2c_type": "Protol.TacticTrainReceiveSupportRewardS2C"
+ },
+ {
+  "msg_id": "0x3606",
+  "name": "TacticTrainRefreshTrainStage",
+  "c2s_type": "Protol.TacticTrainRefreshTrainStageC2S",
+  "s2c_type": "Protol.TacticTrainRefreshTrainStageS2C"
+ },
+ {
+  "msg_id": "0x3607",
+  "name": "TacticTrainInfiniteReward",
+  "c2s_type": "Protol.TacticTrainInfiniteRewardC2S",
+  "s2c_type": "Protol.TacticTrainInfiniteRewardS2C"
+ },
+ {
+  "msg_id": "0x3608",
+  "name": "TacticTrainInfiniteLineup",
+  "c2s_type": "Protol.TacticTrainInfiniteLineupC2S",
+  "s2c_type": "Protol.TacticTrainInfiniteLineupS2C"
+ },
+ {
+  "msg_id": "0x3701",
+  "name": "ShareDataInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ShareDataInfoS2C"
+ },
+ {
+  "msg_id": "0x3702",
+  "name": "ShareSuccess",
+  "c2s_type": "Protol.ShareSuccessC2S",
+  "s2c_type": "Protol.ShareSuccessS2C"
+ },
+ {
+  "msg_id": "0x3703",
+  "name": "ShareAssistSet",
+  "c2s_type": "Protol.ShareAssistSetC2S",
+  "s2c_type": "Protol.ShareAssistSetS2C"
+ },
+ {
+  "msg_id": "0x3704",
+  "name": "ShareAssistDo",
+  "c2s_type": "Protol.ShareAssistDoC2S",
+  "s2c_type": "Protol.ShareAssistDoS2C"
+ },
+ {
+  "msg_id": "0x3801",
+  "name": "NoticeExtend",
+  "c2s_type": null,
+  "s2c_type": "Protol.NoticeExtendS2C"
+ },
+ {
+  "msg_id": "0x3802",
+  "name": "NoticeClick",
+  "c2s_type": "Protol.NoticeClickC2S",
+  "s2c_type": "Protol.NoticeClickS2C"
+ },
+ {
+  "msg_id": "0x3901",
+  "name": "GreatestInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.GreatestInfoS2C"
+ },
+ {
+  "msg_id": "0x3902",
+  "name": "GreatestSignReceive",
+  "c2s_type": "Protol.GreatestSignReceiveC2S",
+  "s2c_type": "Protol.GreatestSignReceiveS2C"
+ },
+ {
+  "msg_id": "0x3903",
+  "name": "GreatestBattlePassTaskRefresh",
+  "c2s_type": "Protol.GreatestBattlePassTaskRefreshC2S",
+  "s2c_type": "Protol.GreatestBattlePassTaskRefreshS2C"
+ },
+ {
+  "msg_id": "0x3904",
+  "name": "GreatestBattlePassTakeRewardLevel",
+  "c2s_type": "Protol.GreatestBattlePassTakeRewardLevelC2S",
+  "s2c_type": "Protol.GreatestBattlePassTakeRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x3905",
+  "name": "GreatestBattlePassToNextRewardLevel",
+  "c2s_type": "Protol.GreatestBattlePassToNextRewardLevelC2S",
+  "s2c_type": "Protol.GreatestBattlePassToNextRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x3906",
+  "name": "GreatestDailyReceive",
+  "c2s_type": "Protol.GreatestDailyReceiveC2S",
+  "s2c_type": "Protol.GreatestDailyReceiveS2C"
+ },
+ {
+  "msg_id": "0x3A01",
+  "name": "VersionPreviewInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.VersionPreviewInfoS2C"
+ },
+ {
+  "msg_id": "0x3A02",
+  "name": "VersionPreviewReward",
+  "c2s_type": "Protol.VersionPreviewRewardC2S",
+  "s2c_type": "Protol.VersionPreviewRewardS2C"
+ },
+ {
+  "msg_id": "0x3B01",
+  "name": "FateBattleInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.FateBattleInfoS2C"
+ },
+ {
+  "msg_id": "0x3B02",
+  "name": "FateBattleSignReward",
+  "c2s_type": "Protol.FateBattleSignRewardC2S",
+  "s2c_type": "Protol.FateBattleSignRewardS2C"
+ },
+ {
+  "msg_id": "0x3B03",
+  "name": "FateBattleEvolution",
+  "c2s_type": "Protol.FateBattleEvolutionC2S",
+  "s2c_type": "Protol.FateBattleEvolutionS2C"
+ },
+ {
+  "msg_id": "0x3B04",
+  "name": "FateBattleTacticsSave",
+  "c2s_type": "Protol.FateBattleTacticsSaveC2S",
+  "s2c_type": "Protol.FateBattleTacticsSaveS2C"
+ },
+ {
+  "msg_id": "0x3B05",
+  "name": "FateBattleEvolutionReset",
+  "c2s_type": "Protol.FateBattleEvolutionResetC2S",
+  "s2c_type": "Protol.FateBattleEvolutionResetS2C"
+ },
+ {
+  "msg_id": "0x3B06",
+  "name": "FateBattleBattlePassTaskRefresh",
+  "c2s_type": "Protol.FateBattleBattlePassTaskRefreshC2S",
+  "s2c_type": "Protol.FateBattleBattlePassTaskRefreshS2C"
+ },
+ {
+  "msg_id": "0x3B07",
+  "name": "FateBattleBattlePassTakeRewardLevel",
+  "c2s_type": "Protol.FateBattleBattlePassTakeRewardLevelC2S",
+  "s2c_type": "Protol.FateBattleBattlePassTakeRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x3B08",
+  "name": "FateBattleBattlePassToNextRewardLevel",
+  "c2s_type": "Protol.FateBattleBattlePassToNextRewardLevelC2S",
+  "s2c_type": "Protol.FateBattleBattlePassToNextRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x3C01",
+  "name": "RecallingInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.RecallingInfoS2C"
+ },
+ {
+  "msg_id": "0x3C02",
+  "name": "RecallingUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.RecallingUpdateS2C"
+ },
+ {
+  "msg_id": "0x3C03",
+  "name": "RecallingEquip",
+  "c2s_type": "Protol.RecallingEquipC2S",
+  "s2c_type": "Protol.RecallingEquipS2C"
+ },
+ {
+  "msg_id": "0x3C04",
+  "name": "RecallingUpgradeLevel",
+  "c2s_type": "Protol.RecallingUpgradeLevelC2S",
+  "s2c_type": "Protol.RecallingUpgradeLevelS2C"
+ },
+ {
+  "msg_id": "0x3C05",
+  "name": "RecallingUpgradeStage",
+  "c2s_type": "Protol.RecallingUpgradeStageC2S",
+  "s2c_type": "Protol.RecallingUpgradeStageS2C"
+ },
+ {
+  "msg_id": "0x3C06",
+  "name": "RecallingLock",
+  "c2s_type": "Protol.RecallingLockC2S",
+  "s2c_type": "Protol.RecallingLockS2C"
+ },
+ {
+  "msg_id": "0x3C07",
+  "name": "RecallingUnEquip",
+  "c2s_type": "Protol.RecallingUnEquipC2S",
+  "s2c_type": "Protol.RecallingUnEquipS2C"
+ },
+ {
+  "msg_id": "0x3C08",
+  "name": "RecallingDeCompose",
+  "c2s_type": "Protol.RecallingDeComposeC2S",
+  "s2c_type": "Protol.RecallingDeComposeS2C"
+ },
+ {
+  "msg_id": "0x3C09",
+  "name": "RecallingIllustrated",
+  "c2s_type": "Protol.RecallingIllustratedC2S",
+  "s2c_type": "Protol.RecallingIllustratedS2C"
+ },
+ {
+  "msg_id": "0x3C0A",
+  "name": "RecallingAutoResolve",
+  "c2s_type": "Protol.RecallingAutoResolveC2S",
+  "s2c_type": "Protol.RecallingAutoResolveS2C"
+ },
+ {
+  "msg_id": "0x3D01",
+  "name": "PeriodicActivityInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.PeriodicActivityInfoS2C"
+ },
+ {
+  "msg_id": "0x3D02",
+  "name": "PeriodicActivityTurntable",
+  "c2s_type": "Protol.PeriodicActivityTurntableC2S",
+  "s2c_type": "Protol.PeriodicActivityTurntableS2C"
+ },
+ {
+  "msg_id": "0x3D03",
+  "name": "PeriodicActivityTurntableReward",
+  "c2s_type": "Protol.PeriodicActivityTurntableRewardC2S",
+  "s2c_type": "Protol.PeriodicActivityTurntableRewardS2C"
+ },
+ {
+  "msg_id": "0x3D04",
+  "name": "PeriodicActivitySign",
+  "c2s_type": "Protol.PeriodicActivitySignC2S",
+  "s2c_type": "Protol.PeriodicActivitySignS2C"
+ },
+ {
+  "msg_id": "0x3D05",
+  "name": "PeriodicActivityDayPayReward",
+  "c2s_type": "Protol.PeriodicActivityDayPayRewardC2S",
+  "s2c_type": "Protol.PeriodicActivityDayPayRewardS2C"
+ },
+ {
+  "msg_id": "0x3D06",
+  "name": "PeriodicActivityBattlePassTaskRefresh",
+  "c2s_type": "Protol.PeriodicActivityBattlePassTaskRefreshC2S",
+  "s2c_type": "Protol.PeriodicActivityBattlePassTaskRefreshS2C"
+ },
+ {
+  "msg_id": "0x3D07",
+  "name": "PeriodicActivityBattlePassTakeRewardLevel",
+  "c2s_type": "Protol.PeriodicActivityBattlePassTakeRewardLevelC2S",
+  "s2c_type": "Protol.PeriodicActivityBattlePassTakeRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x3D08",
+  "name": "PeriodicActivityBattlePassToNextRewardLevel",
+  "c2s_type": "Protol.PeriodicActivityBattlePassToNextRewardLevelC2S",
+  "s2c_type": "Protol.PeriodicActivityBattlePassToNextRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x3E01",
+  "name": "CommonSignInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.CommonSignInfoS2C"
+ },
+ {
+  "msg_id": "0x3E02",
+  "name": "CommonSignSign",
+  "c2s_type": "Protol.CommonSignSignC2S",
+  "s2c_type": "Protol.CommonSignSignS2C"
+ },
+ {
+  "msg_id": "0x3F01",
+  "name": "TimeRecordInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.TimeRecordInfoS2C"
+ },
+ {
+  "msg_id": "0x4001",
+  "name": "TeamCompetitionInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.TeamCompetitionInfoS2C"
+ },
+ {
+  "msg_id": "0x4002",
+  "name": "TeamCompetitionUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.TeamCompetitionUpdateS2C"
+ },
+ {
+  "msg_id": "0x4003",
+  "name": "TeamCompetitionTakeReward",
+  "c2s_type": "Protol.TeamCompetitionTakeRewardC2S",
+  "s2c_type": "Protol.TeamCompetitionTakeRewardS2C"
+ },
+ {
+  "msg_id": "0x4004",
+  "name": "TeamCompetitionFormationSave",
+  "c2s_type": "Protol.TeamCompetitionFormationSaveC2S",
+  "s2c_type": "Protol.TeamCompetitionFormationSaveS2C"
+ },
+ {
+  "msg_id": "0x4101",
+  "name": "GmShopConfigInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.GmShopConfigInfoS2C"
+ },
+ {
+  "msg_id": "0x4102",
+  "name": "GmShopGamerInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.GmShopGamerInfoS2C"
+ },
+ {
+  "msg_id": "0x4103",
+  "name": "GmShopBuy",
+  "c2s_type": "Protol.GmShopBuyC2S",
+  "s2c_type": "Protol.GmShopBuyS2C"
+ },
+ {
+  "msg_id": "0x4201",
+  "name": "ExtraDropInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ExtraDropInfoS2C"
+ },
+ {
+  "msg_id": "0x4301",
+  "name": "KinglySetterInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.KinglySetterInfoS2C"
+ },
+ {
+  "msg_id": "0x4302",
+  "name": "KinglySetterSignReceive",
+  "c2s_type": "Protol.KinglySetterSignReceiveC2S",
+  "s2c_type": "Protol.KinglySetterSignReceiveS2C"
+ },
+ {
+  "msg_id": "0x4303",
+  "name": "KinglySetterBattlePassTaskRefresh",
+  "c2s_type": "Protol.KinglySetterBattlePassTaskRefreshC2S",
+  "s2c_type": "Protol.KinglySetterBattlePassTaskRefreshS2C"
+ },
+ {
+  "msg_id": "0x4304",
+  "name": "KinglySetterBattlePassTakeRewardLevel",
+  "c2s_type": "Protol.KinglySetterBattlePassTakeRewardLevelC2S",
+  "s2c_type": "Protol.KinglySetterBattlePassTakeRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x4305",
+  "name": "KinglySetterBattlePassToNextRewardLevel",
+  "c2s_type": "Protol.KinglySetterBattlePassToNextRewardLevelC2S",
+  "s2c_type": "Protol.KinglySetterBattlePassToNextRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x4306",
+  "name": "KinglySetterDailyReceive",
+  "c2s_type": "Protol.KinglySetterDailyReceiveC2S",
+  "s2c_type": "Protol.KinglySetterDailyReceiveS2C"
+ },
+ {
+  "msg_id": "0x4401",
+  "name": "PlayerThemeInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.PlayerThemeInfoS2C"
+ },
+ {
+  "msg_id": "0x4402",
+  "name": "PlayerThemeSignReceive",
+  "c2s_type": "Protol.PlayerThemeSignReceiveC2S",
+  "s2c_type": "Protol.PlayerThemeSignReceiveS2C"
+ },
+ {
+  "msg_id": "0x4403",
+  "name": "PlayerThemeBattlePassTaskRefresh",
+  "c2s_type": "Protol.PlayerThemeBattlePassTaskRefreshC2S",
+  "s2c_type": "Protol.PlayerThemeBattlePassTaskRefreshS2C"
+ },
+ {
+  "msg_id": "0x4404",
+  "name": "PlayerThemeBattlePassTakeRewardLevel",
+  "c2s_type": "Protol.PlayerThemeBattlePassTakeRewardLevelC2S",
+  "s2c_type": "Protol.PlayerThemeBattlePassTakeRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x4405",
+  "name": "PlayerThemeBattlePassToNextRewardLevel",
+  "c2s_type": "Protol.PlayerThemeBattlePassToNextRewardLevelC2S",
+  "s2c_type": "Protol.PlayerThemeBattlePassToNextRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x4406",
+  "name": "PlayerThemeDailyReceive",
+  "c2s_type": "Protol.PlayerThemeDailyReceiveC2S",
+  "s2c_type": "Protol.PlayerThemeDailyReceiveS2C"
+ },
+ {
+  "msg_id": "0x4501",
+  "name": "PlatformPrivilegeInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.PlatformPrivilegeInfoS2C"
+ },
+ {
+  "msg_id": "0x4502",
+  "name": "PlatformClickFinish",
+  "c2s_type": "Protol.PlatformClickFinishC2S",
+  "s2c_type": "Protol.PlatformClickFinishS2C"
+ },
+ {
+  "msg_id": "0x4503",
+  "name": "PlatformIdIpInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.PlatformIdIpInfoS2C"
+ },
+ {
+  "msg_id": "0x4504",
+  "name": "PlatformPrivilegeInfoSet",
+  "c2s_type": "Protol.PlatformPrivilegeInfoSetC2S",
+  "s2c_type": "Protol.PlatformPrivilegeInfoSetS2C"
+ },
+ {
+  "msg_id": "0x4601",
+  "name": "PlayerVideoInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.PlayerVideoInfoS2C"
+ },
+ {
+  "msg_id": "0x4602",
+  "name": "PlayerVideoStart",
+  "c2s_type": "Protol.PlayerVideoStartC2S",
+  "s2c_type": "Protol.PlayerVideoStartS2C"
+ },
+ {
+  "msg_id": "0x4701",
+  "name": "ServerBossInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ServerBossInfoS2C"
+ },
+ {
+  "msg_id": "0x4702",
+  "name": "ServerBossCommonRewardReceive",
+  "c2s_type": "Protol.ServerBossCommonRewardReceiveC2S",
+  "s2c_type": "Protol.ServerBossCommonRewardReceiveS2C"
+ },
+ {
+  "msg_id": "0x4703",
+  "name": "ServerBossBuyChallengeNum",
+  "c2s_type": "Protol.ServerBossBuyChallengeNumC2S",
+  "s2c_type": "Protol.ServerBossBuyChallengeNumS2C"
+ },
+ {
+  "msg_id": "0x4704",
+  "name": "ServerBossCommonInfo",
+  "c2s_type": "Protol.ServerBossCommonInfoC2S",
+  "s2c_type": "Protol.ServerBossCommonInfoS2C"
+ },
+ {
+  "msg_id": "0x4801",
+  "name": "TurnCardInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.TurnCardInfoS2C"
+ },
+ {
+  "msg_id": "0x4802",
+  "name": "TurnCardUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.TurnCardUpdateS2C"
+ },
+ {
+  "msg_id": "0x4803",
+  "name": "TurnCardClosed",
+  "c2s_type": null,
+  "s2c_type": "Protol.TurnCardClosedS2C"
+ },
+ {
+  "msg_id": "0x4804",
+  "name": "TurnCardStarReward",
+  "c2s_type": "Protol.TurnCardStarRewardC2S",
+  "s2c_type": "Protol.TurnCardStarRewardS2C"
+ },
+ {
+  "msg_id": "0x4805",
+  "name": "TurnCardPVEStart",
+  "c2s_type": "Protol.TurnCardPVEStartC2S",
+  "s2c_type": "Protol.TurnCardPVEStartS2C"
+ },
+ {
+  "msg_id": "0x4806",
+  "name": "TurnCardPVEClick",
+  "c2s_type": "Protol.TurnCardPVEClickC2S",
+  "s2c_type": "Protol.TurnCardPVEClickS2C"
+ },
+ {
+  "msg_id": "0x4807",
+  "name": "TurnCardPVETimeout",
+  "c2s_type": null,
+  "s2c_type": "Protol.TurnCardPVETimeoutS2C"
+ },
+ {
+  "msg_id": "0x4808",
+  "name": "TurnCardPVPReady",
+  "c2s_type": "Protol.TurnCardPVPReadyC2S",
+  "s2c_type": "Protol.TurnCardPVPReadyS2C"
+ },
+ {
+  "msg_id": "0x4809",
+  "name": "TurnCardPVPReadyCancel",
+  "c2s_type": "Protol.TurnCardPVPReadyCancelC2S",
+  "s2c_type": "Protol.TurnCardPVPReadyCancelS2C"
+ },
+ {
+  "msg_id": "0x480A",
+  "name": "TurnCardPVPStart",
+  "c2s_type": null,
+  "s2c_type": "Protol.TurnCardPVPStartS2C"
+ },
+ {
+  "msg_id": "0x480B",
+  "name": "TurnCardPVPClick",
+  "c2s_type": "Protol.TurnCardPVPClickC2S",
+  "s2c_type": "Protol.TurnCardPVPClickS2C"
+ },
+ {
+  "msg_id": "0x480C",
+  "name": "TurnCardPVPUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.TurnCardPVPUpdateS2C"
+ },
+ {
+  "msg_id": "0x480D",
+  "name": "TurnCardPVPResult",
+  "c2s_type": null,
+  "s2c_type": "Protol.TurnCardPVPResultS2C"
+ },
+ {
+  "msg_id": "0x480E",
+  "name": "TurnCardQuit",
+  "c2s_type": "Protol.TurnCardQuitC2S",
+  "s2c_type": "Protol.TurnCardQuitS2C"
+ },
+ {
+  "msg_id": "0x480F",
+  "name": "TurnCardRecord",
+  "c2s_type": "Protol.TurnCardRecordC2S",
+  "s2c_type": "Protol.TurnCardRecordS2C"
+ },
+ {
+  "msg_id": "0x4810",
+  "name": "TurnCardPVPRecord",
+  "c2s_type": "Protol.TurnCardPVPRecordC2S",
+  "s2c_type": "Protol.TurnCardPVPRecordS2C"
+ },
+ {
+  "msg_id": "0x4901",
+  "name": "MatchGuessInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.MatchGuessInfoS2C"
+ },
+ {
+  "msg_id": "0x4902",
+  "name": "MatchGuessStake",
+  "c2s_type": "Protol.MatchGuessStakeC2S",
+  "s2c_type": "Protol.MatchGuessStakeS2C"
+ },
+ {
+  "msg_id": "0x4903",
+  "name": "MatchGuessReceive",
+  "c2s_type": "Protol.MatchGuessReceiveC2S",
+  "s2c_type": "Protol.MatchGuessReceiveS2C"
+ },
+ {
+  "msg_id": "0x4904",
+  "name": "MatchGuessPlayback",
+  "c2s_type": "Protol.MatchGuessPlaybackC2S",
+  "s2c_type": "Protol.MatchGuessPlaybackS2C"
+ },
+ {
+  "msg_id": "0x4905",
+  "name": "MatchGuessCommonInfo",
+  "c2s_type": "Protol.MatchGuessCommonInfoC2S",
+  "s2c_type": "Protol.MatchGuessCommonInfoS2C"
+ },
+ {
+  "msg_id": "0x4A01",
+  "name": "PeakInfo",
+  "c2s_type": "Protol.PeakInfoC2S",
+  "s2c_type": "Protol.PeakInfoS2C"
+ },
+ {
+  "msg_id": "0x4A02",
+  "name": "PeakSetDefendFormation",
+  "c2s_type": "Protol.PeakSetDefendFormationC2S",
+  "s2c_type": "Protol.PeakSetDefendFormationS2C"
+ },
+ {
+  "msg_id": "0x4A03",
+  "name": "PeakSetAttackFormation",
+  "c2s_type": "Protol.PeakSetAttackFormationC2S",
+  "s2c_type": "Protol.PeakSetAttackFormationS2C"
+ },
+ {
+  "msg_id": "0x4A04",
+  "name": "PeakResetChallengeList",
+  "c2s_type": "Protol.PeakResetChallengeListC2S",
+  "s2c_type": "Protol.PeakResetChallengeListS2C"
+ },
+ {
+  "msg_id": "0x4A05",
+  "name": "PeakBuyChallengeTimes",
+  "c2s_type": "Protol.PeakBuyChallengeTimesC2S",
+  "s2c_type": "Protol.PeakBuyChallengeTimesS2C"
+ },
+ {
+  "msg_id": "0x4A06",
+  "name": "PeakRecordLook",
+  "c2s_type": "Protol.PeakRecordLookC2S",
+  "s2c_type": "Protol.PeakRecordLookS2C"
+ },
+ {
+  "msg_id": "0x4A07",
+  "name": "PeakGetWeekReward",
+  "c2s_type": "Protol.PeakGetWeekRewardC2S",
+  "s2c_type": "Protol.PeakGetWeekRewardS2C"
+ },
+ {
+  "msg_id": "0x4A08",
+  "name": "PeakGetLadderReward",
+  "c2s_type": "Protol.PeakGetLadderRewardC2S",
+  "s2c_type": "Protol.PeakGetLadderRewardS2C"
+ },
+ {
+  "msg_id": "0x4B01",
+  "name": "InfinitePassInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.InfinitePassInfoS2C"
+ },
+ {
+  "msg_id": "0x4B02",
+  "name": "InfinitePassTakeReward",
+  "c2s_type": "Protol.InfinitePassTakeRewardC2S",
+  "s2c_type": "Protol.InfinitePassTakeRewardS2C"
+ },
+ {
+  "msg_id": "0x4B03",
+  "name": "InfinitePassGiveUp",
+  "c2s_type": "Protol.InfinitePassGiveUpC2S",
+  "s2c_type": "Protol.InfinitePassGiveUpS2C"
+ },
+ {
+  "msg_id": "0x4B04",
+  "name": "InfinitePassFriendRank",
+  "c2s_type": "Protol.InfinitePassFriendRankC2S",
+  "s2c_type": "Protol.InfinitePassFriendRankS2C"
+ },
+ {
+  "msg_id": "0x4B05",
+  "name": "InfinitePassLineupSave",
+  "c2s_type": "Protol.InfinitePassLineupSaveC2S",
+  "s2c_type": "Protol.InfinitePassLineupSaveS2C"
+ },
+ {
+  "msg_id": "0x4C01",
+  "name": "ServeGameInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ServeGameInfoS2C"
+ },
+ {
+  "msg_id": "0x4C02",
+  "name": "ServeGameCurrUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.ServeGameCurrUpdateS2C"
+ },
+ {
+  "msg_id": "0x4C03",
+  "name": "ServeGameStart",
+  "c2s_type": "Protol.ServeGameStartC2S",
+  "s2c_type": "Protol.ServeGameStartS2C"
+ },
+ {
+  "msg_id": "0x4C04",
+  "name": "ServeGameServer",
+  "c2s_type": "Protol.ServeGameServerC2S",
+  "s2c_type": "Protol.ServeGameServerS2C"
+ },
+ {
+  "msg_id": "0x4C05",
+  "name": "ServeGameUseBuff",
+  "c2s_type": "Protol.ServeGameUseBuffC2S",
+  "s2c_type": "Protol.ServeGameUseBuffS2C"
+ },
+ {
+  "msg_id": "0x4C06",
+  "name": "ServeGameFinish",
+  "c2s_type": "Protol.ServeGameFinishC2S",
+  "s2c_type": "Protol.ServeGameFinishS2C"
+ },
+ {
+  "msg_id": "0x4C07",
+  "name": "ServeGameShopBuy",
+  "c2s_type": "Protol.ServeGameShopBuyC2S",
+  "s2c_type": "Protol.ServeGameShopBuyS2C"
+ },
+ {
+  "msg_id": "0x4C08",
+  "name": "ServeGameBegin",
+  "c2s_type": "Protol.ServeGameBeginC2S",
+  "s2c_type": "Protol.ServeGameBeginS2C"
+ },
+ {
+  "msg_id": "0x4C09",
+  "name": "ServeGameShopRefresh",
+  "c2s_type": "Protol.ServeGameShopRefreshC2S",
+  "s2c_type": "Protol.ServeGameShopRefreshS2C"
+ },
+ {
+  "msg_id": "0x4D01",
+  "name": "NewYearActivityInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.NewYearActivityInfoS2C"
+ },
+ {
+  "msg_id": "0x4D02",
+  "name": "NewYearActivityCapsulePush",
+  "c2s_type": "Protol.NewYearActivityCapsulePushC2S",
+  "s2c_type": "Protol.NewYearActivityCapsulePushS2C"
+ },
+ {
+  "msg_id": "0x4D03",
+  "name": "NewYearActivityCapsuleGetReward",
+  "c2s_type": "Protol.NewYearActivityCapsuleGetRewardC2S",
+  "s2c_type": "Protol.NewYearActivityCapsuleGetRewardS2C"
+ },
+ {
+  "msg_id": "0x4D04",
+  "name": "NewYearActivityGetFukubukuroReward",
+  "c2s_type": "Protol.NewYearActivityGetFukubukuroRewardC2S",
+  "s2c_type": "Protol.NewYearActivityGetFukubukuroRewardS2C"
+ },
+ {
+  "msg_id": "0x4D05",
+  "name": "NewYearActivityCacheUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.NewYearActivityCacheUpdateS2C"
+ },
+ {
+  "msg_id": "0x4D06",
+  "name": "NewYearActivityDoubleCount",
+  "c2s_type": null,
+  "s2c_type": "Protol.NewYearActivityDoubleCountS2C"
+ },
+ {
+  "msg_id": "0x4D07",
+  "name": "NewYearActivitySignIn",
+  "c2s_type": "Protol.NewYearActivitySignInC2S",
+  "s2c_type": "Protol.NewYearActivitySignInS2C"
+ },
+ {
+  "msg_id": "0x4E01",
+  "name": "SPThemeInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.SPThemeInfoS2C"
+ },
+ {
+  "msg_id": "0x4E02",
+  "name": "SPThemeUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.SPThemeUpdateS2C"
+ },
+ {
+  "msg_id": "0x4E03",
+  "name": "SPThemeSignReward",
+  "c2s_type": "Protol.SPThemeSignRewardC2S",
+  "s2c_type": "Protol.SPThemeSignRewardS2C"
+ },
+ {
+  "msg_id": "0x4E04",
+  "name": "SPThemeStageStarReward",
+  "c2s_type": "Protol.SPThemeStageStarRewardC2S",
+  "s2c_type": "Protol.SPThemeStageStarRewardS2C"
+ },
+ {
+  "msg_id": "0x4E05",
+  "name": "SPThemeRankScore",
+  "c2s_type": "Protol.SPThemeRankScoreC2S",
+  "s2c_type": "Protol.SPThemeRankScoreS2C"
+ },
+ {
+  "msg_id": "0x4E06",
+  "name": "SPThemeBattlePassTakeRewardLevel",
+  "c2s_type": "Protol.SPThemeBattlePassTakeRewardLevelC2S",
+  "s2c_type": "Protol.SPThemeBattlePassTakeRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x4E07",
+  "name": "SPThemeBattlePassToNextRewardLevel",
+  "c2s_type": "Protol.SPThemeBattlePassToNextRewardLevelC2S",
+  "s2c_type": "Protol.SPThemeBattlePassToNextRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x4F01",
+  "name": "AnniversaryInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.AnniversaryInfoS2C"
+ },
+ {
+  "msg_id": "0x4F02",
+  "name": "AnniversarySign",
+  "c2s_type": "Protol.AnniversarySignC2S",
+  "s2c_type": "Protol.AnniversarySignS2C"
+ },
+ {
+  "msg_id": "0x4F03",
+  "name": "AnniversarySubmitCakeMaterial",
+  "c2s_type": "Protol.AnniversarySubmitCakeMaterialC2S",
+  "s2c_type": "Protol.AnniversarySubmitCakeMaterialS2C"
+ },
+ {
+  "msg_id": "0x4F04",
+  "name": "AnniversaryTakePhotoFinish",
+  "c2s_type": "Protol.AnniversaryTakePhotoFinishC2S",
+  "s2c_type": "Protol.AnniversaryTakePhotoFinishS2C"
+ },
+ {
+  "msg_id": "0x4F05",
+  "name": "AnniversaryPhotoReward",
+  "c2s_type": "Protol.AnniversaryPhotoRewardC2S",
+  "s2c_type": "Protol.AnniversaryPhotoRewardS2C"
+ },
+ {
+  "msg_id": "0x4F06",
+  "name": "AnniversaryCakeProgressReward",
+  "c2s_type": "Protol.AnniversaryCakeProgressRewardC2S",
+  "s2c_type": "Protol.AnniversaryCakeProgressRewardS2C"
+ },
+ {
+  "msg_id": "0x5001",
+  "name": "RunningGameInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.RunningGameInfoS2C"
+ },
+ {
+  "msg_id": "0x5002",
+  "name": "RunningGameMatch",
+  "c2s_type": "Protol.RunningGameMatchC2S",
+  "s2c_type": "Protol.RunningGameMatchS2C"
+ },
+ {
+  "msg_id": "0x5003",
+  "name": "RunningGameCancel",
+  "c2s_type": "Protol.RunningGameCancelC2S",
+  "s2c_type": "Protol.RunningGameCancelS2C"
+ },
+ {
+  "msg_id": "0x5004",
+  "name": "RunningGameMatchSuccess",
+  "c2s_type": null,
+  "s2c_type": "Protol.RunningGameMatchSuccessS2C"
+ },
+ {
+  "msg_id": "0x5005",
+  "name": "RunningGameExit",
+  "c2s_type": "Protol.RunningGameExitC2S",
+  "s2c_type": "Protol.RunningGameExitS2C"
+ },
+ {
+  "msg_id": "0x5006",
+  "name": "RunningGameReport",
+  "c2s_type": "Protol.RunningGameReportC2S",
+  "s2c_type": "Protol.RunningGameReportS2C"
+ },
+ {
+  "msg_id": "0x5007",
+  "name": "RunningGameGetProp",
+  "c2s_type": "Protol.RunningGameGetPropC2S",
+  "s2c_type": "Protol.RunningGameGetPropS2C"
+ },
+ {
+  "msg_id": "0x5008",
+  "name": "RunningGameUseProp",
+  "c2s_type": "Protol.RunningGameUsePropC2S",
+  "s2c_type": "Protol.RunningGameUsePropS2C"
+ },
+ {
+  "msg_id": "0x5009",
+  "name": "RunningGameGetBuff",
+  "c2s_type": "Protol.RunningGameGetBuffC2S",
+  "s2c_type": "Protol.RunningGameGetBuffS2C"
+ },
+ {
+  "msg_id": "0x500A",
+  "name": "RunningGamePropHit",
+  "c2s_type": null,
+  "s2c_type": "Protol.RunningGamePropHitS2C"
+ },
+ {
+  "msg_id": "0x500B",
+  "name": "RunningGameResult",
+  "c2s_type": null,
+  "s2c_type": "Protol.RunningGameResultS2C"
+ },
+ {
+  "msg_id": "0x500C",
+  "name": "RunningGameMemberSync",
+  "c2s_type": null,
+  "s2c_type": "Protol.RunningGameMemberSyncS2C"
+ },
+ {
+  "msg_id": "0x5101",
+  "name": "TeamFreedomInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.TeamFreedomInfoS2C"
+ },
+ {
+  "msg_id": "0x5102",
+  "name": "TeamFreedomFormationSave",
+  "c2s_type": "Protol.TeamFreedomFormationSaveC2S",
+  "s2c_type": "Protol.TeamFreedomFormationSaveS2C"
+ },
+ {
+  "msg_id": "0x5103",
+  "name": "TeamFreedomUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.TeamFreedomUpdateS2C"
+ },
+ {
+  "msg_id": "0x5104",
+  "name": "TeamFreedomName",
+  "c2s_type": "Protol.TeamFreedomNameC2S",
+  "s2c_type": "Protol.TeamFreedomNameS2C"
+ },
+ {
+  "msg_id": "0x5105",
+  "name": "TeamFreedomSeeOther",
+  "c2s_type": "Protol.TeamFreedomSeeOtherC2S",
+  "s2c_type": "Protol.TeamFreedomSeeOtherS2C"
+ },
+ {
+  "msg_id": "0x5201",
+  "name": "FightFreedomInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.FightFreedomInfoS2C"
+ },
+ {
+  "msg_id": "0x5202",
+  "name": "FightFreedomUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.FightFreedomUpdateS2C"
+ },
+ {
+  "msg_id": "0x5203",
+  "name": "FightFreedomGift",
+  "c2s_type": "Protol.FightFreedomGiftC2S",
+  "s2c_type": "Protol.FightFreedomGiftS2C"
+ },
+ {
+  "msg_id": "0x5204",
+  "name": "FightFreedomRecord",
+  "c2s_type": "Protol.FightFreedomRecordC2S",
+  "s2c_type": "Protol.FightFreedomRecordS2C"
+ },
+ {
+  "msg_id": "0x5205",
+  "name": "FightFreedomRecordPlayback",
+  "c2s_type": "Protol.FightFreedomRecordPlaybackC2S",
+  "s2c_type": "Protol.FightFreedomRecordPlaybackS2C"
+ },
+ {
+  "msg_id": "0x5206",
+  "name": "FightFreedomChallengeBuy",
+  "c2s_type": "Protol.FightFreedomChallengeBuyC2S",
+  "s2c_type": "Protol.FightFreedomChallengeBuyS2C"
+ },
+ {
+  "msg_id": "0x5207",
+  "name": "FightFreedomPlayerLineup",
+  "c2s_type": "Protol.FightFreedomPlayerLineupC2S",
+  "s2c_type": "Protol.FightFreedomPlayerLineupS2C"
+ },
+ {
+  "msg_id": "0x5208",
+  "name": "FightFreedomPlayerLineupSave",
+  "c2s_type": "Protol.FightFreedomPlayerLineupSaveC2S",
+  "s2c_type": "Protol.FightFreedomPlayerLineupSaveS2C"
+ },
+ {
+  "msg_id": "0x5209",
+  "name": "FightFreedomReward",
+  "c2s_type": "Protol.FightFreedomRewardC2S",
+  "s2c_type": "Protol.FightFreedomRewardS2C"
+ },
+ {
+  "msg_id": "0x520A",
+  "name": "FightFreedomMatch",
+  "c2s_type": "Protol.FightFreedomMatchC2S",
+  "s2c_type": "Protol.FightFreedomMatchS2C"
+ },
+ {
+  "msg_id": "0x5301",
+  "name": "GoldCardBattlePassInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.GoldCardBattlePassInfoS2C"
+ },
+ {
+  "msg_id": "0x5302",
+  "name": "GoldCardBattlePassUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.GoldCardBattlePassUpdateS2C"
+ },
+ {
+  "msg_id": "0x5303",
+  "name": "GoldCardBattlePassTakeRewardLevel",
+  "c2s_type": "Protol.GoldCardBattlePassTakeRewardLevelC2S",
+  "s2c_type": "Protol.GoldCardBattlePassTakeRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x5304",
+  "name": "GoldCardBattlePassBuyRewardLevel",
+  "c2s_type": "Protol.GoldCardBattlePassBuyRewardLevelC2S",
+  "s2c_type": "Protol.GoldCardBattlePassBuyRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x5401",
+  "name": "CarouselInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.CarouselInfoS2C"
+ },
+ {
+  "msg_id": "0x5501",
+  "name": "CoachInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.CoachInfoS2C"
+ },
+ {
+  "msg_id": "0x5502",
+  "name": "CoachUpdate",
+  "c2s_type": null,
+  "s2c_type": "Protol.CoachUpdateS2C"
+ },
+ {
+  "msg_id": "0x5503",
+  "name": "CoachUpLevel",
+  "c2s_type": "Protol.CoachUpLevelC2S",
+  "s2c_type": "Protol.CoachUpLevelS2C"
+ },
+ {
+  "msg_id": "0x5504",
+  "name": "CoachLock",
+  "c2s_type": "Protol.CoachLockC2S",
+  "s2c_type": "Protol.CoachLockS2C"
+ },
+ {
+  "msg_id": "0x5505",
+  "name": "CoachDecomp",
+  "c2s_type": "Protol.CoachDecompC2S",
+  "s2c_type": "Protol.CoachDecompS2C"
+ },
+ {
+  "msg_id": "0x5506",
+  "name": "CoachSetting",
+  "c2s_type": "Protol.CoachSettingC2S",
+  "s2c_type": "Protol.CoachSettingS2C"
+ },
+ {
+  "msg_id": "0x5601",
+  "name": "HighSchoolTrialsInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.HighSchoolTrialsInfoS2C"
+ },
+ {
+  "msg_id": "0x5602",
+  "name": "HighSchoolTrialsDailyRewards",
+  "c2s_type": "Protol.HighSchoolTrialsDailyRewardsC2S",
+  "s2c_type": "Protol.HighSchoolTrialsDailyRewardsS2C"
+ },
+ {
+  "msg_id": "0x5603",
+  "name": "HighSchoolTrialsDailyRewardsBuy",
+  "c2s_type": "Protol.HighSchoolTrialsDailyRewardsBuyC2S",
+  "s2c_type": "Protol.HighSchoolTrialsDailyRewardsBuyS2C"
+ },
+ {
+  "msg_id": "0x5604",
+  "name": "HighSchoolTrialsTotalRewards",
+  "c2s_type": "Protol.HighSchoolTrialsTotalRewardsC2S",
+  "s2c_type": "Protol.HighSchoolTrialsTotalRewardsS2C"
+ },
+ {
+  "msg_id": "0x5605",
+  "name": "HighSchoolTrialsLineupSave",
+  "c2s_type": "Protol.HighSchoolTrialsLineupSaveC2S",
+  "s2c_type": "Protol.HighSchoolTrialsLineupSaveS2C"
+ },
+ {
+  "msg_id": "0x5606",
+  "name": "HighSchoolTrialsPlayerLineup",
+  "c2s_type": "Protol.HighSchoolTrialsPlayerLineupC2S",
+  "s2c_type": "Protol.HighSchoolTrialsPlayerLineupS2C"
+ },
+ {
+  "msg_id": "0x5701",
+  "name": "BarbecueInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.BarbecueInfoS2C"
+ },
+ {
+  "msg_id": "0x5702",
+  "name": "BarbecueBeginStage",
+  "c2s_type": "Protol.BarbecueBeginStageC2S",
+  "s2c_type": "Protol.BarbecueBeginStageS2C"
+ },
+ {
+  "msg_id": "0x5703",
+  "name": "BarbecueEndStage",
+  "c2s_type": "Protol.BarbecueEndStageC2S",
+  "s2c_type": "Protol.BarbecueEndStageS2C"
+ },
+ {
+  "msg_id": "0x5704",
+  "name": "BarbecueRandStage",
+  "c2s_type": "Protol.BarbecueRandStageC2S",
+  "s2c_type": "Protol.BarbecueRandStageS2C"
+ },
+ {
+  "msg_id": "0x5705",
+  "name": "BarbecueGuide",
+  "c2s_type": "Protol.BarbecueGuideC2S",
+  "s2c_type": "Protol.BarbecueGuideS2C"
+ },
+ {
+  "msg_id": "0x5706",
+  "name": "BarbecueQuitStage",
+  "c2s_type": "Protol.BarbecueQuitStageC2S",
+  "s2c_type": "Protol.BarbecueQuitStageS2C"
+ },
+ {
+  "msg_id": "0x5801",
+  "name": "ALuckyInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.ALuckyInfoS2C"
+ },
+ {
+  "msg_id": "0x5802",
+  "name": "ALuckyReward",
+  "c2s_type": "Protol.ALuckyRewardC2S",
+  "s2c_type": "Protol.ALuckyRewardS2C"
+ },
+ {
+  "msg_id": "0x5803",
+  "name": "ALuckyRecords",
+  "c2s_type": "Protol.ALuckyRecordsC2S",
+  "s2c_type": "Protol.ALuckyRecordsS2C"
+ },
+ {
+  "msg_id": "0x5A01",
+  "name": "ReservesMatchStart",
+  "c2s_type": "Protol.ReservesMatchStartC2S",
+  "s2c_type": "Protol.ReservesMatchStartS2C"
+ },
+ {
+  "msg_id": "0x5A02",
+  "name": "ReservesMatchQuit",
+  "c2s_type": "Protol.ReservesMatchQuitC2S",
+  "s2c_type": "Protol.ReservesMatchQuitS2C"
+ },
+ {
+  "msg_id": "0x5A03",
+  "name": "ReservesMatchEnter",
+  "c2s_type": null,
+  "s2c_type": "Protol.ReservesMatchEnterS2C"
+ },
+ {
+  "msg_id": "0x5A04",
+  "name": "ReservesPackOrStoreSort",
+  "c2s_type": "Protol.ReservesPackOrStoreSortC2S",
+  "s2c_type": "Protol.ReservesPackOrStoreSortS2C"
+ },
+ {
+  "msg_id": "0x5A05",
+  "name": "ReservesChangeRoleOrSkill",
+  "c2s_type": "Protol.ReservesChangeRoleOrSkillC2S",
+  "s2c_type": "Protol.ReservesChangeRoleOrSkillS2C"
+ },
+ {
+  "msg_id": "0x5A06",
+  "name": "ReservesPackStoreSwap",
+  "c2s_type": "Protol.ReservesPackStoreSwapC2S",
+  "s2c_type": "Protol.ReservesPackStoreSwapS2C"
+ },
+ {
+  "msg_id": "0x5A07",
+  "name": "ReservesEquipId",
+  "c2s_type": "Protol.ReservesEquipIdC2S",
+  "s2c_type": "Protol.ReservesEquipIdS2C"
+ },
+ {
+  "msg_id": "0x5A08",
+  "name": "ReservesItemSale",
+  "c2s_type": "Protol.ReservesItemSaleC2S",
+  "s2c_type": "Protol.ReservesItemSaleS2C"
+ },
+ {
+  "msg_id": "0x5A09",
+  "name": "ReservesInfoPackStore",
+  "c2s_type": null,
+  "s2c_type": "Protol.ReservesInfoPackStoreS2C"
+ },
+ {
+  "msg_id": "0x5A0A",
+  "name": "ReservesPackStoreChange",
+  "c2s_type": null,
+  "s2c_type": "Protol.ReservesPackStoreChangeS2C"
+ },
+ {
+  "msg_id": "0x5A0B",
+  "name": "ReservesFightResult",
+  "c2s_type": "Protol.ReservesFightResultC2S",
+  "s2c_type": "Protol.ReservesFightResultS2C"
+ },
+ {
+  "msg_id": "0x5A0C",
+  "name": "ReservesInfoChange",
+  "c2s_type": null,
+  "s2c_type": "Protol.ReservesInfoChangeS2C"
+ },
+ {
+  "msg_id": "0x5A0D",
+  "name": "ReservesRecord",
+  "c2s_type": "Protol.ReservesRecordC2S",
+  "s2c_type": "Protol.ReservesRecordS2C"
+ },
+ {
+  "msg_id": "0x5A0E",
+  "name": "ReservesFightQuit",
+  "c2s_type": "Protol.ReservesFightQuitC2S",
+  "s2c_type": "Protol.ReservesFightQuitS2C"
+ },
+ {
+  "msg_id": "0x5B01",
+  "name": "PayDrainageInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.PayDrainageInfoS2C"
+ },
+ {
+  "msg_id": "0x5B02",
+  "name": "PayDrainageRed",
+  "c2s_type": null,
+  "s2c_type": "Protol.PayDrainageRedS2C"
+ },
+ {
+  "msg_id": "0x5B03",
+  "name": "PayDrainageClick",
+  "c2s_type": "Protol.PayDrainageClickC2S",
+  "s2c_type": "Protol.PayDrainageClickS2C"
+ },
+ {
+  "msg_id": "0x5C01",
+  "name": "TwoYearBattlePassInfo",
+  "c2s_type": null,
+  "s2c_type": "Protol.TwoYearBattlePassInfoS2C"
+ },
+ {
+  "msg_id": "0x5C02",
+  "name": "TwoYearBattlePassTakeRewardLevel",
+  "c2s_type": "Protol.TwoYearBattlePassTakeRewardLevelC2S",
+  "s2c_type": "Protol.TwoYearBattlePassTakeRewardLevelS2C"
+ },
+ {
+  "msg_id": "0x5C03",
+  "name": "TwoYearBattlePassToNextRewardLevel",
+  "c2s_type": "Protol.TwoYearBattlePassToNextRewardLevelC2S",
+  "s2c_type": "Protol.TwoYearBattlePassToNextRewardLevelS2C"
+ },
+ {
+  "msg_id": "0xC901",
+  "name": "ClientGameServerState",
+  "c2s_type": null,
+  "s2c_type": "Protol.ClientGameServerStateS2C"
+ }
+]

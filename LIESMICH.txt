@@ -1,0 +1,55 @@
+Haikyuu Fly High - Private Server Launcher
+==========================================
+
+Voraussetzungen
+---------------
+- Windows 10/11
+- LDPlayer 9 oder LDPlayer 14 (https://www.ldplayer.net) mit installiertem
+  Haikyuu Fly High (com.garena.game.haikyu)
+- Root im LDPlayer: Einstellungen -> Sonstiges -> Root-Berechtigung: An
+  (der Launcher schaltet es selbst ein, wenn er den Emulator startet)
+
+Start
+-----
+1. Den Ordner "HFH-FlyHigh" irgendwohin entpacken (z. B. Desktop oder Dokumente,
+   NICHT nach "C:\Programme").
+2. HFH-Launcher.exe doppelklicken. Falls Windows warnt ("Der Computer wurde
+   durch Windows geschützt"): "Weitere Informationen" -> "Trotzdem ausführen".
+   Die Windows-Firewall-Frage mit "Zulassen" beantworten.
+3. Der Launcher startet den Server, den Proxy, LDPlayer und das Spiel.
+   Im Spiel ganz normal mit dem Garena-Konto anmelden.
+
+Bedienung
+---------
+- "Private Server"     Spiel verbindet sich mit dem eigenen Server (Standard).
+- "Garena (offiziell)" Spiel verbindet sich wieder mit Garena (falls deren
+                       Server mal online sind).
+  Nach dem Umschalten wird das Spiel automatisch neu gestartet.
+- "Spiel neu starten"  beendet das Spiel im Emulator und startet es neu.
+- "Emulator"           Auswahl der LDPlayer-Instanz, falls es mehrere gibt;
+                       "Verbinden" richtet alles neu ein.
+- "Server"             leer = eigener Server auf diesem PC (Standard).
+                       Adresse eines gemeinsamen Online-Servers eintragen
+                       (z. B. "hfh.example.org" oder "1.2.3.4:10104") und
+                       "Übernehmen" -> du spielst mit den anderen auf diesem
+                       Server (Arena gegen ihre Teams). Das Spiel startet neu.
+                       Admin Mode gibt es dort nicht.
+- Fenster schließen    beendet Server und Proxy.
+
+Admin Mode (nur in der Admin-Version "HFH-FlyHigh-Admin")
+-----------------------------------------------------------
+1. Im Spiel: Einstellungen -> "Gift Code" -> Admin-Passwort eingeben -> "Redeem".
+2. Im Launcher erscheint der Knopf "Admin Mode". Dort kann man Level, Gold,
+   Diamanten, alle Charaktere, Max-Karten, Gegenstände und Potentials einstellen.
+3. "Übernehmen & Spiel neu starten" -> im Spiel auf START tippen, fertig.
+
+Ohne Server-Adresse hat jeder Spieler seinen eigenen Server auf dem eigenen PC
+(auf einem Online-Server liegen die Spielstände dort); die Spielstände
+liegen im Ordner server\accounts.
+
+Probleme
+--------
+- "kein Root": Root-Berechtigung in den LDPlayer-Einstellungen einschalten und
+  LDPlayer neu starten.
+- "nicht installiert": Haikyuu Fly High im LDPlayer installieren.
+- Das Log unten im Fenster zeigt, woran es hängt.

@@ -1,0 +1,350 @@
+"""
+Admin Mode: give yourself characters, currencies, items and potentials.
+
+Only active when server/admin.json exists ({"pw_sha256": "<sha256 of the password>"}),
+i.e. in the admin build of the launcher package, and never on a shared multiplayer server
+(server/multiplayer.json exists or HFH_MULTIPLAYER=1): there the gift code does nothing, queued
+changes are not applied and account flags such as infinite stamina are ignored. The player unlocks it in game:
+Settings -> gift code -> the admin password (0x2403 SettingGiftCodeC2S). The
+launcher then shows its "Admin Mode" window, which queues changes in
+accounts/admin_queue/<gid>.json; they are applied at the next login
+(Account.__init__ -> apply_pending) and reported in accounts/admin_done/<gid>.json.
+
+Potentials (PlayerSpecialty) can also be put on / taken off cards in game
+(0x1804 / 0x1805), for the baseline ones as well as the created ones.
+
+Queue entries (list, applied in order):
+  {"level": 60}
+  {"currency": {"100": 9999999, ...}}           conf id -> amount
+  {"all_cards": true}                           one card of every character not owned yet
+  {"max_cards": true}                           every card to the top star and level 80
+  {"items": 999}                                every bag item kind (as in the captured account) to this count
+  {"flags": {"infinite_stamina": true}}
+  {"specialties": [{"conf": 3051045, "level": 12, "main": 1023,
+                    "vices": [[2010, 2], [2023, 1], ...], "count": 1}]}
+"""
+import hashlib
+import json
+import logging
+import os
+import time
+from pathlib import Path
+
+import gameconfig
+import wire
+
+log = logging.getLogger("hfh")
+
+HERE = Path(__file__).parent
+CONFIG = HERE / "admin.json"
+MULTIPLAYER = HERE / "multiplayer.json"  # marks a shared server: Admin Mode is off there
+ACCOUNTS = HERE / "accounts"
+UNLOCKED = ACCOUNTS / "admin_unlocked.json"
+QUEUE = ACCOUNTS / "admin_queue"
+DONE = ACCOUNTS / "admin_done"
+
+MSG_GIFT_CODE = 0x2403
+MSG_SPECIALTY_ON = 0x1804
+MSG_SPECIALTY_OFF = 0x1805
+MAX_STAR = 6
+SPECIALTY_INST_BASE = 1 << 61  # far away from captured and starter instance ids
+
+
+def multiplayer() -> bool:
+    """Shared server for several players (server/multiplayer.json or HFH_MULTIPLAYER=1)."""
+    return os.environ.get("HFH_MULTIPLAYER", "") not in ("", "0") or MULTIPLAYER.exists()
+
+
+def enabled() -> bool:
+    return CONFIG.exists() and not multiplayer()
+
+
+def flag(acc, key: str) -> bool:
+    """An Admin Mode account switch, only honoured while Admin Mode is enabled."""
+    return enabled() and bool(acc.admin_flags.get(key))
+
+
+def _json(path: Path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
+def unlocked() -> dict:
+    return _json(UNLOCKED, {})
+
+
+def is_unlocked(gid: int) -> bool:
+    return enabled() and str(gid) in unlocked()
+
+
+def check_password(code: str) -> bool:
+    want = _json(CONFIG, {}).get("pw_sha256", "")
+    return bool(want) and hashlib.sha256(code.strip().encode("utf-8")).hexdigest() == want
+
+
+# --- applying queued changes ------------------------------------------------------
+
+def _specialty_rows():
+    if not gameconfig.AVAILABLE:
+        return {}
+    rows = json.loads((gameconfig.CFG / "specialty.json").read_text(encoding="utf-8"))
+    return {r["ID"]: r for r in rows}
+
+
+def make_specialty(inst: int, conf: int, level: int, main: int, vices) -> bytes:
+    f = [(1, 0, inst), (2, 0, conf)]
+    if level:
+        f.append((3, 0, level))
+    f.append((7, 2, wire.build([(1, 0, main)] + ([(2, 0, level)] if level else []))))
+    for attr, lev in vices:
+        f.append((8, 2, wire.build([(1, 0, int(attr))] + ([(2, 0, int(lev))] if lev else []))))
+    f.append((9, 0, int(time.time())))
+    return wire.build(f)
+
+
+def _apply(acc, action: dict) -> list[str]:
+    done = []
+    if "level" in action:
+        acc.level = max(1, min(int(action["level"]), gameconfig.MAX_PLAYER_LEVEL))
+        acc.exp = 0
+        done.append(f"Manager-Level {acc.level}")
+    for cid, amount in action.get("currency", {}).items():
+        acc.set_currency(int(cid), max(0, int(amount)))
+        done.append(f"Währung {cid} = {amount}")
+    if action.get("all_cards") and gameconfig.AVAILABLE:
+        owned = acc.owned_conf_ids()
+        new = [c for c in sorted(gameconfig.PLAYERS) if c not in owned]
+        for conf in new:
+            acc.add_card(conf)
+        done.append(f"{len(new)} Charaktere freigeschaltet")
+    if action.get("max_cards"):
+        cards = {**acc.b.cards, **{wire.get(wire.parse(c), 1): c for c in acc.cards}}
+        maxed = []
+        for inst, card in cards.items():
+            if inst in acc.removed_cards:
+                continue
+            f = wire.parse(card)
+            f = wire.set_varint(f, 6, MAX_STAR)
+            f = wire.set_varint(f, 4, gameconfig.level_cap(MAX_STAR))
+            maxed.append(wire.build(f))
+        acc.cards = maxed  # one pass instead of put_card per card (thousands of cards)
+        n = len(maxed)
+        done.append(f"{n} Karten auf {MAX_STAR} Sterne / Level {gameconfig.level_cap(MAX_STAR)}")
+    if "items" in action:
+        from accounts import CAPTURED, PSEUDO_ITEMS
+        count = max(0, int(action["items"]))
+        n = 0
+        # only item kinds a real inventory holds (the captured account's bag): the item table also
+        # lists memories, wallpapers etc. that are no bag items and break the client's inventory
+        for item_id in sorted(set(CAPTURED.items) | set(acc.b.items) | set(acc.items)):
+            if item_id in PSEUDO_ITEMS or acc.is_currency(item_id):
+                continue
+            acc.set_item(item_id, count)
+            n += 1
+        done.append(f"{n} Gegenstände auf {count}")
+    for key, value in action.get("flags", {}).items():
+        acc.admin_flags[key] = bool(value)
+        done.append(f"{key} = {bool(value)}")
+    if action.get("specialties"):
+        rows = _specialty_rows()
+        n = 0
+        for spec in action["specialties"]:
+            conf = int(spec["conf"])
+            if conf not in rows:
+                continue
+            for _ in range(max(1, min(int(spec.get("count", 1)), 50))):
+                inst = SPECIALTY_INST_BASE + acc.next_inst
+                acc.next_inst += 1
+                acc.put_specialty(make_specialty(inst, conf, int(spec.get("level", 0)),
+                                                 int(spec["main"]), spec.get("vices", [])))
+                n += 1
+        done.append(f"{n} Potentials erstellt")
+    return done
+
+
+def apply_pending(acc):
+    """Apply the launcher's queued Admin Mode changes for this account (called at login)."""
+    if not is_unlocked(acc.gid):
+        return
+    path = QUEUE / f"{acc.gid}.json"
+    actions = _json(path, None)
+    if actions is None:
+        return
+    report = []
+    for action in actions if isinstance(actions, list) else [actions]:
+        try:
+            report += _apply(acc, action)
+        except Exception as e:  # a bad entry must never block the login
+            log.error(f"  ADMIN change failed {action}: {e!r}")
+            report.append(f"Fehler: {e}")
+    path.unlink(missing_ok=True)
+    DONE.mkdir(parents=True, exist_ok=True)
+    (DONE / f"{acc.gid}.json").write_text(json.dumps({"time": time.time(), "done": report},
+                                                     ensure_ascii=False, indent=1), encoding="utf-8")
+    log.info(f"  ADMIN applied for {acc.gid}: {report}")
+
+
+# --- message handlers -------------------------------------------------------------
+
+async def handle_gift_code(client, pb_data: bytes):
+    """0x2403 SettingGiftCodeC2S{1=code}: the admin password unlocks Admin Mode for this gid."""
+    code = wire.get(wire.parse(pb_data), 1, b"")
+    code = code.decode("utf-8", errors="replace") if isinstance(code, bytes) else str(code)
+    gid = getattr(client, "gid", None)
+    if enabled() and gid and check_password(code):
+        state = unlocked()
+        state[str(gid)] = time.time()
+        ACCOUNTS.mkdir(exist_ok=True)
+        UNLOCKED.write_text(json.dumps(state, indent=1), encoding="utf-8")
+        log.info(f"  ADMIN MODE unlocked for {gid}")
+        await client.send_packet(MSG_GIFT_CODE, wire.build([]))
+        return
+    log.info(f"  Gift code {code!r} (no effect)")
+    await client.send_packet(MSG_GIFT_CODE, wire.build([]))
+
+
+def _position(rows, conf: int) -> int:
+    return rows.get(conf, {}).get("Position") or 0
+
+
+SLOTS = 6  # PlayerCard field 9: packed potential inst ids, index = specialty Position (0 = empty)
+
+
+def _slots(card: bytes) -> list[int]:
+    ids = _packed(wire.get(wire.parse(card), 9, b""))
+    return (ids + [0] * SLOTS)[:SLOTS]
+
+
+def _with_slots(card: bytes, slots: list[int]) -> bytes:
+    f = [x for x in wire.parse(card) if x[0] != 9]
+    f = sorted(f + [(9, 2, b"".join(wire.varint(i) for i in slots))], key=lambda x: x[0])
+    return wire.build(f)
+
+
+def _all_cards(acc) -> dict[int, bytes]:
+    cards = {**acc.b.cards, **{wire.get(wire.parse(c), 1): c for c in acc.cards}}
+    return {i: c for i, c in cards.items() if i not in acc.removed_cards}
+
+
+def _set_owner(acc, inst: int, card_inst: int) -> bytes | None:
+    """PlayerSpecialty field 6 = card it sits on (explicit 0 when free)."""
+    spec = acc.get_specialty(inst)
+    if spec is None:
+        return None
+    f = sorted([x for x in wire.parse(spec) if x[0] != 6] + [(6, 0, card_inst)], key=lambda x: x[0])
+    spec = wire.build(f)
+    acc.put_specialty(spec)
+    return spec
+
+
+async def _send_changes(client, cards: dict[int, bytes], specs: dict[int, bytes]):
+    from accounts import MSG_CARD_CHANGE, card_info
+    def msg(items, opt):
+        return b"".join(wire.build([(1, 2, s)]) for s in items) + (wire.build([(3, 0, opt)]) if opt else b"")
+
+    # the client merges UPDATEs, so a cleared owner (0) would not stick: freed potentials are
+    # sent as REMOVE + CREATE (replaced), equipped ones as UPDATE
+    freed = [s for s in specs.values() if not wire.get(wire.parse(s), 6, 0)]
+    placed = [s for s in specs.values() if wire.get(wire.parse(s), 6, 0)]
+    if freed:
+        await client.send_packet(0x1802, msg(freed, 2))
+        await client.send_packet(0x1802, msg(freed, 0))
+    if placed:
+        await client.send_packet(0x1802, msg(placed, 1))
+    if cards:  # PlayerCardChangeS2C opt UPDATE
+        await client.send_packet(MSG_CARD_CHANGE, b"".join(wire.build([(1, 2, card_info(c))]) for c in cards.values())
+                                 + wire.build([(2, 0, 1)]))
+
+
+def _card_of(fields) -> int:
+    """The card instance: the first varint field (observed: field 1)."""
+    return next((v for _, wt, v in fields if wt == 0), 0)
+
+
+async def handle_specialty_on(client, pb_data: bytes):
+    """0x1804 PlayerSpecialtyOnC2S{1=card inst, then dress entries}: put potentials on a card."""
+    acc = client.account
+    fields = wire.parse(pb_data)
+    log.info(f"  SPECIALTY on {fields}")
+    card_inst = _card_of(fields)
+    rows = _specialty_rows()
+    all_specs = acc.all_specialties()
+    wanted = []
+    for num, wt, v in fields:
+        if wt == 2:  # dress entry or packed ids: every known potential id inside counts
+            try:
+                inner = [x for _, t, x in wire.parse(v) if t == 0]
+            except Exception:
+                inner = []
+            wanted += [x for x in inner + _packed(v) if x in all_specs and x not in wanted]
+        elif wt == 0 and v in all_specs and v not in wanted:
+            wanted.append(v)
+    cards = _all_cards(acc)
+    if card_inst not in cards:
+        await client.send_packet(MSG_SPECIALTY_ON, wire.build([]))
+        return
+    changed_cards, changed_specs = {}, {}
+    for inst in wanted:
+        pos = _position(rows, wire.get(wire.parse(all_specs[inst]), 2))
+        for other_inst, other in cards.items():  # take it off any card it is on now
+            slots = _slots(changed_cards.get(other_inst, other))
+            if inst in slots and other_inst != card_inst:
+                slots = [0 if i == inst else i for i in slots]
+                changed_cards[other_inst] = _with_slots(other, slots)
+        slots = _slots(changed_cards.get(card_inst, cards[card_inst]))
+        if slots[pos] and slots[pos] != inst:
+            changed_specs[slots[pos]] = _set_owner(acc, slots[pos], 0)
+        slots[pos] = inst
+        changed_cards[card_inst] = _with_slots(cards[card_inst], slots)
+        changed_specs[inst] = _set_owner(acc, inst, card_inst)
+    for c in changed_cards.values():
+        acc.put_card(c)
+    acc.save()
+    await _send_changes(client, changed_cards, {k: v for k, v in changed_specs.items() if v})
+    await client.send_packet(MSG_SPECIALTY_ON, wire.build([]))
+
+
+async def handle_specialty_off(client, pb_data: bytes):
+    """0x1805 PlayerSpecialtyOffC2S{1=card inst, 2=positions (packed)}: take potentials off a card."""
+    acc = client.account
+    fields = wire.parse(pb_data)
+    log.info(f"  SPECIALTY off {fields}")
+    card_inst = _card_of(fields)
+    positions = set()
+    for num, wt, v in fields:
+        if wt == 2:
+            positions |= set(_packed(v))
+        elif v != card_inst:
+            positions.add(v)
+    card = _all_cards(acc).get(card_inst)
+    if card is None:
+        await client.send_packet(MSG_SPECIALTY_OFF, wire.build([]))
+        return
+    slots = _slots(card)
+    changed_specs = {}
+    for pos in range(SLOTS):
+        if slots[pos] and (not positions or pos in positions):
+            changed_specs[slots[pos]] = _set_owner(acc, slots[pos], 0)
+            slots[pos] = 0
+    card = _with_slots(card, slots)
+    acc.put_card(card)
+    acc.save()
+    await _send_changes(client, {card_inst: card}, {k: v for k, v in changed_specs.items() if v})
+    await client.send_packet(MSG_SPECIALTY_OFF, wire.build([]))
+
+
+def _packed(data: bytes) -> list[int]:
+    vals, pos = [], 0
+    while pos < len(data):
+        v, pos = wire.read_varint(data, pos)
+        vals.append(v)
+    return vals
+
+
+HANDLERS = {
+    MSG_GIFT_CODE: handle_gift_code,
+    MSG_SPECIALTY_ON: handle_specialty_on,
+    MSG_SPECIALTY_OFF: handle_specialty_off,
+}
