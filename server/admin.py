@@ -334,6 +334,13 @@ def command(gid, code: str) -> str:
         save_admins(st)
         return f"{cmd} {who} ({st['admins'].get(who, '')})"
 
+    if cmd in ("/rebind", "/unbind"):  # token binding on a shared server (bindings.py)
+        import bindings
+        if target == str(gid) and len(code.split()) == 1:
+            return f"{cmd}: name the player, e.g. {cmd} @Name"
+        ok = bindings.approve(target) if cmd == "/rebind" else bindings.release(target)
+        return f"{cmd} {target}: {'ok' if ok else 'nothing to do'}"
+
     if cmd in CURRENCY_CMDS and num is not None:
         action = {"currency": {str(CURRENCY_CMDS[cmd]): num}}
     elif cmd == "/level" and num is not None:

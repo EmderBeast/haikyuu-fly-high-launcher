@@ -34,7 +34,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("hfh-server")
 
-PORT = 10104
+PORT = int(os.environ.get("HFH_PORT", "10104"))  # HFH_PORT: a second test server next to the main one
+TIME_OFFSET = int(os.environ.get("HFH_TIME_OFFSET", "0"))  # test only: shift the clock the client sees
 HEADER_SIZE = 8
 FLAG_ENCRYPT = 0x01
 FLAG_COMPRESS = 0x02
@@ -308,6 +309,12 @@ async def handle_login(client: GameClient, pb_data: bytes):
             token = token.hex()
 
     log.info(f"  LOGIN gid={gid} token={token[:16]}...")
+    import bindings  # shared server: the account belongs to the Garena login that used it first
+    if not bindings.check(gid, token):
+        log.warning(f"  LOGIN gid={gid} refused: token differs from the bound one (approve with "
+                    f"/rebind or 'python bindings.py approve {gid}')")
+        await client.send_packet(0x0101, encode_protobuf({1: ("varint", 1038)}))  # LOGIN_AUTH_FAILED
+        return
     client.gid = gid
     client.logged_in = True
 
@@ -378,7 +385,7 @@ async def handle_heartbeat(client: GameClient, pb_data: bytes):
     # PVPPingS2C: 1=client_time (echo), 2=server_time
     response = encode_protobuf({
         1: ("varint", client_time),
-        2: ("varint", int(time.time() * 1000)),
+        2: ("varint", int((time.time() + TIME_OFFSET) * 1000)),
     })
     await client.send_packet(0x0301, response)
 

@@ -23,6 +23,7 @@ docs/multiplayer.md): W = WinParam[0] / 500, L = (WinParam[0] - WinParam[1]) / 5
 win +round(2W(1-E)), loss -round(2L*E) with Elo E (/400); start 1000 (constant 12), never below
 1000. Defender: a quarter of that, opposite sign.
 """
+import asyncio
 import os
 import random
 import time
@@ -187,6 +188,8 @@ def find_opponent(gid: int, acc, name: str) -> dict:
 
 
 def opponent_team(e: dict) -> P.PVPTeamInfo | None:
+    if e.get("rt_team"):  # real-time partner: the team they attack with
+        return P.PVPTeamInfo.FromString(bytes.fromhex(e["rt_team"]))
     if e["gid"] > 0:
         snap = pvp.state()["snapshots"].get(str(e["gid"]), {})
         return P.PVPTeamInfo.FromString(bytes.fromhex(snap["freedom"])) if snap.get("freedom") else None
@@ -295,10 +298,49 @@ async def handle_match(client, pb: bytes):
         out.err = 1
     else:
         snapshot(acc, gid, name)
+        if realtime_enabled():  # wait for a second searcher without blocking this connection
+            asyncio.create_task(_match_realtime(client, pattern))
+            return
         e = find_opponent(gid, acc, name)
         d["match"] = {"enemy": e, "pattern": pattern}
         out.data.CopyFrom(match_msg(gid, e, pattern))
     pvp.save()
+    await client.send_packet(MSG_MATCH, out.SerializeToString())
+
+
+def realtime_enabled() -> bool:
+    """Real-time pairing on a shared server (multiplayer.json / HFH_MULTIPLAYER) or HFH_REALTIME=1."""
+    import admin
+    flag = os.environ.get("HFH_REALTIME")
+    return flag not in (None, "", "0") if flag is not None else admin.multiplayer()
+
+
+async def _match_realtime(client, pattern: int):
+    """Pair with another searcher (realtime.pair); otherwise a saved opponent as usual."""
+    import realtime
+    gid, acc, name = client.gid, client.account, _name(client)
+    out = P.FightFreedomMatchS2C()
+    try:
+        found = await realtime.pair(client, pattern)
+        d = entry(gid, acc)
+        if found:
+            key, other, host_gid = found
+            other_name = _name(other)
+            mine = team_of(acc, gid, name, "attack")
+            theirs = team_of(other.account, other.gid, other_name, "attack")
+            if host_gid != gid:  # we arrived second: build the shared room now (host = the waiting one)
+                realtime.create_room(key, theirs, mine, (other.gid, gid))
+            prof = pvp.profile(other.account, other.gid, other_name)
+            e = {"gid": other.gid, "rt": key, "rt_team": theirs.SerializeToString().hex(),
+                 "name": other_name, "level": prof["level"]}
+            d["match"] = {"enemy": e, "pattern": pattern, "rt": key}
+        else:
+            e = find_opponent(gid, acc, name)
+            d["match"] = {"enemy": e, "pattern": pattern}
+        out.data.CopyFrom(match_msg(gid, e, pattern))
+        pvp.save()
+    except Exception:  # never leave the matching screen hanging
+        out = P.FightFreedomMatchS2C(err=1)
     await client.send_packet(MSG_MATCH, out.SerializeToString())
 
 
@@ -328,6 +370,17 @@ def build_room(args_pb: bytes, acc, gid: int, name: str):
     m = d.get("match")
     if not m:
         return None
+    if m.get("rt"):  # real-time match with another player
+        import realtime
+        joined = realtime.join(m["rt"], gid)
+        if joined:
+            if m["pattern"] == SCORE:
+                d["times"] += 1
+            pvp.save()
+            create, view = joined
+            match = matches.Match(view.info, False, 0b001, view)
+            match.freedom = FreedomGame(gid, m["enemy"], m["pattern"])
+            return create, match
     away = opponent_team(m["enemy"])
     if away is None:
         return None
@@ -396,7 +449,7 @@ async def handle_result(client, match):
         d["history"] = max(d["history"], d["score"])
         _record(d, P.FIGHTFREEDOM_CHALLENGE_WIN if won else P.FIGHTFREEDOM_CHALLENGE_LOSE, _card(e["gid"], e),
                 d["score"], change, (1 if won else 0, 0 if won else 1), game.begin)
-        if e["gid"] > 0:
+        if e["gid"] > 0 and not e.get("rt"):  # real-time partners update their own ladder
             od = entry(e["gid"])
             before = od["score"]
             od["score"] = max(START_SCORE, od["score"] + round(score_change(od["score"], old[0], not won) / 4))
