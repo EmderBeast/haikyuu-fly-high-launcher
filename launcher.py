@@ -458,6 +458,13 @@ class Launcher:
         if not self.emu_entries:
             self.emu_choice.set("Kein LDPlayer gefunden")
             return
+        forced = os.environ.get("HFH_INSTANCE")  # tests: always this instance, never another one
+        if forced is not None and forced.strip().isdigit():
+            pick = next((e for e in self.emu_entries if e[2] == int(forced)), None)
+            self.emu_choice.set(pick[0] if pick else f"Instanz #{forced} nicht gefunden")
+            if pick is None:
+                self.emu_entries = []
+            return
         # running instance first, then the one used last time
         saved = (self.settings.get("ldplayer"), self.settings.get("index"))
         pick = next((e for e in self.emu_entries if e[3]), None) or next(
