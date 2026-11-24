@@ -38,6 +38,11 @@ SETTINGS_FILE = APP_DIR / "settings.json"
 FROZEN = getattr(sys, "frozen", False)
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
+UPDATE_REPO = "EmderBeast/haikyuu-fly-high-launcher"  # public repo with the release "launcher-latest"
+UPDATE_PAGE = f"https://github.com/{UPDATE_REPO}/releases/latest"
+UPDATE_ZIP = f"https://github.com/{UPDATE_REPO}/releases/download/launcher-latest/{{name}}.zip"
+BACKUP_KEEP = 20  # automatic + manual backups of server/accounts kept in backups/
+
 MODES = {"private": "Private Server", "garena": "Garena (offiziell)"}
 
 
@@ -298,6 +303,15 @@ class Launcher:
         tk.Button(emu_row, text="Verbinden", command=self.connect_clicked, bg="#0f3460",
                   fg="white", relief="flat", cursor="hand2", font=font,
                   activebackground="#1a5276", activeforeground="white").pack(side="left")
+        tk.Button(emu_row, text="Backup", command=self.backup_clicked, bg="#2d4a3e",
+                  fg="white", relief="flat", cursor="hand2", font=font,
+                  activebackground="#3d6a55", activeforeground="white").pack(side="left", padx=(8, 0))
+        tk.Button(emu_row, text="Wiederherstellen", command=self.restore_clicked, bg="#53354a",
+                  fg="white", relief="flat", cursor="hand2", font=font,
+                  activebackground="#6b3a5a", activeforeground="white").pack(side="left", padx=(6, 0))
+        self.update_btn = tk.Button(mode_frame, text="Update verfügbar – hier laden", command=self.open_update,
+                                    bg="#c97a00", fg="white", relief="flat", cursor="hand2", font=font,
+                                    activebackground="#e08a00", activeforeground="white")
 
         # server address: empty = local server, otherwise a shared multiplayer server
         srv_row = tk.Frame(self.root, bg=BG)
@@ -784,8 +798,202 @@ class Launcher:
             self.adb("shell", "settings", "put", "global", "http_proxy", ":0", timeout=5)
         self.root.destroy()
 
+    # --- backups of the save games (server/accounts) -----------------------------------------
+
+    def backup_dir(self) -> Path:
+        return self.base / "backups"
+
+    def make_backup(self, reason: str) -> Path | None:
+        """Zip server/accounts to backups/accounts-<time>.zip; keeps the newest BACKUP_KEEP."""
+        src = self.base / "server" / "accounts"
+        if not src.exists() or not any(src.iterdir()):
+            return None
+        import zipfile
+        out_dir = self.backup_dir()
+        out_dir.mkdir(exist_ok=True)
+        out = out_dir / f"accounts-{time.strftime('%Y%m%d-%H%M%S')}.zip"
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in sorted(src.rglob("*")):
+                if f.is_file() and not f.name.endswith(".tmp"):
+                    z.write(f, f.relative_to(src.parent))
+        for old in sorted(out_dir.glob("accounts-*.zip"))[:-BACKUP_KEEP]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        self.log(f"Backup der Spielstände ({reason}): {out.name}")
+        return out
+
+    def backup_clicked(self):
+        try:
+            out = self.make_backup("von Hand")
+        except Exception as e:
+            self.log(f"Backup fehlgeschlagen: {e}")
+            return
+        if out is None:
+            self.log("Keine Spielstände zum Sichern gefunden.")
+            return
+        try:
+            os.startfile(str(self.backup_dir()))  # show the folder
+        except Exception:
+            pass
+
+    # --- update check (zip packages only) ---------------------------------------------------
+
+    def check_update(self):
+        """Compare the package's version.json with the public repo; show a button if newer exists."""
+        try:
+            local = json.loads((Path(sys.executable).parent / "version.json").read_text(encoding="utf-8"))
+        except Exception:
+            return  # running from source or the own repo build: no update check
+        if "--base" in sys.argv[1:]:
+            return
+        try:
+            import urllib.request
+            req = urllib.request.Request(f"https://api.github.com/repos/{UPDATE_REPO}/commits/main",
+                                         headers={"User-Agent": "HFH-Launcher",
+                                                  "Accept": "application/vnd.github+json"})
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(req, timeout=8) as r:
+                remote = json.loads(r.read().decode("utf-8"))
+        except Exception:
+            return  # offline or rate-limited: try again next start
+        if remote.get("sha") and remote["sha"] != local.get("commit"):
+            when = remote.get("commit", {}).get("committer", {}).get("date", "")[:10]
+            self.log(f"Neue Version verfügbar ({when}) – Knopf „Update verfügbar“.")
+            self.ui(lambda: self.update_btn.pack(pady=(0, 10)))
+
+    def open_update(self):
+        from tkinter import messagebox
+        if not self.package_dir():
+            import webbrowser
+            webbrowser.open(UPDATE_PAGE)
+            return
+        if messagebox.askyesno("Update", "Neue Version jetzt automatisch installieren?\n\n"
+                               "Der Launcher lädt sie herunter (ca. 50 MB), beendet sich, ersetzt die "
+                               "Programmdateien und startet neu. Deine Spielstände und Backups bleiben.",
+                               parent=self.root):
+            self.job(self.self_update)
+
+    def package_dir(self) -> Path | None:
+        """Folder of a zip package (frozen exe next to server/), None for source/own repo builds."""
+        if not FROZEN or "--base" in sys.argv[1:]:
+            return None
+        d = Path(sys.executable).resolve().parent
+        return d if (d / "server" / "server.py").exists() else None
+
+    def self_update(self):
+        """Download the matching release zip, then let a helper script swap the files after we exit."""
+        import tempfile
+        import urllib.request
+        import zipfile
+        pkg = self.package_dir()
+        if pkg is None:
+            return
+        name = "HFH-FlyHigh-Admin" if (pkg / "server" / "admin.json").exists() else "HFH-FlyHigh"
+        work = Path(tempfile.mkdtemp(prefix="hfh-update-"))
+        zpath = work / f"{name}.zip"
+        self.log(f"Lade {name}.zip ...")
+        try:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            req = urllib.request.Request(UPDATE_ZIP.format(name=name), headers={"User-Agent": "HFH-Launcher"})
+            with opener.open(req, timeout=60) as r, open(zpath, "wb") as f:
+                total = int(r.headers.get("Content-Length") or 0)
+                done, last = 0, 0
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    done += len(chunk)
+                    if total and done * 10 // total > last:
+                        last = done * 10 // total
+                        self.log(f"  {done * 100 // total} %")
+            with zipfile.ZipFile(zpath) as z:
+                z.extractall(work)
+        except Exception as e:
+            self.log(f"Update fehlgeschlagen: {e}")
+            return
+        new = work / name
+        if not (new / "HFH-Launcher.exe").exists():
+            self.log("Update fehlgeschlagen: die Zip enthält keinen Launcher.")
+            return
+        try:
+            self.make_backup("vor dem Update")
+        except Exception:
+            pass
+        bat = work / "update.bat"
+        bat.write_text("\r\n".join([
+            "@echo off",
+            "chcp 65001 >nul",
+            ":wait",
+            f'tasklist /fi "PID eq {os.getpid()}" | find "{os.getpid()}" >nul && (timeout /t 1 /nobreak >nul & goto wait)',
+            "timeout /t 1 /nobreak >nul",
+            # copy everything except the save games, backups and own settings
+            f'robocopy "{new}" "{pkg}" /E /NFL /NDL /NJH /NJS /XD "{new / "server" / "accounts"}" "{new / "backups"}" >nul',
+            f'start "" "{pkg / "HFH-Launcher.exe"}" ' + " ".join(
+                f'"{a}"' for a in sys.argv[1:] if a != "--update-now"),
+            f'rmdir /s /q "{work}"',
+        ]) + "\r\n", encoding="utf-8")
+        self.log("Update geladen – der Launcher startet gleich neu.")
+        subprocess.Popen(["cmd", "/c", str(bat)], creationflags=NO_WINDOW, close_fds=True)
+        self.ui(self.on_close)
+
+    def restore_clicked(self):
+        """Pick a backup zip and put it back as server/accounts (current state is saved first)."""
+        from tkinter import filedialog, messagebox
+        self.backup_dir().mkdir(exist_ok=True)
+        path = filedialog.askopenfilename(parent=self.root, title="Backup wiederherstellen",
+                                          initialdir=str(self.backup_dir()),
+                                          filetypes=[("Backups", "accounts-*.zip"), ("Zip", "*.zip")])
+        if not path:
+            return
+        if self.server_proc is None and port_in_use(GAME_PORT):
+            messagebox.showwarning("Wiederherstellen", "Der Server läuft gerade außerhalb des Launchers "
+                                   "(Port 10104). Bitte diesen Server zuerst beenden, sonst überschreibt er "
+                                   "die wiederhergestellten Spielstände.", parent=self.root)
+            return
+        if not messagebox.askyesno("Wiederherstellen", f"Spielstände aus {Path(path).name} wiederherstellen?\n\n"
+                                   "Der aktuelle Stand wird vorher als Backup gesichert. Der Server wird "
+                                   "dafür kurz neu gestartet.", parent=self.root):
+            return
+        self.job(self.restore_job, Path(path))
+
+    def restore_job(self, path: Path):
+        import zipfile
+        with zipfile.ZipFile(path) as z:
+            names = [n for n in z.namelist() if n.startswith("accounts/") and ".." not in n]
+            if not names:
+                self.log(f"{path.name} enthält keine Spielstände.")
+                return
+            self.make_backup("vor dem Wiederherstellen")
+            self.stop_proc(self.server_proc)  # the server must not save over the restored files
+            self.server_proc = None
+            for _ in range(20):
+                if not port_in_use(GAME_PORT):
+                    break
+                time.sleep(0.25)
+            target = self.base / "server" / "accounts"
+            import shutil
+            if target.exists():
+                shutil.rmtree(target)
+            z.extractall(self.base / "server", members=names)
+        self.log(f"Spielstände aus {path.name} wiederhergestellt.")
+        self.start_processes()
+        if self.ld is not None and self.serial is not None and self.game_running():
+            self.start_game(restart=True)
+
     def run(self):
-        self.root.after(300, lambda: self.job(self.full_start))
+        try:
+            self.make_backup("beim Start")
+        except Exception as e:
+            self.log(f"Backup beim Start fehlgeschlagen: {e}")
+        if FROZEN:
+            threading.Thread(target=self.check_update, daemon=True).start()
+        if "--update-now" in sys.argv[1:]:  # for tests: update without the dialog
+            self.root.after(1500, lambda: self.job(self.self_update))
+        if "--no-emulator" not in sys.argv[1:]:  # tests: launcher window only, no server/emulator
+            self.root.after(300, lambda: self.job(self.full_start))
         self.root.mainloop()
 
 

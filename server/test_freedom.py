@@ -117,13 +117,15 @@ async def main():
     await dispatch(a, freedom.MSG_BUY, P.FightFreedomChallengeBuyC2S(num=1).SerializeToString())
     assert P.FightFreedomChallengeBuyS2C.FromString(a.last(freedom.MSG_BUY)).buy_times == 1
 
-    # daily match chest: 5 score matches needed for the first one (season 104: rows 10/11/12)
-    await dispatch(a, freedom.MSG_REWARD, P.FightFreedomRewardC2S(index=10).SerializeToString())
+    # daily match chest: 5 score matches needed for the first one; index / bit = list position
+    await dispatch(a, freedom.MSG_REWARD, P.FightFreedomRewardC2S(index=0).SerializeToString())
     assert P.FightFreedomRewardS2C.FromString(a.last(freedom.MSG_REWARD)).err != 0
     freedom.entry(9301)["times"] = 5
-    await dispatch(a, freedom.MSG_REWARD, P.FightFreedomRewardC2S(index=10).SerializeToString())
-    assert P.FightFreedomRewardS2C.FromString(a.last(freedom.MSG_REWARD)).challenge_reward == 1 << 10
-    await dispatch(a, freedom.MSG_REWARD, P.FightFreedomRewardC2S(index=10).SerializeToString())
+    await dispatch(a, freedom.MSG_REWARD, P.FightFreedomRewardC2S(index=1).SerializeToString())
+    assert P.FightFreedomRewardS2C.FromString(a.last(freedom.MSG_REWARD)).err != 0  # needs 10
+    await dispatch(a, freedom.MSG_REWARD, P.FightFreedomRewardC2S(index=0).SerializeToString())
+    assert P.FightFreedomRewardS2C.FromString(a.last(freedom.MSG_REWARD)).challenge_reward == 1 << 0
+    await dispatch(a, freedom.MSG_REWARD, P.FightFreedomRewardC2S(index=0).SerializeToString())
     assert P.FightFreedomRewardS2C.FromString(a.last(freedom.MSG_REWARD)).err != 0  # only once
 
     freedom.entry(9301)["history"] = 1700

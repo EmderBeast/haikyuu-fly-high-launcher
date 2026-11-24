@@ -282,6 +282,9 @@ class GameClient:
             log.error(f"Error handling {self.addr}: {e}")
         finally:
             log.info(f"Client disconnected: {self.addr}")
+            if getattr(self, "gid", None) is not None and mail.ONLINE.get(int(self.gid)) is self:
+                del mail.ONLINE[int(self.gid)]  # no more pushes (mail, chat) to a closed connection
+                chat.on_logout(int(self.gid))  # "offline since" in the contact list
             self.writer.close()
 
     async def handle_message(self, msg_id: int, pb_data: bytes):
@@ -365,7 +368,8 @@ async def handle_login(client: GameClient, pb_data: bytes):
     log.info(f"  ACCOUNT {gid}: {len(client.account.cards)} added cards, {len(client.account.items)} changed items")
     try:  # shared-server PvP: snapshot this player's team, arena info from this server's ladder
         for mid, pb in (pvp.on_login(client) + peak.on_login(client) + teamcomp.on_login(client)
-                        + freedom.on_login(client) + mail.on_login(client) + personal.on_login(client)):
+                        + freedom.on_login(client) + mail.on_login(client) + personal.on_login(client)
+                        + chat.on_login(client) + friends.on_login(client)):
             await client.send_packet(mid, pb)
     except Exception as e:  # never block the login
         log.error(f"  PVP login update failed: {e!r}")
@@ -1060,6 +1064,11 @@ import mail  # noqa: E402  mailbox (season / daily rank rewards)
 import seasons  # noqa: E402  season ends and daily arena rewards, sent as mail
 import personal  # noqa: E402  time-limited frames / chat bubbles / titles (season rewards)
 MESSAGE_HANDLERS.update(mail.HANDLERS)
+MESSAGE_HANDLERS.update(personal.HANDLERS)  # profile choices (title, frame, chat frame ...)
+import chat  # noqa: E402  world chat and private messages between the players of this server
+MESSAGE_HANDLERS.update(chat.HANDLERS)
+import friends  # noqa: E402  friends list, requests, block list, friendship tokens
+MESSAGE_HANDLERS.update(friends.HANDLERS)
 pvp.HOOKS.update(grant_rewards=grant_rewards, player_name=player_name, generic=handle_generic,
                  mission_event=mission_event)
 

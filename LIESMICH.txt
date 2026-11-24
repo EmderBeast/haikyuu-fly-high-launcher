@@ -34,6 +34,13 @@ Bedienung
                        "Übernehmen" -> du spielst mit den anderen auf diesem
                        Server (Arena gegen ihre Teams). Das Spiel startet neu.
                        Admin Mode gibt es dort nicht.
+- "Backup"             sichert alle Spielstände nach "backups" (passiert auch bei
+                       jedem Start automatisch; die letzten 20 bleiben).
+- "Wiederherstellen"   spielt ein Backup wieder ein (der aktuelle Stand wird vorher
+                       gesichert, der Server kurz neu gestartet).
+- "Update verfügbar"   erscheint, wenn es auf GitHub eine neue Version gibt: lädt sie und
+                       installiert sie selbst (Launcher startet neu). Spielstände und
+                       Backups bleiben erhalten.
 - Fenster schließen    beendet Server und Proxy.
 
 Admin Mode (nur in der Admin-Version "HFH-FlyHigh-Admin")

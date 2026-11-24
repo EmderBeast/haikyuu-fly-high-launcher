@@ -33,7 +33,8 @@ JOB_LIBERO = 4  # battleconstant MaxCrossNetNum
 # often than the raw spike-vs-dig power suggests (best fit on the captured touches, scratch fit3.py)
 CATCH_BIAS = 1.5
 DIG_ROW = 4
-REROLL_FAIL = {DIG_SERVE: 0.8, SAVE: 0.35}
+FIRST_ATTACK, LATER_ATTACK = 0.25, 1.45  # factor on DIG_FAIL for the first / the later attacks of a rally
+REROLL_FAIL = {DIG_SERVE: 0.8, SAVE: 0.35, SERVE: 0.6}
 # chance that a dig fails: spike result -> (dig weaker than the spike, dig stronger)
 DIG_FAIL = {4: (0.20, 0.0), 5: (0.20, 0.0), 6: (0.45, 0.27)}
 BLOCK_CHANCE = 1.0  # every captured dig after a spike came after a block attempt
@@ -226,7 +227,8 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
     windows = [0]
     if battle:
         battle.rally_start(set(court.stance[HOST]) | set(court.stance[GUEST]), set(behind_libero),
-                           {t: court.front(t) for t in (HOST, GUEST)})
+                           {t: court.front(t) for t in (HOST, GUEST)},
+                           stance={t: list(court.stance[t]) for t in (HOST, GUEST)})
         rally.start = battle.flush()
 
     def add(formula, pid, link, opp: Power | None, last_result: int, forced: int | None = None,
@@ -254,6 +256,10 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
             # how often Garena's digs fail depends on the spike's result and on who is stronger (92
             # captured digs: 45 % after a perfect spike against a weaker dig, none after a result-3 one)
             fail = DIG_FAIL.get(last_spike_result, (0.0, 0.0))[0 if pw.ball < ref else 1]
+            # the first attack of a rally is nearly always kept in play (3 of 53 captured ones were
+            # lost by the defence), later ones far less (36 of 92)
+            first = sum(s.formula == SPIKE for s in steps) <= 1
+            fail = min(fail * (FIRST_ATTACK if first else LATER_ATTACK), 0.95)
             if rng.random() < fail:
                 result = 0
             else:
@@ -266,6 +272,9 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
         # often than the table says (38 %): part of the failed rolls are rolled again
         if forced is None and result == 0 and rng.random() < REROLL_FAIL.get(formula, 0.0):
             result = roll_result(formula, last_result, link, x, rng)
+        if (forced is None and result == 0 and formula == SAVE and sum(s.formula == SPIKE for s in steps) <= 1
+                and rng.random() < 0.7):  # saves behind the first attack: see FIRST_ATTACK
+            result = roll_result(formula, last_result, link, x, rng) or 3
         if formula == SPIKE:
             result = min(max(result, 3), 6)
         st = Step(formula, pid, result, link, pw)

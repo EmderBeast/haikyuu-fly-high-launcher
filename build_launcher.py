@@ -20,6 +20,7 @@ import io
 import os
 import shutil
 import subprocess
+import time
 import sys
 import zipfile
 from pathlib import Path
@@ -89,6 +90,12 @@ def package(exe_dir: Path, data: Path, name: str = PACKAGE, admin_pw: str | None
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(exe_dir, out)
+    # version of this package: the launcher compares it with the public repo to offer updates
+    import json
+    commit = subprocess.run(["git", "-C", str(HERE), "rev-parse", "HEAD"], capture_output=True,
+                            text=True).stdout.strip()
+    (out / "version.json").write_text(json.dumps({"commit": commit, "built": time.strftime("%Y-%m-%d %H:%M")}),
+                                      encoding="utf-8")
 
     # server code + data from the last commit
     for rel in git_files(HERE, "server"):

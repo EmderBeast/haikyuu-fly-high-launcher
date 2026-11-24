@@ -550,17 +550,19 @@ def daily_chests(season: int) -> list[dict]:
 
 
 async def handle_reward(client, pb: bytes):
-    """0x5209 FightFreedomRewardC2S{index}: daily match chest (freedailytaskconf). challenge_reward is
-    a bit mask over the row IDs (UIGenericUtils.IsRewarded); index = row ID or list position."""
+    """0x5209 FightFreedomRewardC2S{index}: daily match chest (freedailytaskconf). index is the chest's
+    position in the season's list and challenge_reward a bit mask over those positions
+    (FreeMatchMainViewLogic.OnListRewardsEvent / UpdateRewards -> UIGenericUtils.IsRewarded(mask, i);
+    checked in the emulator)."""
     idx = P.FightFreedomRewardC2S.FromString(pb).index
     d = entry(client.gid, client.account)
     rows = daily_chests(current_season())
-    row = next((r for r in rows if r["ID"] == idx), None) or (rows[idx] if 0 <= idx < len(rows) else None)
-    if not row or d["reward"] & (1 << row["ID"]) or d["times"] < row["Value"]:
+    row = rows[idx] if 0 <= idx < len(rows) else None
+    if not row or d["reward"] & (1 << idx) or d["times"] < row["Value"]:
         await client.send_packet(MSG_REWARD, P.FightFreedomRewardS2C(err=1, challenge_reward=d["reward"])
                                  .SerializeToString())
         return
-    d["reward"] |= 1 << row["ID"]
+    d["reward"] |= 1 << idx
     pvp.save()
     rewards = [tuple(int(x) for x in s.split(":")) for s in row.get("TaskItemReward") or []]
     await client.send_packet(MSG_REWARD, P.FightFreedomRewardS2C(challenge_reward=d["reward"]).SerializeToString())

@@ -19,6 +19,7 @@ the server PC, or by in-game commands), applied at the player's next login
 In-game commands for admins: the gift code field takes "/command [value] [@player]"
 (player = name or id, default yourself; applied at that player's next login):
   /gold N  /diamonds N  /exp N  /stamina N  /level N  /items N  /allcards  /maxcards
+  /card <name>  (every version of that character)   /potential <set name>  (full set, max)
   /infinite on|off  /power N|off  (all cards' match strength in percent)
 Owner only (shared server): /admin <player>  /unadmin <player>
 
@@ -29,6 +30,7 @@ Queue entries (list, applied in order):
   {"level": 60}
   {"currency": {"100": 9999999, ...}}           conf id -> amount
   {"all_cards": true}                           one card of every character not owned yet
+  {"cards": [conf, ...]}                        one card of each of these characters
   {"max_cards": true}                           every card to the top star and level 80
   {"items": 999}                                every bag item kind (as in the captured account) to this count
   {"flags": {"infinite_stamina": true}}
@@ -163,6 +165,11 @@ def _apply(acc, action: dict) -> list[str]:
         for conf in new:
             acc.add_card(conf)
         done.append(f"{len(new)} Charaktere freigeschaltet")
+    if action.get("cards") and gameconfig.AVAILABLE:
+        confs = [int(c) for c in action["cards"] if int(c) in gameconfig.PLAYERS]
+        for conf in confs:
+            acc.add_card(conf)
+        done.append(f"{len(confs)} Karte(n): " + ", ".join(card_names().get(c, str(c)) for c in confs))
     if action.get("max_cards"):
         cards = {**acc.b.cards, **{wire.get(wire.parse(c), 1): c for c in acc.cards}}
         maxed = []
@@ -309,46 +316,186 @@ CURRENCY_CMDS = {"/gold": 100, "/diamonds": 108, "/diamanten": 108, "/exp": 102,
                  "/stamina": 105, "/ausdauer": 105}
 
 
-def command(gid, code: str) -> str:
-    """Run an admin command from the gift code field; returns a log line."""
+_names_cache: dict = {}
+
+
+def _lang() -> dict:
+    if "lang" not in _names_cache:
+        rows = json.loads((gameconfig.CFG / "language.json").read_text(encoding="utf-8"))
+        _names_cache["lang"] = {r["ID"]: r for r in rows}
+    return _names_cache["lang"]
+
+
+def _text(ref) -> str:
+    import re
+    m = re.findall(r"\d+", str(ref or ""))
+    row = _lang().get(int(m[0])) if m else None
+    return (row.get("German") or row.get("English") or "") if row else ""
+
+
+def card_names() -> dict:
+    """card conf id -> shown name (e.g. "TAKANOBU AONE (Nach der Schule)")."""
+    if "cards" not in _names_cache:
+        _names_cache["cards"] = {c: _text(r.get("Intro")) or str(c) for c, r in gameconfig.PLAYERS.items()}
+    return _names_cache["cards"]
+
+
+def suit_names() -> dict:
+    """potential set id -> name (e.g. 101 -> "Präziser Aufschlag")."""
+    if "suits" not in _names_cache:
+        rows = json.loads((gameconfig.CFG / "specialtysuitconf.json").read_text(encoding="utf-8"))
+        _names_cache["suits"] = {r["ID"]: _text(r.get("Name")) or str(r["ID"]) for r in rows}
+    return _names_cache["suits"]
+
+
+def _norm(t: str) -> str:
+    return "".join(ch for ch in t.lower() if ch.isalnum())
+
+
+def find_cards(text: str) -> list[int]:
+    """Every card whose name contains all words of text (a number is taken as conf id)."""
+    if text.strip().isdigit():
+        return [int(text)] if int(text) in gameconfig.PLAYERS else []
+    words = [_norm(w) for w in text.split() if _norm(w)]
+    out = [c for c, n in card_names().items() if words and all(w in _norm(n) for w in words)]
+    normal = [c for c in out if c < 50000]  # 5xxxx: same-named twins (opponent/special versions)
+    return sorted(normal or out)[:20]
+
+
+def full_set(suit: int) -> list[dict]:
+    """All 6 places of a potential set, top rarity, max level, its first main and 4 vice attrs."""
+    rows = _specialty_rows()
+    vices = {}
+    try:
+        vices = {r["ID"]: r["Viceattr"] for r in json.loads(
+            (gameconfig.CFG / "specialtyviceattr.json").read_text(encoding="utf-8"))}
+    except Exception:
+        pass
+    rare = max((r["Rare"] for r in rows.values() if r["SuitID"] == suit), default=0)
+    level = {1: 6, 2: 6, 3: 9, 4: 12}.get(rare, 12)
+    out = []
+    for r in rows.values():
+        if r["SuitID"] != suit or r["Rare"] != rare:
+            continue
+        mains = r["MainattrID"] if isinstance(r["MainattrID"], list) else [r["MainattrID"]]
+        pool = vices.get(r.get("ViceattrPool"), [])[:4]
+        out.append({"conf": r["ID"], "level": level, "main": mains[0],
+                    "vices": [[a, 1 if i < level // 3 else 0] for i, a in enumerate(pool)], "count": 1})
+    return out
+
+
+def find_suit(text: str) -> int | None:
+    if text.strip().isdigit():
+        return int(text) if int(text) in suit_names() else None
+    words = [_norm(w) for w in text.split() if _norm(w)]
+    exact = [s for s, n in suit_names().items() if _norm(n) == "".join(words)]
+    if exact:
+        return exact[0]
+    hits = [s for s, n in suit_names().items() if words and all(w in _norm(n) for w in words)]
+    return hits[0] if len(hits) == 1 else None
+
+
+HELP = ("Befehle: /gold N, /diamonds N, /exp N, /stamina N (kommen sofort als Post), /level N, "
+        "/items N, /allcards, /maxcards, /card <Name>, /potential <Set>, /infinite on|off, "
+        "/power N|off – mit @Name für einen anderen Spieler.")
+
+
+def notify(gid, text: str, items: list | None = None) -> bool:
+    """In-game mail "Admin Mode" (mail.py), optionally with attachments the player claims at once.
+
+    Returns False where there is no mailbox (then nothing was sent)."""
+    try:
+        import mail
+        now = int(time.time())
+        mail.send(int(gid), {"id": mail._new_id(), "template": 0, "title": "Admin Mode", "content": text,
+                             "items": [list(i) for i in (items or [])], "args": [], "send": now,
+                             "end": now + 7 * 86400, "state": mail.P.MAIL_UNREAD})
+        return True
+    except Exception as e:
+        log.warning(f"  ADMIN notify {gid} failed: {e!r}")
+        return False
+
+
+def _name(gid) -> str:
+    return player_names().get(str(gid)) or str(gid)
+
+
+def command(gid, code: str) -> tuple[str, str | None, str | None, str | None]:
+    """Run an admin command from the gift code field.
+
+    Returns (log line, message to the sender or None, target gid, message to the target or None).
+    Currency commands (/gold N ...) arrive at once as a mail attachment that ADDS N; the other
+    commands are queued and work at the next login."""
     parts = code.split()
     target = str(gid)
     if len(parts) > 1 and parts[-1].startswith("@"):
-        target = find_player(parts.pop())
+        who = parts.pop()
+        target = find_player(who)
         if target is None:
-            return f"unknown player in {code!r}"
+            return f"unknown player in {code!r}", f"Spieler {who[1:]} nicht gefunden.", None, None
     cmd, args = parts[0].lower(), parts[1:]
     num = int(args[0]) if args and args[0].isdigit() else None
 
     if cmd in ("/admin", "/unadmin"):
         if not is_owner(gid):
-            return f"{cmd}: only the owner of a shared server"
+            return (f"{cmd}: only the owner of a shared server",
+                    f"{cmd} darf nur der Besitzer eines gemeinsamen Servers benutzen.", None, None)
         who = find_player(" ".join(args)) if args else None
         if who is None:
-            return f"{cmd}: unknown player {' '.join(args)!r}"
+            return (f"{cmd}: unknown player {' '.join(args)!r}",
+                    f"Spieler {' '.join(args) or '?'} nicht gefunden.", None, None)
         st = admins_state()
         if cmd == "/admin":
             st["admins"][who] = player_names().get(who, "")
         else:
             st["admins"].pop(who, None)
         save_admins(st)
-        return f"{cmd} {who} ({st['admins'].get(who, '')})"
+        granted = cmd == "/admin"
+        return (f"{cmd} {who} ({_name(who)})",
+                f"{_name(who)} hat {'jetzt' if granted else 'keine'} Admin-Rechte{'' if granted else ' mehr'}.",
+                who, ("Du hast jetzt Admin-Rechte auf diesem Server. " + HELP) if granted
+                else "Deine Admin-Rechte auf diesem Server wurden entfernt.")
 
     if cmd in ("/rebind", "/unbind"):  # token binding on a shared server (bindings.py)
         import bindings
         if target == str(gid) and len(code.split()) == 1:
-            return f"{cmd}: name the player, e.g. {cmd} @Name"
+            return (f"{cmd}: name the player, e.g. {cmd} @Name", f"Bitte Spieler angeben, z. B. {cmd} @Name.",
+                    None, None)
         ok = bindings.approve(target) if cmd == "/rebind" else bindings.release(target)
-        return f"{cmd} {target}: {'ok' if ok else 'nothing to do'}"
+        what = "freigegeben" if cmd == "/rebind" else "gelöst"
+        return (f"{cmd} {target}: {'ok' if ok else 'nothing to do'}",
+                f"Login von {_name(target)} {what}." if ok else f"Bei {_name(target)} gibt es nichts zu tun.",
+                None, None)
 
     if cmd in CURRENCY_CMDS and num is not None:
-        action = {"currency": {str(CURRENCY_CMDS[cmd]): num}}
+        # at once: the amount comes as a mail attachment (claim in the mailbox, no restart needed)
+        shown = " ".join(parts)
+        if notify(target, f"{shown}: im Anhang – einfach abholen.", [(CURRENCY_CMDS[cmd], num)]):
+            if target == str(gid):
+                return f"{code!r} sent as mail to {target}", None, None, None
+            return (f"{code!r} sent as mail to {target}", f"{shown} an {_name(target)} geschickt (Post).",
+                    None, None)
+        action = {"currency": {str(CURRENCY_CMDS[cmd]): num}}  # no mailbox: set it at the next login
     elif cmd == "/level" and num is not None:
         action = {"level": num}
     elif cmd == "/items" and num is not None:
         action = {"items": num}
     elif cmd == "/allcards":
         action = {"all_cards": True}
+    elif cmd == "/card" and args:
+        confs = find_cards(" ".join(args))
+        if not confs:
+            return (f"/card: no card {' '.join(args)!r}",
+                    f"Keine Karte mit „{' '.join(args)}“ gefunden (Name wie im Spiel, z. B. /card Aone).",
+                    None, None)
+        action = {"cards": confs}
+    elif cmd == "/potential" and args:
+        suit = find_suit(" ".join(args))
+        if suit is None:
+            return (f"/potential: no set {' '.join(args)!r}",
+                    "Set nicht eindeutig gefunden. Sets: " + ", ".join(sorted(suit_names().values())) + ".",
+                    None, None)
+        action = {"specialties": full_set(suit)}
     elif cmd == "/maxcards":
         action = {"max_cards": True}
     elif cmd == "/infinite" and args and args[0].lower() in ("on", "an", "off", "aus"):
@@ -356,21 +503,32 @@ def command(gid, code: str) -> str:
     elif cmd == "/power" and args and (num is not None or args[0].lower() in ("off", "aus")):
         action = {"power": {"*": None if num is None else {"pct": num}}}
     else:
-        return f"unknown command {code!r}"
+        return f"unknown command {code!r}", f"Unbekannter Befehl: {code}. {HELP}", None, None
     queue(target, [action])
-    return f"{code!r} queued for {target}"
+    shown = " ".join(parts)
+    if target == str(gid):
+        return (f"{code!r} queued for {target}",
+                f"{shown} ist vorgemerkt und wirkt beim nächsten Login – Spiel einmal neu starten.", None, None)
+    return (f"{code!r} queued for {target}", f"{shown} für {_name(target)} vorgemerkt.", target,
+            f"Ein Admin hat dir {shown} gegeben. Spiel einmal neu starten, dann ist es da.")
 
 
 async def handle_gift_code(client, pb_data: bytes):
-    """0x2403 SettingGiftCodeC2S{1=code}: admin password or "/command" for admins."""
+    """0x2403 SettingGiftCodeC2S{1=code}: admin password or "/command" for admins (result as mail)."""
     code = wire.get(wire.parse(pb_data), 1, b"")
     code = (code.decode("utf-8", errors="replace") if isinstance(code, bytes) else str(code)).strip()
     gid = getattr(client, "gid", None)
     if enabled() and gid and code.startswith("/"):
         if is_admin(gid):
-            log.info(f"  ADMIN command from {gid}: {command(gid, code)}")
+            line, msg, target, target_msg = command(gid, code)
+            log.info(f"  ADMIN command from {gid}: {line}")
+            if msg:
+                notify(gid, msg)
+            if target and target_msg and str(target) != str(gid):
+                notify(target, target_msg)
         else:
             log.info(f"  ADMIN command {code!r} from {gid} ignored (no admin rights)")
+            notify(gid, "Für Admin-Befehle fehlen dir die Rechte auf diesem Server.")
     elif enabled() and gid and check_password(code):
         if multiplayer():
             st = admins_state()
@@ -378,6 +536,7 @@ async def handle_gift_code(client, pb_data: bytes):
                 st["owner"] = str(gid)
                 save_admins(st)
                 log.info(f"  ADMIN owner of this shared server: {gid}")
+                notify(gid, "Du bist jetzt Besitzer dieses Servers und hast Admin-Rechte. " + HELP)
             else:
                 log.info(f"  admin password from {gid} ignored (owner is {st['owner']})")
         else:
@@ -386,6 +545,7 @@ async def handle_gift_code(client, pb_data: bytes):
             ACCOUNTS.mkdir(exist_ok=True)
             UNLOCKED.write_text(json.dumps(state, indent=1), encoding="utf-8")
             log.info(f"  ADMIN MODE unlocked for {gid}")
+            notify(gid, "Admin Mode freigeschaltet: im Launcher gibt es jetzt den Knopf „Admin Mode“. " + HELP)
     else:
         log.info(f"  Gift code {code!r} (no effect)")
     await client.send_packet(MSG_GIFT_CODE, wire.build([]))

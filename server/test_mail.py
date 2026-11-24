@@ -113,6 +113,18 @@ async def main():
     upd = P.PersonalUpdateS2C.FromString(a.last(personal.MSG_UPDATE))
     assert {tl.item_id for tl in upd.time_limit} == set(unl) and set(unl) <= set(upd.item_ids)
 
+    # equip the unlocked title / frame; the choice comes back after the next login
+    title = next(i for i in unl if i // 1000 == 6)
+    await server.MESSAGE_HANDLERS[0x210B](a, P.PersonalTitleSetC2S(conf_id=title).SerializeToString())
+    assert P.PersonalTitleSetS2C.FromString(a.last(0x210B)).conf_id == title
+    await server.MESSAGE_HANDLERS[0x2108](a, P.PersonalShowPlayerListSetC2S(inst_ids=[11, 12]).SerializeToString())
+    a = await login(9901)
+    assert P.PersonalTitleSetS2C.FromString(a.last(0x210B)).conf_id == title
+    assert list(P.PersonalShowPlayerListSetS2C.FromString(a.last(0x2108)).inst_ids) == [11, 12]
+    pvp.state()["unlocks"]["9901"][str(title)] = 1  # expired: the baseline title shows again
+    a = await login(9901)
+    assert not any(m == 0x210B for m, _ in a.sent)
+
     # Freedom season 104 closes 2026-12-23
     freedom.entry(9901)
     pvp.state()["freedom"]["9901"].update(season=104, score=1700, history=1700, gifts=[])

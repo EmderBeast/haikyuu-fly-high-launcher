@@ -140,7 +140,9 @@ def _personal(acc) -> list:
 
 def profile(acc, gid: int, name: str) -> dict:
     f = _personal(acc)
-    return {"name": name, "icon": wire.get(f, 4, 0), "frame": wire.get(f, 5, 0), "level": acc.level}
+    import personal  # the player's own portrait / frame choice wins over the baseline
+    return {"name": name, "icon": personal.chosen(gid, 0x2105, wire.get(f, 4, 0)),
+            "frame": personal.chosen(gid, 0x2106, wire.get(f, 5, 0)), "level": acc.level}
 
 
 def _template() -> P.PVPRoomInfo:
