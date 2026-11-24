@@ -127,6 +127,8 @@ def package(exe_dir: Path, data: Path, name: str = PACKAGE, admin_pw: str | None
     else:
         print(f"Warnung: {skill} fehlt - Skills im Match sind im Paket aus")
     shutil.copy(HERE / "LIESMICH.txt", out / "LIESMICH.txt")
+    if (HERE / "README_EN.txt").exists():
+        shutil.copy(HERE / "README_EN.txt", out / "README_EN.txt")
     if admin_pw:  # admin build: server/admin.json enables Admin Mode (password entered in game)
         import hashlib, json
         (out / "server" / "admin.json").write_text(json.dumps(

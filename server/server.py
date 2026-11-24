@@ -442,7 +442,11 @@ async def grant_rewards(client: GameClient, rewards: list[tuple[int, int]], popu
     """Credit rewards to the account, send the currency/item updates and (optionally) the reward popup."""
     acc = client.account
     updates, shown, levels = {}, [], []
+    import clubs
     for conf_id, number in rewards:
+        if clubs.credit(int(client.gid), conf_id, number):  # club points / funds / contribution
+            shown.append((1, 2, wire.build([(2, 0, conf_id), (3, 0, number)])))
+            continue
         if conf_id in gameconfig.MANAGER_EXP:
             levels += acc.add_player_exp(number)
             shown.append((1, 2, wire.build([(2, 0, conf_id), (3, 0, number)])))

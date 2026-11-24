@@ -26,6 +26,8 @@ import threading
 import time
 from pathlib import Path
 
+import launcher_i18n as i18n
+
 GAME_PORT = 10104
 PROXY_PORT = 8082
 GAME_PACKAGE = "com.garena.game.haikyu"
@@ -230,6 +232,7 @@ class Launcher:
                 self.settings["server"] = ""
         save_settings(self.settings)  # the proxy reads the mode from here
 
+        i18n.LANG = i18n.detect(self.settings)
         self.installs = ldplayer_installs()
         self.ld = None
         self.serial = None
@@ -264,6 +267,8 @@ class Launcher:
         tk.Label(titles, text="Haikyuu Fly High", bg=BG, fg=ACCENT,
                  font=("Segoe UI", 20, "bold")).pack(anchor="w")
         tk.Label(titles, text="Launcher", bg=BG, fg="#eeeeee", font=font).pack(anchor="w")
+        tk.Button(header, text="DE / EN", command=self.toggle_language, bg=PANEL, fg="#eeeeee",
+                  relief="flat", cursor="hand2", font=("Segoe UI", 8)).pack(side="left", padx=(16, 0))
 
         # mode panel
         mode_frame = tk.Frame(self.root, bg=PANEL, highlightbackground=ACCENT,
@@ -357,16 +362,40 @@ class Launcher:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.show_mode()
         self.fill_emulators()
+        self.translate_widgets()
+        if i18n.LANG != "de":
+            i18n.patch_messagebox()
         self.poll_admin()
 
     # --- UI helpers (thread-safe) -------------------------------------------
+
+    def translate_widgets(self, widget=None):
+        """English UI: translate the text of every button/label once after building the window."""
+        if i18n.LANG == "de":
+            return
+        widget = widget or self.root
+        for child in widget.winfo_children():
+            try:
+                text = child.cget("text")
+                if text:
+                    child.configure(text=i18n.tr(text))
+            except Exception:
+                pass
+            self.translate_widgets(child)
+
+    def toggle_language(self):
+        new = "en" if i18n.LANG == "de" else "de"
+        self.settings["lang"] = new
+        save_settings(self.settings)
+        self.log("Sprache: Englisch – wird beim nächsten Start übernommen." if new == "en"
+                 else "Sprache: Deutsch – wird beim nächsten Start übernommen.")
 
     def ui(self, fn, *args):
         if not self.closing:
             self.root.after(0, fn, *args)
 
     def log(self, msg):
-        line = time.strftime("%H:%M:%S ") + msg
+        line = time.strftime("%H:%M:%S ") + i18n.tr(msg)
 
         def add():
             self.log_box.configure(state="normal")
@@ -389,6 +418,7 @@ class Launcher:
 
     def set_status(self, key, text, color):
         var, lbl, name = self.status[key]
+        text, name = i18n.tr(text), i18n.tr(name)
 
         def apply():
             var.set(f"{name}: {text}")
@@ -408,7 +438,7 @@ class Launcher:
             color = WARN
 
         def apply():
-            self.mode_var.set(text)
+            self.mode_var.set(i18n.tr(text))
             self.mode_label.configure(fg=color)
             self.private_btn.configure(relief="sunken" if wanted == "private" else "flat")
             self.garena_btn.configure(relief="sunken" if wanted == "garena" else "flat")
@@ -419,7 +449,7 @@ class Launcher:
         for folder in self.installs:
             ld = LDPlayer(folder)
             for index, name, running in ld.instances():
-                label = f"{folder.name} – {name} (#{index})" + (" – läuft" if running else "")
+                label = f"{folder.name} – {name} (#{index})" + (" – " + i18n.tr("läuft") if running else "")
                 self.emu_entries.append((label, folder, index, running))
         labels = [e[0] for e in self.emu_entries]
         self.emu_box.configure(values=labels)
@@ -689,8 +719,71 @@ class Launcher:
         if "package:" not in out:
             self.log("Haikyuu Fly High ist in diesem Emulator nicht installiert.")
             self.set_status("game", "nicht installiert", BAD)
-            return False
+            path = self.ask_file_main(
+                "Haikyuu Fly High ist in diesem LDPlayer nicht installiert.\n\n"
+                "Hast du die Spieldatei (.apk, .xapk, .apks oder .apkm)? Dann wähle sie im nächsten "
+                "Fenster aus, der Launcher installiert sie.")
+            if not path or not self.install_game(Path(path)):
+                return False
         return True
+
+    def ask_file_main(self, question: str) -> str | None:
+        """Yes/no, then a file dialog - on the Tk thread, from a worker thread."""
+        from tkinter import filedialog, messagebox
+        result, done = [None], threading.Event()
+
+        def ask():
+            try:
+                if messagebox.askyesno("Haikyuu Fly High", question, parent=self.root):
+                    result[0] = filedialog.askopenfilename(
+                        parent=self.root, title="Haikyuu Fly High",
+                        filetypes=[("APK / XAPK", "*.apk *.xapk *.apks *.apkm"), ("*", "*.*")]) or None
+            finally:
+                done.set()
+        self.ui(ask)
+        done.wait()
+        return result[0]
+
+    def install_game(self, path: Path) -> bool:
+        """Install a single .apk or a split package (.xapk/.apks/.apkm: zip of apks, maybe obb)."""
+        import tempfile
+        import zipfile
+        self.set_status("game", "installiere ...", WARN)
+        work = None
+        try:
+            if path.suffix.lower() == ".apk":
+                apks, obb = [path], None
+            else:
+                work = Path(tempfile.mkdtemp(prefix="hfh-apk-"))
+                self.log(f"Entpacke {path.name} ...")
+                with zipfile.ZipFile(path) as z:
+                    z.extractall(work)
+                apks = sorted(work.rglob("*.apk"), key=lambda a: (a.name != "base.apk", a.name))
+                obb = next((d for d in work.rglob("obb") if d.is_dir()), None)
+            if not apks:
+                self.log(f"{path.name} enthält keine APK.")
+                return False
+            self.log(f"Installiere Haikyuu Fly High ({len(apks)} Teil(e)) – das dauert ein paar Minuten ...")
+            cmd = ["install"] if len(apks) == 1 else ["install-multiple"]
+            ok, out = self.adb(*cmd, "-r", *map(str, apks), timeout=1800)
+            if not ok or "Success" not in out:
+                self.log(f"Installation fehlgeschlagen: {out[-300:]}")
+                self.set_status("game", "Fehler", BAD)
+                return False
+            if obb is not None:
+                for pkg_dir in obb.iterdir():
+                    self.adb("push", str(pkg_dir), "/sdcard/Android/obb/", timeout=1800)
+            self.log("Haikyuu Fly High installiert.")
+            self.set_status("game", "installiert", OK)
+            return True
+        except Exception as e:
+            self.log(f"Installation fehlgeschlagen: {e}")
+            self.set_status("game", "Fehler", BAD)
+            return False
+        finally:
+            if work is not None:
+                import shutil
+                shutil.rmtree(work, ignore_errors=True)
 
     def wait_boot(self, index) -> bool:
         run([self.ld.adb_exe, "start-server"], timeout=30)

@@ -36,6 +36,15 @@ Jedes Konto ist an den Garena-Login gebunden, der es zuerst benutzt hat.
 
 Mehr steht in `LIESMICH.txt` im Zip.
 
+## English
+
+Own server and one-click launcher for the shut-down **Haikyuu Fly High** (Garena), played in
+LDPlayer 9/14 on Windows. Download `HFH-FlyHigh.zip` (or `HFH-FlyHigh-Admin.zip` with Admin Mode)
+from **[Releases](../../releases/latest)**, unzip, start `HFH-Launcher.exe` and log in to the game
+with your Garena account. The launcher sets everything up (server, proxy, LDPlayer, root, game),
+keeps backups of the save games and updates itself. Its window is in English on an English Windows (button “DE / EN” switches) – `README_EN.txt` in
+the zip explains every button and the admin gift-code commands.
+
 ## Selbst bauen
 
 ```powershell

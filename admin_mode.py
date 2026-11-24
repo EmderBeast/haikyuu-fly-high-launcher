@@ -13,6 +13,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from pathlib import Path
 
+import launcher_i18n as i18n
+
 BG = "#1a1a2e"
 PANEL = "#16213e"
 FG = "#eeeeee"
@@ -37,7 +39,8 @@ class GameData:
         def de(ref):
             m = re.findall(r"\d+", str(ref))
             row = lang.get(int(m[0])) if m else None
-            return (row.get("German") or row.get("English")) if row else None
+            first, second = ("English", "German") if i18n.LANG == "en" else ("German", "English")
+            return (row.get(first) or row.get(second)) if row else None
 
         self.suits = {}
         for r in load("specialtysuitconf"):
@@ -74,8 +77,18 @@ class GameData:
         return self.vice_pools.get(row.get("ViceattrPool"), [])
 
 
+class TrVar(tk.StringVar):
+    """StringVar whose texts are shown in the UI language."""
+
+    def set(self, value):
+        super().set(i18n.tr(value))
+
+
 class AdminWindow:
     def __init__(self, launcher):
+        if i18n.LANG != "de":  # rarity names are compared with the box's value: translate once
+            for k in list(RARITY):
+                RARITY[k] = i18n.tr(RARITY[k])
         self.l = launcher
         self.base = launcher.base
         self.data = GameData(self.base)
@@ -93,22 +106,29 @@ class AdminWindow:
         top.pack(fill="x", padx=14, pady=(12, 4))
         tk.Label(top, text="Admin Mode", bg=BG, fg=GOLD, font=("Segoe UI", 18, "bold")).pack(side="left")
         tk.Label(top, text="Konto:", bg=BG, fg=FG, font=("Segoe UI", 10)).pack(side="left", padx=(24, 4))
-        self.gid = tk.StringVar()
+        self.gid = tk.StringVar()  # the chosen account's gid (the box shows "name (gid)")
         gids = sorted(self.unlocked())
-        self.gid_box = ttk.Combobox(top, textvariable=self.gid, values=gids, state="readonly", width=14)
+        names = self.players()
+        self.gid_labels = {(f"{names[g]} ({g})" if names.get(g) else g): g for g in gids}
+        self.gid_label = tk.StringVar()
+        self.gid_box = ttk.Combobox(top, textvariable=self.gid_label, values=list(self.gid_labels),
+                                    state="readonly", width=30)
         self.gid_box.pack(side="left")
+        self.gid_box.bind("<<ComboboxSelected>>", self.account_chosen)
         if gids:
             owner = str(self.admins().get("owner") or "")
-            self.gid.set(owner if owner in gids else gids[-1])
+            first = owner if owner in gids else gids[-1]
+            self.gid.set(first)
+            self.gid_label.set(next(lbl for lbl, g in self.gid_labels.items() if g == first))
 
         nb = ttk.Notebook(self.win)
         nb.pack(fill="both", expand=True, padx=14, pady=6)
-        nb.add(self.tab_account(nb), text="Konto")
-        nb.add(self.tab_cards(nb), text="Charaktere & Gegenstände")
-        nb.add(self.tab_potentials(nb), text="Potentials")
-        nb.add(self.tab_power(nb), text="Stärke")
+        nb.add(self.tab_account(nb), text=i18n.tr("Konto"))
+        nb.add(self.tab_cards(nb), text=i18n.tr("Charaktere & Gegenstände"))
+        nb.add(self.tab_potentials(nb), text=i18n.tr("Potentials"))
+        nb.add(self.tab_power(nb), text=i18n.tr("Stärke"))
         if self.shared():
-            nb.add(self.tab_rights(nb), text="Rechte")
+            nb.add(self.tab_rights(nb), text=i18n.tr("Rechte"))
 
         bottom = tk.Frame(self.win, bg=BG)
         bottom.pack(fill="x", padx=14, pady=(0, 12))
@@ -117,11 +137,17 @@ class AdminWindow:
                   activebackground="#1a5276", activeforeground="white").pack(side="left")
         tk.Button(bottom, text="Admin Mode sperren", command=self.lock, bg="#53354a", fg="white",
                   font=("Segoe UI", 10), relief="flat", cursor="hand2").pack(side="right")
-        self.status = tk.StringVar(value=self.last_report())
+        self.status = TrVar(value=i18n.tr(self.last_report()))
         tk.Label(self.win, textvariable=self.status, bg=BG, fg="#9be7a5", font=("Segoe UI", 9),
                  wraplength=720, justify="left").pack(fill="x", padx=14, pady=(0, 10))
+        i18n.translate_tree(self.win)
 
     # --- files --------------------------------------------------------------------
+
+    def account_chosen(self, _event=None):
+        self.gid.set(self.gid_labels.get(self.gid_label.get(), ""))
+        if hasattr(self, "status"):
+            self.status.set(self.last_report())
 
     def unlocked(self):
         """Accounts to edit: admins, and on a shared server every player the server knows."""
@@ -248,7 +274,7 @@ class AdminWindow:
 
         self.suit = tk.StringVar()
         self.rare = tk.StringVar(value=RARITY[4])
-        self.pos = tk.StringVar(value="Platz 1")
+        self.pos = tk.StringVar(value=i18n.tr("Platz 1"))
         self.plevel = tk.IntVar(value=12)
         self.main = tk.StringVar()
         self.count = tk.IntVar(value=1)
@@ -261,7 +287,7 @@ class AdminWindow:
         ttk.Combobox(grid, textvariable=self.rare, values=list(RARITY.values()), state="readonly",
                      width=20).grid(row=1, column=1, sticky="w")
         label(2, "Platz:")
-        ttk.Combobox(grid, textvariable=self.pos, values=[f"Platz {p + 1}" for p in POSITIONS],
+        ttk.Combobox(grid, textvariable=self.pos, values=[i18n.tr(f"Platz {p + 1}") for p in POSITIONS],
                      state="readonly", width=10).grid(row=2, column=1, sticky="w")
         label(3, "Level:")
         tk.Spinbox(grid, from_=0, to=12, textvariable=self.plevel, width=5).grid(row=3, column=1, sticky="w")
@@ -334,7 +360,7 @@ class AdminWindow:
         spec = {"conf": row["ID"], "level": max(0, min(int(self.plevel.get()), MAX_LEVEL[rare])),
                 "main": GameData.id_of(self.main.get()), "vices": vices, "count": int(self.count.get())}
         self.pending_specs.append(spec)
-        self.spec_list.insert("end", self.describe(spec))
+        self.spec_list.insert("end", i18n.tr(self.describe(spec)))
 
     def add_full_set(self):
         suit = GameData.id_of(self.suit.get())
@@ -348,7 +374,7 @@ class AdminWindow:
             spec = {"conf": row["ID"], "level": level, "main": self.data.mains(row)[0], "vices": vices,
                     "count": 1}
             self.pending_specs.append(spec)
-            self.spec_list.insert("end", self.describe(spec))
+            self.spec_list.insert("end", i18n.tr(self.describe(spec)))
 
     def clear_specs(self):
         self.pending_specs.clear()
@@ -463,7 +489,7 @@ class AdminWindow:
         self.card_var.set("Alle Karten (*)")
         self.power_list.delete(0, "end")
         for key, m in self.saved_power.items():
-            self.power_list.insert("end", "gespeichert: " + self.describe_power(key, m))
+            self.power_list.insert("end", i18n.tr("gespeichert: " + self.describe_power(key, m)))
 
     def selected_card(self):
         label = self.card_var.get()
@@ -508,7 +534,7 @@ class AdminWindow:
                 stats[str(t)] = int(text)
         m = {"pct": max(1, int(self.pct.get())), "stats": stats}
         self.pending_power[key] = m
-        self.power_list.insert("end", self.describe_power(key, m))
+        self.power_list.insert("end", i18n.tr(self.describe_power(key, m)))
         self.pct.set(100)  # fresh fields for the next card
         for v in self.stat_vars.values():
             v.set("")
@@ -518,7 +544,7 @@ class AdminWindow:
         if key is None:
             return
         self.pending_power[key] = None
-        self.power_list.insert("end", self.describe_power(key, None))
+        self.power_list.insert("end", i18n.tr(self.describe_power(key, None)))
 
     def collect(self):
         actions = []
@@ -594,7 +620,7 @@ class AdminWindow:
                          "benutzt hat; ein abgelehnter Login (z. B. neues Handy) lässt sich hier freigeben.",
                  bg=PANEL, fg="#aaaaaa", font=("Segoe UI", 9), wraplength=700, justify="left").pack(
             anchor="w", padx=12, pady=(10, 4))
-        self.owner_var = tk.StringVar()
+        self.owner_var = TrVar()
         tk.Label(f, textvariable=self.owner_var, bg=PANEL, fg=GOLD, font=("Segoe UI", 10, "bold")).pack(
             anchor="w", padx=12, pady=(4, 6))
         holder = tk.Frame(f, bg=PANEL)
@@ -651,6 +677,7 @@ class AdminWindow:
             if b:
                 tk.Button(row, text="Lösen", command=lambda g=gid: self.release_login(g), bg="#53354a",
                           fg="white", relief="flat").pack(side="left", padx=2)
+        i18n.translate_tree(self.rights_frame)
 
     # token binding (server/bindings.py): an account belongs to the Garena login that used it first
 

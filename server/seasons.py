@@ -135,6 +135,8 @@ def run(now: float | None = None) -> dict:
     now = time.time() if now is None else now
     out = {"arena_daily": arena_daily(now), "arena_season": arena_season(now),
            "peak": peak_season(now), "freedom": freedom_seasons(now)}
+    import clubs
+    out["club_week"] = clubs.weekly(now)
     pvp.save()
     if any(out.values()):
         log.info(f"  SEASONS {out}")

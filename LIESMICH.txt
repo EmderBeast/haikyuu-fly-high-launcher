@@ -6,8 +6,7 @@ Voraussetzungen
 - Windows 10/11
 - LDPlayer 9 oder LDPlayer 14 (https://www.ldplayer.net) mit installiertem
   Haikyuu Fly High (com.garena.game.haikyu)
-- Root im LDPlayer: Einstellungen -> Sonstiges -> Root-Berechtigung: An
-  (der Launcher schaltet es selbst ein, wenn er den Emulator startet)
+- Root im LDPlayer (der Launcher fragt nach und schaltet es selbst ein)
 
 Start
 -----
@@ -38,6 +37,8 @@ Bedienung
                        jedem Start automatisch; die letzten 20 bleiben).
 - "Wiederherstellen"   spielt ein Backup wieder ein (der aktuelle Stand wird vorher
                        gesichert, der Server kurz neu gestartet).
+- "LDPlayer laden"     erscheint, wenn kein LDPlayer installiert ist: öffnet die
+                       Download-Seite.
 - "Update verfügbar"   erscheint, wenn es auf GitHub eine neue Version gibt: lädt sie und
                        installiert sie selbst (Launcher startet neu). Spielstände und
                        Backups bleiben erhalten.
@@ -56,8 +57,9 @@ liegen im Ordner server\accounts.
 
 Probleme
 --------
-- "kein Root": Root-Berechtigung in den LDPlayer-Einstellungen einschalten und
-  LDPlayer neu starten.
-- "nicht installiert": Haikyuu Fly High im LDPlayer installieren.
+- "kein Root": die Frage des Launchers mit "Ja" beantworten – er startet LDPlayer
+  mit Root neu. (Von Hand: LDPlayer-Einstellungen -> Sonstiges -> Root-Berechtigung: An.)
+- "nicht installiert": der Launcher fragt nach der Spieldatei (.apk, .xapk, .apks
+  oder .apkm) und installiert sie selbst.
 - Das Log unten im Fenster zeigt, woran es hängt. Es steht auch in launcher.log im
   Launcher-Ordner – die Datei bei Problemen einfach mitschicken.

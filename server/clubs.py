@@ -17,8 +17,16 @@ Clubs (Association, 0x2Exx) between the players of this server: the core of the 
   0x2E09 declaration, 0x2E19 icon (free default icons), 0x2E23 name, 0x2E18 notice board
   (AssocNotify), 0x2E1A notice read, 0x2E17 daily welfare (association DailyReward of the level)
   Club chat: chat.py, ASSOCIATION_CHAN.
-Not built: club level-up / funds, wishes and donations (0x2E11-0x2E16), boss, buffet, icon shop,
-invite / recruit messages (answered with an error). Rejoin cooldown: associationconstant 2 (24 h).
+Club values are items for the client (Bag.BagUtils.GetItemCount): 128 = the member's club points
+(AssociationNumber.gold), 129 = the club's funds (cur_funds), 130 = the member's contribution
+(contribution this week, contribution_total overall). Rewards with them (daily welfare, weekly
+benefits mail) are credited here, not to the inventory (credit(), called by server.grant_rewards).
+Club funds: at most `association` DailyMaxFund a day (daliy_funds) and MaxFund in all; 0x2E0A levels
+the club up for FundingConsume (leader / vice leader). Every week (weekly(), from seasons.run) each
+member with contribution gets the associationbenefit row of the club level as mail 214 ("Weekly Club
+Benefits"), then the week's contribution starts again. A kicked member gets mail 10.
+Wishes and donations: see the section below. Not built: boss, buffet, icon shop, invite / recruit
+messages (answered with an error). Rejoin cooldown: associationconstant 2 (24 h).
 Member limit: association PlayerCount of the level (level 1: 30). State in pvp.json ("clubs").
 """
 import asyncio
@@ -42,6 +50,9 @@ CREATE_COST = tuple(int(x) for x in (_CONST.get(1, {}).get("Data") or "108_300")
 REJOIN_WAIT = _CONST.get(2, {}).get("Number", 86400)
 FREE_ICONS = {r.get("ID", 0) for r in pvp._cfg("associationicon") if r.get("IsDefalt") == 1}
 LEADER, VICE, NORMAL = P.ASSOCIATION_LEADER, P.ASSOCIATION_VICE_LEADER, P.ASSOCIATION_NORMAL
+POINTS, FUNDS, CONTRIB = 128, 129, 130  # club items (BagUtils.GetItemCount)
+BENEFITS = pvp._cfg("associationbenefit")
+MAIL_WEEK, MAIL_KICKED = 214, 10
 MAX_NAME, MAX_TEXT, LIST_SIZE = 14, 200, 20
 
 
@@ -69,6 +80,8 @@ def _org(c: dict) -> P.AssociationOrganization:
     return P.AssociationOrganization(
         id=c["id"], lv=c.get("lv", 1), leader_id=leader, leader_name=chat.base(leader).name if leader else "",
         name=c["name"], declaration=c.get("decl", ""), review_status=c.get("review", P.ASSOCIATION_ALLOW),
+        cur_funds=c.get("funds", 0), total_funds=c.get("total_funds", 0),
+        daliy_funds=c.get("day_funds", 0) if c.get("day") == pvp._today() else 0,
         review_condtion=c.get("cond", 0), cur_count=len(c["members"]), cr_time=c["created"],
         icon_id=c.get("icon", 0), cur_day_lv=c.get("lv", 1), cur_week_lv=c.get("lv", 1),
         cur_all_notify=len(c.get("notices", [])))
@@ -78,7 +91,9 @@ def _number(c: dict, gid: int) -> P.AssociationNumber:
     m = c["members"][str(gid)]
     daily = P.ASSOC_DAILY_ALREADY if m.get("daily") == pvp._today() else P.ASSOC_DAILY_REWARD
     return P.AssociationNumber(id=gid, association_id=c["id"], position=m["pos"], in_come_time=m["joined"],
-                               update_time=m["joined"], daily_status=daily, read_notify=m.get("read", []))
+                               update_time=m["joined"], daily_status=daily, read_notify=m.get("read", []),
+                               gold=m.get("gold", 0), contribution=m.get("contrib", 0),
+                               contribution_total=m.get("contrib_total", 0))
 
 
 def base(gid: int):
@@ -132,7 +147,8 @@ def _refresh(c: dict, also: list[int] = ()):
 
 
 def on_login(client) -> list[tuple[int, bytes]]:
-    return [(MSG_INFO, info(int(client.gid)))]
+    gid = int(client.gid)
+    return [(MSG_INFO, info(gid)), (MSG_VOW_INFO, vow_info(club_of(gid))), (MSG_VOW_RECORD, vow_record(gid))]
 
 
 def _add_member(c: dict, gid: int, pos=NORMAL):
@@ -147,6 +163,60 @@ def _remove_member(c: dict, gid: int):
     c["members"].pop(str(gid), None)
     _st()["member_of"].pop(str(gid), None)
     _st()["left"][str(gid)] = int(time.time())
+
+
+def credit(gid: int, conf: int, number: int) -> bool:
+    """Credit a club item (128 / 129 / 130) to the player's club; False when it is no club item.
+    Without a club the item is dropped (nothing to credit it to)."""
+    if conf not in (POINTS, FUNDS, CONTRIB):
+        return False
+    c = club_of(gid)
+    if c is None:
+        return True
+    m = c["members"][str(gid)]
+    if conf == POINTS:
+        m["gold"] = m.get("gold", 0) + number
+    elif conf == CONTRIB:
+        m["contrib"] = m.get("contrib", 0) + number
+        m["contrib_total"] = m.get("contrib_total", 0) + number
+    else:
+        lv = _level(c)
+        if c.get("day") != pvp._today():
+            c["day"], c["day_funds"] = pvp._today(), 0
+        room = min(lv.get("DailyMaxFund", 10 ** 9) - c["day_funds"], lv.get("MaxFund", 10 ** 9) - c.get("funds", 0))
+        add = max(0, min(number, room))
+        c["funds"] = c.get("funds", 0) + add
+        c["total_funds"] = c.get("total_funds", 0) + add
+        c["day_funds"] += add
+    pvp.save()
+    _refresh(c)
+    return True
+
+
+def _week(now: float | None = None) -> str:
+    return time.strftime("%G-%V", time.localtime(time.time() if now is None else now))
+
+
+def weekly(now: float | None = None) -> int:
+    """New week: weekly benefits mail by last week's contribution, then the contribution starts again."""
+    st = _st()
+    week = _week(now)
+    if st.get("week") == week:
+        return 0
+    first = "week" not in st
+    st["week"] = week
+    sent = 0
+    for c in ([] if first else st["clubs"].values()):
+        for g, m in c["members"].items():
+            got = m.get("contrib", 0)
+            row = next((r for r in BENEFITS if r.get("AssociationLevel") == c.get("lv", 1)
+                        and r["Contribution"][0] <= got <= r["Contribution"][1]), None)
+            if got > 0 and row:
+                mail.send(int(g), mail.make(MAIL_WEEK, items=_kv(row.get("WeekReward")), args=[got], now=now))
+                sent += 1
+            m["contrib"] = 0
+    pvp.save()
+    return sent
 
 
 def _full(c: dict) -> bool:
@@ -193,7 +263,7 @@ async def handle_create(client, pb: bytes):
         entry = acc.set_currency(cid, have - cost)
         await client.send_packet(MSG_CURRENCY_CHANGE, wire.build([(1, 2, entry)]))
     else:
-        await client.send_packet(0x0802, acc.set_item(cid, have - cost))
+        await client.send_packet(0x0802, wire.build([(1, 2, acc.set_item(cid, have - cost))]))
     acc.save()
     st = _st()
     c = {"id": st["next"], "name": name, "decl": req.read_str[:MAX_TEXT], "icon": req.icon_id if req.icon_id in FREE_ICONS else 0,
@@ -326,6 +396,7 @@ async def handle_exit(client, pb: bytes):
         await _reply(client, MSG_EXIT, "AssociationExitS2C", err=1, target_id=t)
         return
     _remove_member(c, t)
+    mail.send(t, mail.make(MAIL_KICKED))
     pvp.save()
     await _reply(client, MSG_EXIT, "AssociationExitS2C", target_id=t)
     _push(t, MSG_EXIT, P.AssociationExitS2C(target_id=t).SerializeToString())  # kicked: KickOut
@@ -419,8 +490,188 @@ async def handle_daily(client, pb: bytes):
     await pvp.HOOKS["grant_rewards"](client, _kv(_level(c).get("DailyReward")), True)
 
 
+async def handle_level(client, pb: bytes):
+    """0x2E0A: club level up for the level's FundingConsume (club funds), leader / vice leader."""
+    c = _officer(client)
+    cost = dict(_kv(_level(c).get("FundingConsume"))).get(FUNDS, 0) if c else 0
+    if not c or c.get("lv", 1) + 1 not in LEVELS or c.get("funds", 0) < cost:
+        await _reply(client, MSG_LV, "AssociationLvS2C", err=1)
+        return
+    c["funds"] -= cost
+    c["lv"] = c.get("lv", 1) + 1
+    pvp.save()
+    await _reply(client, MSG_LV, "AssociationLvS2C")
+    _refresh(c)
+
+
 async def handle_unbuilt(client, pb: bytes, msg_id: int, cls: str):
     await _reply(client, msg_id, cls, err=1)
+
+
+# --- wishes and donations (0x2E11-0x2E16) ------------------------------------------------------------
+# A member wishes for shards of a player (piecemerge: player_id -> shard item), once a day
+# (associationconstant 11). Other members donate one shard each (at most constant 10 = 3 a day); a
+# wish takes at most GetMaxWishShardCount(shard rarity) = constants 12-16 (5/5/3/3/1), and the donor
+# gets that constant's Data ("128_100,129_20,130_20": club points / funds / contribution). The wisher
+# collects with 0x2E14; shards still uncollected when the wish ends (next day) come as mail 212.
+# 0x2E11 AssociationVowInfoS2C{all, data: AssociationExtendVow} goes to every online member after a
+# change; 0x2E12 AssociationVowRecordS2C{donate_record, donee_record, extend_data} to the player.
+MSG_VOW_INFO, MSG_VOW_RECORD, MSG_THANK, MSG_RECEIVE, MSG_DONATE, MSG_WISH = range(0x2E11, 0x2E17)
+PIECES = {r["ID"]: r["Pieceid"] for r in pvp._cfg("piecemerge")}
+_ITEMS = {r["ID"]: r for r in pvp._cfg("item")}
+WISHES_PER_DAY = _CONST.get(11, {}).get("Number", 1)
+DONATES_PER_DAY = _CONST.get(10, {}).get("Number", 3)
+MAIL_SHARDS = 212
+
+
+def _rarity_row(player_id: int) -> dict:
+    rare = _ITEMS.get(PIECES.get(player_id, 0), {}).get("Itemrare", 1)
+    return _CONST.get(11 + max(1, min(5, rare)), {})
+
+
+def _wish_max(player_id: int) -> int:
+    return _rarity_row(player_id).get("Number", 1)
+
+
+def _donor_reward(player_id: int) -> list[tuple[int, int]]:
+    data = _rarity_row(player_id).get("Data") or ""
+    return [tuple(int(x) for x in part.split("_")) for part in data.split(",") if "_" in part]
+
+
+def _today_of(m: dict) -> dict:
+    if m.get("vow_day") != pvp._today():
+        m.update(vow_day=pvp._today(), wished=0, donated=0)
+    return m
+
+
+def _expire_wishes(c: dict):
+    """Wishes of earlier days end; uncollected shards go to the wisher by mail."""
+    keep = {}
+    for g, w in c.setdefault("wishes", {}).items():
+        if w["day"] == pvp._today():
+            keep[g] = w
+            continue
+        left = w["got"] - w.get("taken", 0)
+        if left > 0:
+            mail.send(int(g), mail.make(MAIL_SHARDS, items=[(PIECES.get(w["player"], 0), left)]))
+    c["wishes"] = keep
+
+
+def _vow(g: str, w: dict) -> P.AssociationExtendVow:
+    """donor_record = donations not collected yet (the client collects when it is not empty)."""
+    return P.AssociationExtendVow(gid=int(g), player_id=w["player"], get_num=w["got"], vow_time=w["time"],
+                                  donor_record=w.get("donors", [])[w.get("taken", 0):])
+
+
+def vow_info(c: dict | None) -> bytes:
+    out = P.AssociationVowInfoS2C(all=True)
+    if c:
+        _expire_wishes(c)
+        out.data.extend(_vow(g, w) for g, w in c["wishes"].items())
+    return out.SerializeToString()
+
+
+def _record(r: dict) -> P.AssociationExtandVowRecord:
+    b = base(r["gid"])
+    return P.AssociationExtandVowRecord(inst_id=r["id"], gid=r["gid"], op_time=r["time"], is_thank=r.get("thank", False),
+                                        icon=b.icon, icon_frame=b.icon_frame, name=b.name, chip_id=r["chip"], chip_num=1)
+
+
+def vow_record(gid: int) -> bytes:
+    c = club_of(gid)
+    out = P.AssociationVowRecordS2C(all=True)
+    if c:
+        m = _today_of(c["members"][str(gid)])
+        recs = c.setdefault("vow_records", [])
+        out.donate_record.extend(_record(dict(r, gid=r["to"])) for r in recs if r["from"] == gid)
+        out.donee_record.extend(_record(dict(r, gid=r["from"])) for r in recs if r["to"] == gid)
+        out.extend_data.CopyFrom(P.AssociationExtendVowData(wish_num=m["wished"], donate_num=m["donated"],
+                                                            last_player_id=m.get("last_wish", 0)))
+    return out.SerializeToString()
+
+
+def _vow_refresh(c: dict, also: tuple = ()):
+    pb = vow_info(c)
+    for g in list(c["members"]) + [str(x) for x in also]:
+        _push(int(g), MSG_VOW_INFO, pb)
+        _push(int(g), MSG_VOW_RECORD, vow_record(int(g)))
+
+
+async def handle_wish(client, pb: bytes):
+    gid = int(client.gid)
+    pid = P.AssociationVowWishC2S.FromString(pb).player_id
+    c = club_of(gid)
+    m = _today_of(c["members"][str(gid)]) if c else None
+    if not c or pid not in PIECES or m["wished"] >= WISHES_PER_DAY or str(gid) in c.get("wishes", {}):
+        await _reply(client, MSG_WISH, "AssociationVowWishS2C", err=1)
+        return
+    _expire_wishes(c)
+    c["wishes"][str(gid)] = {"player": pid, "got": 0, "taken": 0, "time": int(time.time()), "day": pvp._today(),
+                             "donors": []}
+    m["wished"] += 1
+    m["last_wish"] = pid
+    pvp.save()
+    await _reply(client, MSG_WISH, "AssociationVowWishS2C")
+    _vow_refresh(c)
+
+
+async def handle_donate(client, pb: bytes):
+    req = P.AssociationVowDonateC2S.FromString(pb)
+    gid, acc = int(client.gid), client.account
+    c = club_of(gid)
+    w = c.get("wishes", {}).get(str(req.donee_id)) if c else None
+    chip = PIECES.get(w["player"], 0) if w else 0
+    m = _today_of(c["members"][str(gid)]) if c else None
+    if (not w or req.donee_id == gid or w["day"] != pvp._today() or w["got"] >= _wish_max(w["player"])
+            or m["donated"] >= DONATES_PER_DAY or acc.item_count(chip) < 1):
+        await _reply(client, MSG_DONATE, "AssociationVowDonateS2C", err=1)
+        return
+    await client.send_packet(0x0802, wire.build([(1, 2, acc.set_item(chip, acc.item_count(chip) - 1))]))
+    acc.save()
+    rec = {"id": int(time.time() * 1000) * 1000 + len(c.setdefault("vow_records", [])) % 1000, "from": gid,
+           "to": req.donee_id, "time": int(time.time()), "chip": chip}
+    c["vow_records"] = (c["vow_records"] + [rec])[-200:]
+    w["got"] += 1
+    w["donors"].append(rec["id"])
+    m["donated"] += 1
+    pvp.save()
+    await _reply(client, MSG_DONATE, "AssociationVowDonateS2C")
+    await pvp.HOOKS["grant_rewards"](client, _donor_reward(w["player"]), True)
+    _vow_refresh(c)
+
+
+async def handle_receive(client, pb: bytes):
+    """The client sends this whenever the wish view opens (AssociationShardViewLogic.CheckSelfHaveWish)
+    and shows the reward view when data.donor_record is not empty: answer without an error and with
+    only the donations not collected yet."""
+    gid = int(client.gid)
+    c = club_of(gid)
+    w = c.get("wishes", {}).get(str(gid)) if c else None
+    left = w["got"] - w.get("taken", 0) if w else 0
+    if left <= 0:
+        await _reply(client, MSG_RECEIVE, "AssociationVowReceiveS2C")
+        return
+    out = P.AssociationVowReceiveS2C()
+    out.data.CopyFrom(_vow(str(gid), w))  # the new donations (shown in the reward view)
+    w["taken"] = w["got"]
+    pvp.save()
+    await client.send_packet(MSG_RECEIVE, out.SerializeToString())
+    await pvp.HOOKS["grant_rewards"](client, [(PIECES[w["player"]], left)], True)
+    _vow_refresh(c)
+
+
+async def handle_thank(client, pb: bytes):
+    gid = int(client.gid)
+    inst = P.AssociationVowThankC2S.FromString(pb).inst_id
+    c = club_of(gid)
+    rec = next((r for r in c.get("vow_records", []) if r["id"] == inst and r["to"] == gid), None) if c else None
+    if not rec or rec.get("thank"):
+        await _reply(client, MSG_THANK, "AssociationVowThankS2C", err=1)
+        return
+    rec["thank"] = True
+    pvp.save()
+    await _reply(client, MSG_THANK, "AssociationVowThankS2C")
+    _vow_refresh(c)
 
 
 HANDLERS = {
@@ -428,7 +679,8 @@ HANDLERS = {
     MSG_JOIN: handle_join, MSG_REVIEW: handle_review, MSG_APPOINT: handle_appoint, MSG_EXIT: handle_exit,
     MSG_DISBAND: handle_disband, MSG_DECL: handle_declaration, MSG_ICON: handle_icon, MSG_NAME: handle_name,
     MSG_NOTIFY: handle_notify, MSG_READ: handle_read, MSG_DAILY: handle_daily,
-    MSG_LV: lambda c, pb: handle_unbuilt(c, pb, MSG_LV, "AssociationLvS2C"),
+    MSG_LV: lambda c, pb: handle_level(c, pb),
+    MSG_WISH: handle_wish, MSG_DONATE: handle_donate, MSG_RECEIVE: handle_receive, MSG_THANK: handle_thank,
     MSG_INVITE: lambda c, pb: handle_unbuilt(c, pb, MSG_INVITE, "AssociationInviteS2C"),
     MSG_RECRUIT: lambda c, pb: handle_unbuilt(c, pb, MSG_RECRUIT, "AssociationRecruitS2C"),
 }

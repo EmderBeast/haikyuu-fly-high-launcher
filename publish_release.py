@@ -43,7 +43,7 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # what the public repo contains (paths at origin/main); server/*.py is added automatically
 PUBLIC_FILES = [
-    "launcher.py", "admin_mode.py", "build_launcher.py", "publish_release.py", "LIESMICH.txt",
+    "launcher.py", "launcher_i18n.py", "admin_mode.py", "build_launcher.py", "publish_release.py", "LIESMICH.txt", "README_EN.txt",
     "patch/mitm_redirect.py", "decoded/message_ids.json", "decoded/proto/haikyuu.proto",
     "server/data/anim_table.json", "server/data/rallies.bin",
     "server/data/login_sync.json", "server/data/replies.json",

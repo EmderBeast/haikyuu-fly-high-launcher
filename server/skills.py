@@ -34,10 +34,16 @@ T_MATCH, T_SET, T_RALLY, T_OWN_SCORE, T_OTHER_SCORE, T_NET, T_TOUCH = 1, 2, 3, 4
 T_SERVE, T_DIG_SERVE, T_SAVE, T_SET_TOUCH, T_SPIKE, T_BLOCK, T_DIG_SPIKE, T_DIG_NO_ATTACK = range(8, 16)
 T_BOTH_TOUCH, T_OWN_TOUCH, T_OTHER_SPIKE = 18, 19, 20
 ENERGY_MAX = 120.0
+EARLY_TP5 = True
+RESULT_KEYS = {"TouchBallEvaluate", "IsFormulaCrit", "IsCurrentFormulaCrit", "OwnFRWithStep", "OtherFRWithStep",
+               "OwnFormulaResult", "OwnTounchBallNumber", "LastFormula"}
+TOUCH_OK = {1: 1, 2: 3, 3: 3, 4: 4, 5: 4, 6: 2, 7: 3, 8: 3}  # formula -> lowest result that is not BAD
+TOUCH_TOP = {1: 1, 2: 5, 3: 5, 4: 6, 5: 6, 6: 3, 7: 5, 8: 5}  # formula -> the PERFECT result
 COUNTERS = {0: 3, 3: 1, 1: 2, 2: 0}  # Lineup Specialty -> the one it counters
 STATE_SKILLS = True
 _CHECKABLE: dict[int, bool] = {}  # skill id -> all its trigger keys are known
 USE_UP = False  # an armed buff stays when its lent skill has run (Garena never sent its removal)
+OWN_CLOCKS = False  # OverlayType 1 stacks with their own duration: no gain on the captures so far
 GRANTED = True  # armed buffs lend skills (False: the older "armed buff turns into its inner buff")
 STAMINA = 8  # property id
 FATIGUE_20, FATIGUE_50, FATIGUE_IMMUNE = 20019, 20020, 20021
@@ -47,7 +53,7 @@ CATCH = {2, 3, 7, 8}
 FORMULA_PROP = {1: 5, 2: 4, 3: 6, 4: 2, 5: 1, 6: 3, 7: 4, 8: 4}  # stat each formula uses
 TOUCH_KEYS = {"GetSelfFormulaType", "SelfFormulaIsCatch", "SelfTouchBallMan", "MyTouchBallSkillTagType",
               "TouchBallSkillTagType", "OwnPlayerUniqueSkillTagType", "TouchBallPlayerProfile",
-              "SelfFormulaTypeIsAttack", "OwnTounchBallNumber",
+              "SelfFormulaTypeIsAttack", "OwnTounchBallNumber", "TouchBallEvaluate",
               "OwnPlayerTouchBallSkillTagType", "TouchBallTeam", "Link", "IsFormulaCrit", "IsCurrentFormulaCrit",
               "TouchBallSkillUnique", "LastFormula", "IAttackType", "OwnFRWithStep", "OtherFRWithStep",
               "OwnFormulaResult", "SelfIsLastTouchBallMan", "OwnLastTouchBallManIsSelf", "ParticipateMultipleBlock"}
@@ -119,6 +125,7 @@ class Buff:
     left: int | None  # remaining duration in row Time units (None = until removed)
     caster: int
     level: int = 1  # level of the skill that gave it (armed buffs convert to the inner buff of that level)
+    lefts: list | None = None  # OverlayType 1: remaining duration of every stack (each has its own clock)
 
 
 @dataclass
@@ -259,6 +266,11 @@ class Battle:
         self.changes.append(BuffChange(("e", pid), 0, new, 0))
         ratio = new / ENERGY_MAX
         me = ("p", pid)
+        # system skills 20023-20025: on every stamina change the fatigue buff that no longer fits goes
+        if self.stacks(me, FATIGUE_20) and (ratio <= 0.05 or ratio > 0.20):
+            self.remove_buff(me, FATIGUE_20)
+        if self.stacks(me, FATIGUE_50) and ratio > 0.05:
+            self.remove_buff(me, FATIGUE_50)
         if not self.stacks(me, FATIGUE_IMMUNE):
             if 0.05 < ratio <= 0.20 and not self.stacks(me, FATIGUE_20):
                 self.add_buff(me, FATIGUE_20, 1, pid)
@@ -298,14 +310,20 @@ class Battle:
             if _num(keeper.row.get("Type")) == 13 and _flat(keeper.row.get("ModifyTarget")) == [0, buff_id]:
                 left = max(left or 0, self._args(keeper.row)[0] // 10000)
         b = have.get(buff_id)
+        own_clock = OWN_CLOCKS and left is not None and _num(row.get("OverlayType"), 2) == 1
         if b and _num(row.get("OverlayType"), 2) in (1, 3):
             b.stacks = min(limit, b.stacks + stacks)
             b.left = left
+            if own_clock:  # every stack runs for itself; at the limit the oldest stacks are renewed
+                b.lefts = sorted((b.lefts or []) + [left] * stacks)[-limit:]
+                b.stacks = len(b.lefts)
         elif b:
             b.stacks = min(limit, max(b.stacks, stacks))
             b.left = left
         else:
             b = have[buff_id] = Buff(buff_id, row, min(limit, stacks), left, caster, level)
+            if own_clock:
+                b.lefts = [left] * b.stacks
         self.changes.append(BuffChange(entity, buff_id, b.stacks, b.left or 0))
         btype = _num(row.get("Type"))
         if btype == 13:  # duration keeper (captures: 111851121 keeps the marker 55011131 for 99 rallies)
@@ -347,6 +365,15 @@ class Battle:
                 b = have[bid]
                 if b.left is None or _num(b.row.get("Time")) != unit:
                     continue
+                if b.lefts:
+                    b.lefts = [x - 1 for x in b.lefts if x > 1]
+                    if b.lefts:
+                        if len(b.lefts) != b.stacks:
+                            b.stacks = len(b.lefts)
+                            self.changes.append(BuffChange(entity, bid, b.stacks, max(b.lefts)))
+                        b.left = max(b.lefts)
+                        continue
+                    b.left = 1
                 b.left -= 1
                 if b.left <= 0:
                     del have[bid]
@@ -357,6 +384,8 @@ class Battle:
             if pids is not None and pid not in pids:
                 continue
             if team is not None and self.team_of(pid) != team:
+                continue
+            if self.cd.get((pid, sid)) is not c:  # ended meanwhile by a skill that ran in this loop
                 continue
             c[1] -= 1
             if c[1] <= 0:
@@ -372,27 +401,61 @@ class Battle:
         self._cd_tag = tag
         try:
             ctx = Ctx("cd", pid)
-            for skill, lv in list(self.skills.get(pid, [])):
-                if any(t.get("Key") == "TagTypeSkillCDComplete" for t in skill.get("Trigger") or []):
-                    self._run(skill, pid, lv, ctx)
+            # for everyone on the team: in the captures 51045211 of card 5104 also comes when a
+            # teammate's Block Ultimate is ready again
+            for mate in [p for p in self.cards if self.team_of(p) == self.team_of(pid)]:
+                for skill, lv in list(self.skills.get(mate, [])):
+                    if any(t.get("Key") == "TagTypeSkillCDComplete" for t in skill.get("Trigger") or []):
+                        self._run(skill, mate, lv, ctx)
         finally:
             self._cd_tag = None
 
+    def _cd_skills(self, pid: int, row) -> list[int] | None:
+        """Skill ids of pid a cooldown buff (Type 5) acts on. ModifyTarget = [mode, selector, ...]:
+        selector 2 = the listed skills, 5 = ultimate-type skills with a listed tag, 6 = Block Ultimates
+        (skill text of card 5702: "Block Ultimate cooldown duration decreases by 4" is [1, 6] -4),
+        3 = every skill. None = a selector we cannot read."""
+        tg = _flat(row.get("ModifyTarget"))
+        sel, rest = (tg[1] if len(tg) > 1 else 2), tg[2:]
+        own = [sk for sk, _ in self.skills.get(pid, [])]
+        if sel == 2:
+            return list(rest)
+        if sel == 3:
+            return [sk["ID"] for sk in own]
+        if sel in (5, 6):
+            tags = set(rest) if sel == 5 else {2}
+            return [sk["ID"] for sk in own if _num(sk.get("Type")) & DRIVING and _num(sk.get("SkillTagType")) in tags]
+        return None
+
+    def _cd_length(self, pid: int, skill: dict) -> int:
+        """Cooldown a skill starts with: its CDValue and the cooldown-length buffs (mode 1) on the player."""
+        base = max(_flat(skill.get("CDValue")) or [1])
+        change = 0
+        for b in self._active(pid):
+            # modes 1 and 2 change the length (captures: 5702's own [2, 2, 57024111] -2 counts with the
+            # [1, 6] -4 he gives: 12 - 6 is under 8, the 12 - 4 of card 5302 is not)
+            if _num(b.row.get("Type")) == 5 and (_flat(b.row.get("ModifyTarget")) or [0])[0] in (1, 2):
+                ids = self._cd_skills(pid, b.row)
+                if ids and skill["ID"] in ids:
+                    change += self._args(b.row)[0] // 10000 * b.stacks
+        return max(base + change, 0)
+
     def _cd_change(self, entity, row):
-        targets = _flat(row.get("ModifyTarget"))[2:]
         amount = self._args(row)[0]
         pids = [entity[1]] if entity[0] == "p" else self.members(entity[1])
         for pid in pids:
-            for sid in targets:
+            for sid in self._cd_skills(pid, row) or []:
                 c = self.cd.get((pid, sid))
                 if not c:
                     continue
                 if amount <= -900000:
-                    del self.cd[(pid, sid)]
+                    self.cd.pop((pid, sid), None)
+                    self._cd_done(pid, sid)
                 else:
                     c[1] += amount // 10000
                     if c[1] <= 0:
-                        del self.cd[(pid, sid)]
+                        self.cd.pop((pid, sid), None)
+                        self._cd_done(pid, sid)
 
     @staticmethod
     def _args(row) -> list[int]:
@@ -601,10 +664,7 @@ class Battle:
                     if _num(sk.get("SkillTagType")) == arg and _num(sk.get("Type")) & DRIVING]
             if not mine:
                 return -1
-            base = max(max(_flat(sk.get("CDValue")) or [0]) for sk in mine)
-            change = sum(self._args(b.row)[0] / 10000 * b.stacks for b in self._active(owner)
-                         if _num(b.row.get("Type")) == 5)
-            return max(base + change, 0)
+            return max(self._cd_length(owner, sk) for sk in mine)
         if key in ("TouchBallSkillTagType", "OwnPlayerUniqueSkillTagType"):
             if ctx.event not in ("touch", "after") or ctx.actor is None:
                 return False
@@ -626,8 +686,20 @@ class Battle:
             return ctx.event == "cd" and self._cd_tag is not None and (not arg or arg == self._cd_tag)
         if key == "HaveBuffTag":  # comes with a BuffNumber condition that names the buff
             return 0xFFFF
-        if key == "OwnTounchBallNumber":  # (sic) a touch of our team
-            return ctx.event in ("touch", "after") and ctx.actor is not None and self.team_of(ctx.actor) == team
+        if key == "OwnTounchBallNumber":
+            # (sic) a touch of our team after which the ball stays with us: captures of 58011121, which
+            # never ran after serves, spikes and stuff blocks
+            if ctx.event not in ("touch", "after") or ctx.actor is None or self.team_of(ctx.actor) != team:
+                return False
+            return ctx.formula not in (1, 5) and not (ctx.formula == 6 and ctx.result == 3)
+        if key == "TouchBallEvaluate":
+            # 0 BAD, 1 normal, 2 PERFECT (the label the client shows). Captures of 58011121 ("a touch
+            # that is not BAD"): receives from result 3, sets from 4, blocks with a touch (2)
+            if ctx.event != "after" or (arg and not me):
+                return -1
+            if ctx.result < TOUCH_OK.get(ctx.formula, 3):
+                return 0
+            return 2 if ctx.result >= TOUCH_TOP.get(ctx.formula, 5) else 1
         if key == "OtherLastTouchBallManAttackType":  # 1 power / 2 quick, like IAttackType
             h = self._last(1 - team)
             if not h:
@@ -810,7 +882,9 @@ class Battle:
         if cost:
             self.spend(owner, cost)
         if _num(skill.get("CDType")):
-            self.cd[(owner, sid)] = [skill["CDType"], max(_flat(skill.get("CDValue")) or [1])]
+            length = self._cd_length(owner, skill)
+            if length > 0:
+                self.cd[(owner, sid)] = [skill["CDType"], length]
         self.casts.append(Cast(sid, owner, level))
         return True
 
@@ -820,7 +894,7 @@ class Battle:
         else touch-related keys with the TimePoint (before/after the touch), else rally start."""
         keys = {t.get("Key") for t in skill.get("Trigger") or []}
         if not keys:  # no trigger at all: checked before every touch (Garena casts e.g. 55015431 then)
-            return "after" if _num(skill.get("TimePoint")) in (4, 5, 6, 8, 9) else "touch"
+            return Battle._touch_event(skill, keys)
         if keys & {"RoundStart", "ToPosition"}:
             return "start"
         if "TagTypeSkillCDComplete" in keys:
@@ -830,8 +904,18 @@ class Battle:
         if "BallOverNet" in keys:
             return "over"
         if keys & TOUCH_KEYS:
-            return "after" if _num(skill.get("TimePoint")) in (4, 5, 6, 8, 9) else "touch"
+            return Battle._touch_event(skill, keys)
         return "start"
+
+    @staticmethod
+    def _touch_event(skill: dict, keys: set) -> str:
+        """Before or after the touch. TimePoint 5 skills come with the announcement of the touch in the
+        captures (57011121: the toucher's own touch already has the bonus) unless they ask for the
+        outcome of the touch."""
+        tp = _num(skill.get("TimePoint"))
+        if tp == 5 and EARLY_TP5:
+            return "after" if keys & RESULT_KEYS else "touch"
+        return "after" if tp in (4, 5, 6, 8, 9) else "touch"
 
     def fire(self, ctx: Ctx, owners=None):
         """Check every passive skill that belongs to this event, for all owners (default: everyone)."""
@@ -1126,7 +1210,7 @@ class Battle:
 
     # ------------------------------------------------ re-simulation support
     def snapshot(self):
-        return ({e: {k: Buff(b.id, b.row, b.stacks, b.left, b.caster, b.level) for k, b in have.items()}
+        return ({e: {k: Buff(b.id, b.row, b.stacks, b.left, b.caster, b.level, list(b.lefts) if b.lefts else None) for k, b in have.items()}
                  for e, have in self.buffs.items()},
                 {k: list(v) for k, v in self.cd.items()}, dict(self.energy), list(self.morale),
                 set(self.on_court), set(self.was_on_court), list(self.morale_active),
@@ -1136,7 +1220,7 @@ class Battle:
         buffs, cd, energy, morale, on, was, active, ever, behind, self.last_winner, slot = snap
         self.slot = dict(slot)
         self.ever_on_court, self.behind_libero = set(ever), set(behind)
-        self.buffs = {e: {k: Buff(b.id, b.row, b.stacks, b.left, b.caster, b.level) for k, b in have.items()}
+        self.buffs = {e: {k: Buff(b.id, b.row, b.stacks, b.left, b.caster, b.level, list(b.lefts) if b.lefts else None) for k, b in have.items()}
                       for e, have in buffs.items()}
         self.cd = {k: list(v) for k, v in cd.items()}
         self.energy, self.morale = dict(energy), list(morale)
