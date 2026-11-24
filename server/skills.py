@@ -34,7 +34,7 @@ T_MATCH, T_SET, T_RALLY, T_OWN_SCORE, T_OTHER_SCORE, T_NET, T_TOUCH = 1, 2, 3, 4
 T_SERVE, T_DIG_SERVE, T_SAVE, T_SET_TOUCH, T_SPIKE, T_BLOCK, T_DIG_SPIKE, T_DIG_NO_ATTACK = range(8, 16)
 T_BOTH_TOUCH, T_OWN_TOUCH, T_OTHER_SPIKE = 18, 19, 20
 ENERGY_MAX = 120.0
-BOSS_TYPE = 9  # FIGHT_TYPE FIGHT_ASSOC_BOSS
+COUNTERS = {0: 3, 3: 1, 1: 2, 2: 0}  # Lineup Specialty -> the one it counters
 STATE_SKILLS = True
 _CHECKABLE: dict[int, bool] = {}  # skill id -> all its trigger keys are known
 USE_UP = False  # an armed buff stays when its lent skill has run (Garena never sent its removal)
@@ -157,7 +157,11 @@ class Battle:
 
     def __init__(self, info, stats: dict):
         self.stats = stats  # base attributes (engine.stats_for)
-        self.boss_mode = info.room_args.pvp_type == BOSS_TYPE
+        # Lineup Specialty (formation.genre: 0 Power ATK, 1 Quick ATK, 2 Block, 3 Receive, 4 none).
+        # Rule text of the game: Power Attack counters Receive, Receive counters Quick Attack, Quick
+        # Attack counters Block, Block counters Power Attack.
+        genre = {HOST: info.home.formation.genre.value, GUEST: info.away.formation.genre.value}
+        self.counter = {t: COUNTERS.get(genre[t]) == genre[1 - t] for t in (HOST, GUEST)}
         self.cards = {}
         self.skills: dict[int, list[tuple[dict, int]]] = {}
         extras = {}  # pid -> skill ids Garena listed for the player (PlayerCardInfo.skill_extras)
@@ -209,6 +213,7 @@ class Battle:
         self.slot = {pid: pid % TEAM_IDS for pid in self.cards if pid % TEAM_IDS < 6}
         self._copying = False
         self._lender: int | None = None  # caster of the armed buff whose lent skill is being checked
+        self._cd_tag: int | None = None  # tag of the skill whose cooldown just ended (see _cd_done)
         self.history: list[tuple] = []  # (team, link, formula, result, player, crit) this rally
         self.casts: list[Cast] = []  # collected since the last flush
         self.changes: list[BuffChange] = []
@@ -356,6 +361,22 @@ class Battle:
             c[1] -= 1
             if c[1] <= 0:
                 del self.cd[(pid, sid)]
+                self._cd_done(pid, sid)
+
+    def _cd_done(self, pid: int, sid: int):
+        """A skill is ready again: skills with a TagTypeSkillCDComplete trigger (TimePoint 11) of that
+        player run, e.g. 51045211 "+10 % stats for everyone on court when the Block Ultimate is ready"."""
+        tag = _num(SKILLS.get(sid, {}).get("SkillTagType"))
+        if not tag or self._cd_tag is not None:
+            return
+        self._cd_tag = tag
+        try:
+            ctx = Ctx("cd", pid)
+            for skill, lv in list(self.skills.get(pid, [])):
+                if any(t.get("Key") == "TagTypeSkillCDComplete" for t in skill.get("Trigger") or []):
+                    self._run(skill, pid, lv, ctx)
+        finally:
+            self._cd_tag = None
 
     def _cd_change(self, entity, row):
         targets = _flat(row.get("ModifyTarget"))[2:]
@@ -462,9 +483,9 @@ class Battle:
         if key == "Score":
             return ctx.event == "end" and ctx.scorer == team
         if key == "TeamBeat":
-            # the club boss mode: in the captures these skills never ran in other modes and ran from
-            # the first rally on in the FIGHT_ASSOC_BOSS match (bond 1213: +15 % stats for everyone)
-            return self.boss_mode
+            # "when your Lineup Specialty counters the opponent's" (skill texts); in the captures bond
+            # 1213 ran only in the one match where the home specialty countered
+            return self.counter[team]
         if key == "ParticipateMultipleBlock":  # our blocks: the front row joins every block
             return (ctx.formula == 6 and ctx.actor is not None and self.team_of(ctx.actor) == team
                     and (owner == ctx.actor or owner in self.front.get(team, ())))
@@ -601,6 +622,8 @@ class Battle:
             return self.jobs.get(ctx.actor, 0) if ctx.actor is not None else 0
         if key == "SelfFormulaTypeIsAttack":
             return me and ctx.formula in (1, 4, 5)
+        if key == "TagTypeSkillCDComplete":  # see _cd_done
+            return ctx.event == "cd" and self._cd_tag is not None and (not arg or arg == self._cd_tag)
         if key == "HaveBuffTag":  # comes with a BuffNumber condition that names the buff
             return 0xFFFF
         if key == "OwnTounchBallNumber":  # (sic) a touch of our team
@@ -800,6 +823,8 @@ class Battle:
             return "after" if _num(skill.get("TimePoint")) in (4, 5, 6, 8, 9) else "touch"
         if keys & {"RoundStart", "ToPosition"}:
             return "start"
+        if "TagTypeSkillCDComplete" in keys:
+            return "cd"
         if keys & {"RoundEnd", "Score"}:
             return "end"
         if "BallOverNet" in keys:

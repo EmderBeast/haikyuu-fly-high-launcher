@@ -59,4 +59,5 @@ Probleme
 - "kein Root": Root-Berechtigung in den LDPlayer-Einstellungen einschalten und
   LDPlayer neu starten.
 - "nicht installiert": Haikyuu Fly High im LDPlayer installieren.
-- Das Log unten im Fenster zeigt, woran es hängt.
+- Das Log unten im Fenster zeigt, woran es hängt. Es steht auch in launcher.log im
+  Launcher-Ordner – die Datei bei Problemen einfach mitschicken.

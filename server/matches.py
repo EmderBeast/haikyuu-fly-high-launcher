@@ -166,6 +166,8 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
     if form:  # "Preset Sub Position": who the libero replaces (none = he stays on the bench)
         team.formation.libero_replace_type = form.libero_replace_type
         team.formation.auto_replace = form.auto_replace
+        if form.HasField("genre"):  # Lineup Specialty of this line-up (decides the Specialty Counter)
+            team.formation.genre.CopyFrom(form.genre)
     for inst in _lineup(acc, fight_type)[:TEAM_SIZE]:
         raw = acc.get_card(inst)
         if not raw:

@@ -33,6 +33,7 @@ JOB_LIBERO = 4  # battleconstant MaxCrossNetNum
 # often than the raw spike-vs-dig power suggests (best fit on the captured touches, scratch fit3.py)
 CATCH_BIAS = 1.5
 DIG_ROW = 4
+RESTRAINT = 1.15  # Specialty Counter factor (some skills raise it: 1.2 in one captured match)
 FIRST_ATTACK, LATER_ATTACK = 0.25, 1.45  # factor on DIG_FAIL for the first / the later attacks of a rally
 REROLL_FAIL = {DIG_SERVE: 0.8, SAVE: 0.35, SERVE: 0.6}
 # chance that a dig fails: spike result -> (dig weaker than the spike, dig stronger)
@@ -166,9 +167,12 @@ def power(stats: dict, pid: int, formula: int, rng=random, multiplier: float = 1
     crit_dmg = 1.5 + dmg if crit else 1.0
     dmg_bonus = 1.0 + bonus
     k = K.get(formula, 1)
-    v = attr * multiplier * crit_dmg * dmg_bonus * k
+    # a team whose Lineup Specialty counters the opponent's plays every action with the counter factor
+    # (captures: 1.15 on all home touches in the match where Quick ATK met Block)
+    restraint = RESTRAINT if battle and battle.counter[team_of(pid)] else 1.0
+    v = attr * multiplier * crit_dmg * dmg_bonus * restraint * k
     des = (f"{v:.3f} = (属性值){attr:.4f} * (倍率){multiplier:.4g} * (爆伤){crit_dmg:.4g} * (增伤){dmg_bonus:.4g}"
-           f" * (威力)1 * (克制系数)1 * (k){k}")
+           f" * (威力)1 * (克制系数){restraint:.4g} * (k){k}")
     return Power(v, 2 * v / k, crit, des)
 
 

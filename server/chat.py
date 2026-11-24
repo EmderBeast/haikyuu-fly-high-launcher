@@ -48,7 +48,17 @@ def base(gid: int) -> P.FriendBase:
     client = mail.ONLINE.get(gid)
     if client is None:
         out.logout_time = int(snap.get("time", 0))
+    import clubs
+    c = clubs.club_of(gid)
+    if c:  # club name / role next to the player everywhere (chat, friends, member list)
+        out.association_id, out.association_name = c["id"], c["name"]
+        out.position = c["members"][str(gid)]["pos"]
     return out
+
+
+def clubs_of(gid: int):
+    import clubs
+    return clubs.club_of(gid)
 
 
 def _status(gid: int) -> int:
@@ -100,10 +110,13 @@ def on_login(client) -> list[tuple[int, bytes]]:
         info.recent_list.append(_recent(other, msgs[-1]["time"]))
         persons[other] = True
     out = [(MSG_INFO, info.SerializeToString())]
-    if st["world"]:
+    club = clubs_of(gid)
+    club_msgs = club.get("chat", []) if club else []
+    if st["world"] or club_msgs:
         upd = P.ChatUpdateS2C()
         upd.world_msg_list.extend(_unit(m) for m in st["world"])
-        senders = {m["gid"] for m in st["world"]} - {gid}
+        upd.association_msg_list.extend(_unit(m) for m in club_msgs)
+        senders = {m["gid"] for m in st["world"] + club_msgs} - {gid}
         upd.new_chat_person.extend(base(g) for g in sorted(senders))
         out.append((MSG_UPDATE, upd.SerializeToString()))
     return out
@@ -146,7 +159,15 @@ async def handle_send(client, pb: bytes):
         echo.chat_list.add(friend_gid=to).chat_list.append(_unit(m))
         echo.recent_data.append(_recent(to, m["time"]))
         _push(gid, echo)
-    else:  # club channel: no clubs on this server yet
+    elif req.chan == P.ASSOCIATION_CHAN and clubs_of(gid):
+        c = clubs_of(gid)
+        c["chat"] = (c.get("chat", []) + [m])[-WORLD_KEEP:]
+        upd = P.ChatUpdateS2C()
+        upd.association_msg_list.append(_unit(m))
+        upd.new_chat_person.append(base(gid))
+        for other in list(c["members"]):  # every online member, the sender too (like the world chat)
+            _push(int(other), upd)
+    else:  # club channel without a club
         await client.send_packet(MSG_SEND, P.ChatMsgSendS2C(err=1, chan=req.chan).SerializeToString())
         return
     pvp.save()

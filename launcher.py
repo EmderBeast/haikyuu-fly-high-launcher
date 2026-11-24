@@ -38,10 +38,12 @@ SETTINGS_FILE = APP_DIR / "settings.json"
 FROZEN = getattr(sys, "frozen", False)
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
+LDPLAYER_PAGE = "https://www.ldplayer.net/"
 UPDATE_REPO = "EmderBeast/haikyuu-fly-high-launcher"  # public repo with the release "launcher-latest"
 UPDATE_PAGE = f"https://github.com/{UPDATE_REPO}/releases/latest"
 UPDATE_ZIP = f"https://github.com/{UPDATE_REPO}/releases/download/launcher-latest/{{name}}.zip"
-BACKUP_KEEP = 20  # automatic + manual backups of server/accounts kept in backups/
+BACKUP_KEEP = 20
+LOG_MAX = 1_000_000  # launcher.log is rotated to launcher.log.1 above this size  # automatic + manual backups of server/accounts kept in backups/
 
 MODES = {"private": "Private Server", "garena": "Garena (offiziell)"}
 
@@ -192,6 +194,9 @@ class LDPlayer:
     def launch(self, index):
         return run([self.console, "launch", "--index", str(index)])
 
+    def quit(self, index):
+        return run([self.console, "quit", "--index", str(index)])
+
     def enable_root(self, index):
         return run([self.console, "modify", "--index", str(index), "--root", "1"])
 
@@ -309,6 +314,9 @@ class Launcher:
         tk.Button(emu_row, text="Wiederherstellen", command=self.restore_clicked, bg="#53354a",
                   fg="white", relief="flat", cursor="hand2", font=font,
                   activebackground="#6b3a5a", activeforeground="white").pack(side="left", padx=(6, 0))
+        self.ldplayer_btn = tk.Button(emu_row, text="LDPlayer laden", bg="#c97a00", fg="white",
+                                      relief="flat", cursor="hand2", font=font,
+                                      command=lambda: __import__("webbrowser").open(LDPLAYER_PAGE))
         self.update_btn = tk.Button(mode_frame, text="Update verfügbar – hier laden", command=self.open_update,
                                     bg="#c97a00", fg="white", relief="flat", cursor="hand2", font=font,
                                     activebackground="#e08a00", activeforeground="white")
@@ -358,12 +366,26 @@ class Launcher:
             self.root.after(0, fn, *args)
 
     def log(self, msg):
+        line = time.strftime("%H:%M:%S ") + msg
+
         def add():
             self.log_box.configure(state="normal")
-            self.log_box.insert("end", time.strftime("%H:%M:%S ") + msg + "\n")
+            self.log_box.insert("end", line + "\n")
             self.log_box.see("end")
             self.log_box.configure(state="disabled")
         self.ui(add)
+        self.log_to_file(line)
+
+    def log_to_file(self, line: str):
+        """launcher.log next to the data folder (to send along when something goes wrong)."""
+        try:
+            f = self.base / "launcher.log"
+            if f.exists() and f.stat().st_size > LOG_MAX:
+                f.replace(f.with_suffix(".log.1"))
+            with open(f, "a", encoding="utf-8") as out:
+                out.write(time.strftime("%Y-%m-%d ") + line + "\n")
+        except OSError:
+            pass
 
     def set_status(self, key, text, color):
         var, lbl, name = self.status[key]
@@ -617,8 +639,10 @@ class Launcher:
     def ensure_emulator(self):
         folder, index = self.selected_emulator()
         if folder is None:
-            self.log("Kein LDPlayer gefunden. Bitte LDPlayer 9 oder 14 installieren.")
+            self.log("Kein LDPlayer gefunden. Bitte LDPlayer 9 oder 14 installieren "
+                     "(Knopf „LDPlayer laden“), Haikyuu Fly High darin installieren, dann „Verbinden“.")
             self.set_status("emu", "nicht gefunden", BAD)
+            self.ui(lambda: self.ldplayer_btn.pack(side="left", padx=(6, 0)))
             return False
         self.ld = LDPlayer(folder)
         self.serial = f"emulator-{5554 + 2 * index}"
@@ -633,27 +657,33 @@ class Launcher:
         else:
             self.set_status("emu", "verbinde ...", WARN)
 
-        run([self.ld.adb_exe, "start-server"], timeout=30)
-        end = time.time() + 240
-        while time.time() < end:
-            ok, out = self.adb("shell", "getprop", "sys.boot_completed", timeout=10)
-            if ok and out.strip() == "1":
-                break
-            if not ok and "not found" in out:
-                run([self.ld.adb_exe, "connect", f"127.0.0.1:{5555 + 2 * index}"], timeout=10)
-            time.sleep(3)
-        else:
-            self.log("Emulator antwortet nicht über adb.")
-            self.set_status("emu", "keine Verbindung", BAD)
+        if not self.wait_boot(index):
             return False
         self.log(f"Emulator verbunden ({self.serial}).")
 
         ok, out = self.su("id")
         if "uid=0" not in out:
-            self.log("Kein Root im Emulator. In LDPlayer: Einstellungen → Sonstiges → "
-                     "Root-Berechtigung: An, dann LDPlayer neu starten.")
-            self.set_status("emu", "kein Root", BAD)
-            return False
+            if self.ask_main("LDPlayer hat keine Root-Berechtigung, die der Launcher für die Umleitung "
+                             "braucht.\n\nSoll der Launcher LDPlayer kurz beenden, Root einschalten und "
+                             "neu starten?"):
+                self.log("Schalte Root ein und starte LDPlayer neu ...")
+                self.set_status("emu", "Neustart (Root) ...", WARN)
+                self.ld.quit(index)
+                for _ in range(30):
+                    if not self.ld.is_running(index):
+                        break
+                    time.sleep(1)
+                self.ld.enable_root(index)
+                self.ld.launch(index)
+                if not self.wait_boot(index):
+                    return False
+                ok, out = self.su("id")
+            if "uid=0" not in out:
+                self.log("Kein Root im Emulator. In LDPlayer: Einstellungen → Sonstiges → "
+                         "Root-Berechtigung: An, dann LDPlayer neu starten.")
+                self.set_status("emu", "kein Root", BAD)
+                return False
+            self.log("Root ist jetzt an.")
 
         ok, out = self.adb("shell", "pm", "path", GAME_PACKAGE)
         if "package:" not in out:
@@ -661,6 +691,38 @@ class Launcher:
             self.set_status("game", "nicht installiert", BAD)
             return False
         return True
+
+    def wait_boot(self, index) -> bool:
+        run([self.ld.adb_exe, "start-server"], timeout=30)
+        end = time.time() + 240
+        while time.time() < end:
+            ok, out = self.adb("shell", "getprop", "sys.boot_completed", timeout=10)
+            if ok and out.strip() == "1":
+                return True
+            if not ok and "not found" in out:
+                # after a restart adb may list the instance only by its TCP address
+                addr = f"127.0.0.1:{5555 + 2 * index}"
+                ok2, out2 = run([self.ld.adb_exe, "connect", addr], timeout=10)
+                if "connected" in out2:
+                    self.serial = addr
+            time.sleep(3)
+        self.log("Emulator antwortet nicht über adb.")
+        self.set_status("emu", "keine Verbindung", BAD)
+        return False
+
+    def ask_main(self, question: str) -> bool:
+        """Yes/no dialog from a worker thread (runs on the Tk thread, waits for the answer)."""
+        from tkinter import messagebox
+        answer, done = [False], threading.Event()
+
+        def ask():
+            try:
+                answer[0] = messagebox.askyesno("Haikyuu Fly High", question, parent=self.root)
+            finally:
+                done.set()
+        self.ui(ask)
+        done.wait()
+        return answer[0]
 
     def setup_network(self):
         """adb reverse, CA certificate and HTTP proxy (needed in both modes)."""
@@ -863,6 +925,26 @@ class Launcher:
             self.log(f"Neue Version verfügbar ({when}) – Knopf „Update verfügbar“.")
             self.ui(lambda: self.update_btn.pack(pady=(0, 10)))
 
+    def offer_shortcut(self):
+        """First start of a zip package: offer a desktop shortcut (asked once)."""
+        pkg = self.package_dir()
+        if pkg is None or self.settings.get("shortcut_asked") or "--update-now" in sys.argv[1:] \
+                or "--no-emulator" in sys.argv[1:]:
+            return
+        self.settings["shortcut_asked"] = True
+        save_settings(self.settings)
+        from tkinter import messagebox
+        if not messagebox.askyesno("Haikyuu Fly High", "Verknüpfung „Haikyuu Fly High“ auf dem Desktop anlegen?",
+                                   parent=self.root):
+            return
+        exe = pkg / "HFH-Launcher.exe"
+        ps = ("$d=[Environment]::GetFolderPath('Desktop');"
+              "$s=(New-Object -ComObject WScript.Shell).CreateShortcut(\"$d\\Haikyuu Fly High.lnk\");"
+              f"$s.TargetPath='{exe}';$s.WorkingDirectory='{pkg}';$s.IconLocation='{exe},0';"
+              "$s.Description='Haikyuu Fly High - Launcher';$s.Save()")
+        ok, out = run(["powershell", "-NoProfile", "-Command", ps], timeout=30)
+        self.log("Desktop-Verknüpfung angelegt." if ok else f"Verknüpfung fehlgeschlagen: {out}")
+
     def open_update(self):
         from tkinter import messagebox
         if not self.package_dir():
@@ -990,6 +1072,7 @@ class Launcher:
             self.log(f"Backup beim Start fehlgeschlagen: {e}")
         if FROZEN:
             threading.Thread(target=self.check_update, daemon=True).start()
+            self.root.after(2500, self.offer_shortcut)
         if "--update-now" in sys.argv[1:]:  # for tests: update without the dialog
             self.root.after(1500, lambda: self.job(self.self_update))
         if "--no-emulator" not in sys.argv[1:]:  # tests: launcher window only, no server/emulator

@@ -369,7 +369,7 @@ async def handle_login(client: GameClient, pb_data: bytes):
     try:  # shared-server PvP: snapshot this player's team, arena info from this server's ladder
         for mid, pb in (pvp.on_login(client) + peak.on_login(client) + teamcomp.on_login(client)
                         + freedom.on_login(client) + mail.on_login(client) + personal.on_login(client)
-                        + chat.on_login(client) + friends.on_login(client)):
+                        + chat.on_login(client) + friends.on_login(client) + clubs.on_login(client)):
             await client.send_packet(mid, pb)
     except Exception as e:  # never block the login
         log.error(f"  PVP login update failed: {e!r}")
@@ -1069,6 +1069,8 @@ import chat  # noqa: E402  world chat and private messages between the players o
 MESSAGE_HANDLERS.update(chat.HANDLERS)
 import friends  # noqa: E402  friends list, requests, block list, friendship tokens
 MESSAGE_HANDLERS.update(friends.HANDLERS)
+import clubs  # noqa: E402  clubs (Association): create, join, roles, notices, club chat
+MESSAGE_HANDLERS.update(clubs.HANDLERS)
 pvp.HOOKS.update(grant_rewards=grant_rewards, player_name=player_name, generic=handle_generic,
                  mission_event=mission_event)
 

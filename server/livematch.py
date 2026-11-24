@@ -164,6 +164,18 @@ class LiveMatch:
         self.generate = True  # build rallies (engine + rallygen) instead of replaying captured ones
         self.stats = engine.stats_for(info)
         self.battle = skills.Battle(info, self.stats) if skills.AVAILABLE else None
+        if self.battle:  # stage opponents start with the stage's stamina (stage.json LevelDown 7500 ->
+            # 90 of 120 in the captured practice and Training Camp matches)
+            row = matches.stage_row(matches.stage_of(info.room_args)) if hasattr(matches, "stage_row") else {}
+            ratio = 1.0
+            for key in ("LevelDown", "EnergyRatio"):
+                v = row.get(key)
+                if isinstance(v, (int, float)) and 0 < v < 100000:
+                    ratio *= v / 10000
+            if ratio != 1.0 and info.away.gamer_id <= 0:
+                for pid in self.battle.energy:
+                    if pid >= 13:
+                        self.battle.energy[pid] = skills.ENERGY_MAX * ratio
         home = [i for i, p in enumerate(info.home.formation.players) if p.info.conf_id]
         away = [13 + i for i, p in enumerate(info.away.formation.players) if p.info.conf_id]
         self.stance = {HOST: home[:6], GUEST: away[:6]}
