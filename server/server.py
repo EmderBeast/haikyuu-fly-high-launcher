@@ -365,7 +365,7 @@ async def handle_login(client: GameClient, pb_data: bytes):
     log.info(f"  ACCOUNT {gid}: {len(client.account.cards)} added cards, {len(client.account.items)} changed items")
     try:  # shared-server PvP: snapshot this player's team, arena info from this server's ladder
         for mid, pb in (pvp.on_login(client) + peak.on_login(client) + teamcomp.on_login(client)
-                        + freedom.on_login(client)):
+                        + freedom.on_login(client) + mail.on_login(client) + personal.on_login(client)):
             await client.send_packet(mid, pb)
     except Exception as e:  # never block the login
         log.error(f"  PVP login update failed: {e!r}")
@@ -1056,6 +1056,10 @@ import teamcomp  # noqa: E402  Match Streak (TeamCompetition): 2-3 stages in a r
 MESSAGE_HANDLERS.update(teamcomp.HANDLERS)
 import freedom  # noqa: E402  Freedom Championship: matchmaking against the other players' line-ups
 MESSAGE_HANDLERS.update(freedom.HANDLERS)
+import mail  # noqa: E402  mailbox (season / daily rank rewards)
+import seasons  # noqa: E402  season ends and daily arena rewards, sent as mail
+import personal  # noqa: E402  time-limited frames / chat bubbles / titles (season rewards)
+MESSAGE_HANDLERS.update(mail.HANDLERS)
 pvp.HOOKS.update(grant_rewards=grant_rewards, player_name=player_name, generic=handle_generic,
                  mission_event=mission_event)
 
@@ -1071,6 +1075,7 @@ async def main():
     log.info(f"Haikyuu Fly High Private Server running on {addrs}")
     if admin.multiplayer():
         log.info("Multiplayer server: admin rights only for the owner and granted admins")
+    asyncio.get_running_loop().create_task(seasons.loop())  # daily / season-end reward mail
     async with server:
         await server.serve_forever()
 

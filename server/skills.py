@@ -33,6 +33,9 @@ DRIVING, PASSIVE = 4, 8
 T_MATCH, T_SET, T_RALLY, T_OWN_SCORE, T_OTHER_SCORE, T_NET, T_TOUCH = 1, 2, 3, 4, 5, 6, 7
 T_SERVE, T_DIG_SERVE, T_SAVE, T_SET_TOUCH, T_SPIKE, T_BLOCK, T_DIG_SPIKE, T_DIG_NO_ATTACK = range(8, 16)
 T_BOTH_TOUCH, T_OWN_TOUCH, T_OTHER_SPIKE = 18, 19, 20
+ENERGY_MAX = 120.0
+STAMINA = 8  # property id
+FATIGUE_20, FATIGUE_50, FATIGUE_IMMUNE = 20019, 20020, 20021
 FORMULA_UNIT = {1: T_SERVE, 2: T_DIG_SERVE, 3: T_SAVE, 4: T_SET_TOUCH, 5: T_SPIKE, 6: T_BLOCK, 7: T_DIG_SPIKE,
                 8: T_DIG_NO_ATTACK}
 CATCH = {2, 3, 7, 8}
@@ -135,7 +138,7 @@ class Cast:
 
 @dataclass
 class BuffChange:
-    entity: tuple  # ("p", id) or ("t", team)
+    entity: tuple  # ("p", id) or ("t", team); ("e", id) = that player's stamina is now `count`
     buff_id: int
     count: int
     cd: int
@@ -178,7 +181,7 @@ class Battle:
                     self.skills[lead] += [(SKILLS[s], _num(sl.get("Skilllevel"), 1))
                                           for s in _list(sl.get("Skillid")) if s in SKILLS]
         self.cd: dict[tuple[int, int], list] = {}  # (pid, skill id) -> [unit, left]
-        self.energy = {pid: 120.0 for pid in self.cards}
+        self.energy = {pid: ENERGY_MAX for pid in self.cards}
         self.morale = [0.0, 0.0]
         self.on_court: set[int] = set()
         self.was_on_court: set[int] = set()
@@ -221,10 +224,47 @@ class Battle:
         b = self.buffs.get(entity, {}).get(buff_id)
         return b.stacks if b else 0
 
+    # ------------------------------------------------ stamina
+    def spend(self, pid: int, amount: float):
+        """Stamina change of a player (negative amount = recovery), with the fatigue rule of the system
+        skills 20019/20020: at 20 % or less all stats -20 % (buff 20019), at 5 % or less -50 % (20020)."""
+        old = self.energy.get(pid, ENERGY_MAX)
+        new = max(0.0, min(ENERGY_MAX, old - amount))
+        if new == old:
+            return
+        self.energy[pid] = new
+        self.changes.append(BuffChange(("e", pid), 0, new, 0))
+        ratio = new / ENERGY_MAX
+        me = ("p", pid)
+        if not self.stacks(me, FATIGUE_IMMUNE):
+            if 0.05 < ratio <= 0.20 and not self.stacks(me, FATIGUE_20):
+                self.add_buff(me, FATIGUE_20, 1, pid)
+            if ratio <= 0.05 and not self.stacks(me, FATIGUE_50):
+                self.add_buff(me, FATIGUE_50, 1, pid)
+
+    def _recover(self):
+        """Rally end: the fatigue buffs that no longer fit are taken off (system skills 20016-20018).
+        Stamina itself only comes back through skills (stamina buffs, see add_buff): in the captures
+        the user's players got about 8 back per rally from their skills, the stage team nothing."""
+        for pid in sorted(self.cards):
+            ratio = self.energy.get(pid, ENERGY_MAX) / ENERGY_MAX
+            me = ("p", pid)
+            if self.stacks(me, FATIGUE_20) and (ratio <= 0.05 or ratio > 0.20):
+                self.remove_buff(me, FATIGUE_20)
+            if self.stacks(me, FATIGUE_50) and ratio > 0.05:
+                self.remove_buff(me, FATIGUE_50)
+
     # ------------------------------------------------ buffs
     def add_buff(self, entity: tuple, buff_id: int, stacks: int, caster: int, level: int = 1):
         row = BUFFS.get(buff_id)
         if not row:
+            return
+        if (_num(row.get("Type")) == 2 and _flat(row.get("ModifyTarget")) == [STAMINA]
+                and not _num(row.get("Time"), 0) and _num(row.get("ArgsType"), 1) == 1):
+            # stamina buffs act once and stay (no duration, no RevertAddition): +/- Args / 10000
+            pids = [entity[1]] if entity[0] == "p" else self.court(entity[1])
+            for pid in pids:
+                self.spend(pid, -self._args(row)[0] / 10000 * stacks)
             return
         if _num(row.get("MountType"), 1) == 2 and entity[0] == "p":
             entity = ("t", self.team_of(entity[1]))
@@ -649,7 +689,7 @@ class Battle:
                 self._run(SKILLS[after], owner, level, ctx, check=False)
         cost = max(_flat(skill.get("EnergyCostList")) or [0]) / 10000
         if cost:
-            self.energy[owner] = max(0.0, self.energy.get(owner, 0) - cost)
+            self.spend(owner, cost)
         if _num(skill.get("CDType")):
             self.cd[(owner, sid)] = [skill["CDType"], max(_flat(skill.get("CDValue")) or [1])]
         self.casts.append(Cast(sid, owner, level))
@@ -742,6 +782,10 @@ class Battle:
 
     def before_touch(self, pid: int, formula: int, link: int, skill_id: int) -> Ctx:
         ctx = Ctx("touch", pid, formula, link, skill_id=skill_id)
+        # every action costs each player on court 1 stamina and the one who plays it 1 more (Garena's
+        # property changes at every announcement)
+        for p in sorted(self.on_court):
+            self.spend(p, 2.0 if p == pid else 1.0)
         prop = FORMULA_PROP.get(formula, -1)
         if formula == 5 and self.attr(pid, 0) > self.attr(pid, 1):
             prop = 0
@@ -779,6 +823,7 @@ class Battle:
         self.tick(T_RALLY)
         self.tick(T_OWN_SCORE, team=winner)
         self.tick(T_OTHER_SCORE, team=1 - winner)
+        self._recover()
 
     # ------------------------------------------------ manual casts (ultimates, morale skill)
     GENERIC = {"spike": (10301, 10401), "block": (10501,), "catch": (10601,)}

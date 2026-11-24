@@ -167,17 +167,17 @@ def build_team(acc, insts: list[int], gid: int, name: str, icon=(0, 0)) -> P.PVP
     return team
 
 
-def pvp_team(team: P.PVPTeamInfo) -> P.PVPTeam:
-    out = P.PVPTeam(power=team.power)
+def pvp_team(team: P.PVPTeamInfo, owner: int = 0, viewer: int = 0) -> P.PVPTeam:
+    out = P.PVPTeam(power=pvp.shown(team.power, owner, viewer))
     out.pvp_formation.CopyFrom(team.formation)
     return out
 
 
-def peak_formation(teams: list[P.PVPTeamInfo]) -> P.PeakForMation:
+def peak_formation(teams: list[P.PVPTeamInfo], gid: int = 0) -> P.PeakForMation:
     out = P.PeakForMation()
     for t in teams:
-        out.team.append(pvp_team(t))
-        out.power.append(t.power)
+        out.team.append(pvp_team(t, gid))
+        out.power.append(pvp.shown(t.power, gid))
     return out
 
 
@@ -247,7 +247,7 @@ def defence_change(own: int, attacker: int, held: bool) -> int:
     return math.floor(_k(own) * (1 - e) * 0.27 + 0.5) if held else -math.floor(_k(own) * e * 0.27 + 0.5)
 
 
-def peak_player(e: dict, own_score: int) -> P.PeakPlayer:
+def peak_player(e: dict, own_score: int, viewer: int = 0) -> P.PeakPlayer:
     teams = opponent_teams(e)
     p = P.PeakPlayer(gid=e["gid"], score=opponent_score(e))
     if e["gid"] > 0:
@@ -259,8 +259,8 @@ def peak_player(e: dict, own_score: int) -> P.PeakPlayer:
         if teams:
             p.icon, p.icon_frame = teams[0].icon, teams[0].icon_frame
     for t in teams:
-        p.team.append(pvp_team(t))
-        p.power.append(t.power)
+        p.team.append(pvp_team(t, e["gid"], viewer))
+        p.power.append(pvp.shown(t.power, e["gid"], viewer))
     p.add_score = attack_change(own_score, p.score, True)
     return p
 
@@ -284,11 +284,11 @@ def info(gid: int, acc, name: str) -> bytes:
     c = out.challenge
     c.challenge_times, c.buy_times, c.challenge_up_times = me["times"], me["buys"], me["ups"]
     for e in me["list"]:
-        c.challenge_list.append(peak_player(e, me["score"]))
+        c.challenge_list.append(peak_player(e, me["score"], gid))
     out.week_reward, out.week_challenge_times = me["week_reward"], me["week_times"]
     out.ladder_reward, out.max_score, out.rank_score = me["ladder"], me["max"], me["score"]
-    out.defend.CopyFrom(peak_formation(my_teams(acc, gid, name, "defend")))
-    out.attack.CopyFrom(peak_formation(my_teams(acc, gid, name, "attack")))
+    out.defend.CopyFrom(peak_formation(my_teams(acc, gid, name, "defend"), gid))
+    out.attack.CopyFrom(peak_formation(my_teams(acc, gid, name, "attack"), gid))
     return out.SerializeToString()
 
 
@@ -486,8 +486,8 @@ async def handle_set_defend(client, pb: bytes):
     teams = _save_formations(client, pb, "defend")
     out = P.PeakSetDefendFormationS2C()
     for t in teams:
-        out.team.append(pvp_team(t))
-        out.power.append(t.power)
+        out.team.append(pvp_team(t, client.gid))
+        out.power.append(pvp.shown(t.power, client.gid))
     await client.send_packet(MSG_SET_DEFEND, out.SerializeToString())
 
 
@@ -495,8 +495,8 @@ async def handle_set_attack(client, pb: bytes):
     teams = _save_formations(client, pb, "attack")
     out = P.PeakSetAttackFormationS2C()
     for t in teams:
-        out.team.append(pvp_team(t))
-        out.power.append(t.power)
+        out.team.append(pvp_team(t, client.gid))
+        out.power.append(pvp.shown(t.power, client.gid))
     await client.send_packet(MSG_SET_ATTACK, out.SerializeToString())
 
 
@@ -598,6 +598,7 @@ async def handle_quick(client, pb: bytes):
         await client.send_packet(pvp.MSG_QUICK, P.PVPQuickBattleS2C(error=1).SerializeToString())
         return
     create, game = room
+    pvp.calibrate(client.gid, req.home_power, create.info.home.power)
     h, a = _quick_score(create.info.home.power, create.info.away.power)
     m = matches.Match(create.info, h > a, 0)
     m.peak = game

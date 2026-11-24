@@ -590,7 +590,8 @@ class AdminWindow:
         tk.Label(f, text="Gemeinsamer Server: nur der Besitzer und die hier angehakten Spieler haben "
                          "Admin-Rechte. Alle anderen spielen normal. Spieler mit Rechten können im Spiel "
                          "unter Gift Code Befehle eingeben, z. B. /gold 100000, /allcards, /power 200, "
-                         "/gold 5000 @Name.",
+                         "/gold 5000 @Name. Jedes Konto ist an den Garena-Login gebunden, der es zuerst "
+                         "benutzt hat; ein abgelehnter Login (z. B. neues Handy) lässt sich hier freigeben.",
                  bg=PANEL, fg="#aaaaaa", font=("Segoe UI", 9), wraplength=700, justify="left").pack(
             anchor="w", padx=12, pady=(10, 4))
         self.owner_var = tk.StringVar()
@@ -625,14 +626,72 @@ class AdminWindow:
         self.owner_var.set(f"Besitzer: {players.get(owner) or ''} ({owner})" if owner else
                            "Noch kein Besitzer: im Spiel das Admin-Passwort als Gift Code eingeben.")
         self.right_vars = {}
-        for gid in sorted(players, key=lambda g: (players[g] or "~").lower()):
+        binds = self.bindings()
+        for gid in sorted(players, key=lambda g: (g != owner, "pending" not in binds.get(g, {}),
+                                                  (players[g] or "~").lower())):
+            row = tk.Frame(self.rights_frame, bg=PANEL)
+            row.pack(fill="x", anchor="w", pady=1)
+            label = f"{players[gid] or '(ohne Namen)'}  ({gid})"
             if gid == owner:
-                continue
-            var = tk.BooleanVar(value=gid in st["admins"])
-            tk.Checkbutton(self.rights_frame, text=f"{players[gid] or '(ohne Namen)'}  ({gid})", variable=var,
-                           bg=PANEL, fg=FG, selectcolor=BG, activebackground=PANEL, anchor="w").pack(
-                fill="x", anchor="w")
-            self.right_vars[gid] = var
+                tk.Label(row, text="\u2605 " + label + "  (Besitzer)", bg=PANEL, fg=GOLD, width=44,
+                         anchor="w").pack(side="left")
+            else:
+                var = tk.BooleanVar(value=gid in st["admins"])
+                tk.Checkbutton(row, text=label, variable=var, bg=PANEL, fg=FG, selectcolor=BG,
+                               activebackground=PANEL, anchor="w", width=40).pack(side="left")
+                self.right_vars[gid] = var
+            b = binds.get(gid)
+            if b and "pending" in b:
+                when = time.strftime("%d.%m. %H:%M", time.localtime(b["pending"].get("time", 0)))
+                tk.Label(row, text=f"Login abgelehnt ({when})", bg=PANEL, fg="#ff6b6b").pack(side="left", padx=6)
+                tk.Button(row, text="Freigeben", command=lambda g=gid: self.approve_login(g), bg="#2d4a3e",
+                          fg="white", relief="flat").pack(side="left", padx=2)
+            elif b:
+                tk.Label(row, text="gebunden", bg=PANEL, fg="#9be7a5").pack(side="left", padx=6)
+            if b:
+                tk.Button(row, text="Lösen", command=lambda g=gid: self.release_login(g), bg="#53354a",
+                          fg="white", relief="flat").pack(side="left", padx=2)
+
+    # token binding (server/bindings.py): an account belongs to the Garena login that used it first
+
+    def bindings_file(self):
+        return self.base / "server" / "accounts" / "bindings.json"
+
+    def bindings(self):
+        try:
+            return json.loads(self.bindings_file().read_text("utf-8"))
+        except Exception:
+            return {}
+
+    def save_bindings(self, data):
+        f = self.bindings_file()
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        tmp.replace(f)
+
+    def approve_login(self, gid):
+        """Accept the refused login: its token becomes the bound one (as bindings.approve)."""
+        data = self.bindings()
+        entry = data.get(gid)
+        if not entry or "pending" not in entry:
+            return
+        entry["hash"] = entry.pop("pending")["hash"]
+        entry["last"] = int(time.time())
+        self.save_bindings(data)
+        self.status.set(f"Login von {gid} freigegeben – der Spieler kann sich jetzt anmelden.")
+        self.fill_rights()
+
+    def release_login(self, gid):
+        """Forget the binding: the next login of this account binds anew (as bindings.release)."""
+        if not messagebox.askyesno("Admin Mode", f"Bindung von {gid} lösen? Der nächste Login mit dieser "
+                                                 "ID wird dann als neuer Besitzer des Kontos gespeichert.",
+                                   parent=self.win):
+            return
+        data = self.bindings()
+        if data.pop(gid, None) is not None:
+            self.save_bindings(data)
+        self.status.set(f"Bindung von {gid} gelöst.")
+        self.fill_rights()
 
     def save_rights(self):
         st = self.admins()

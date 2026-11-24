@@ -208,6 +208,33 @@ def grade(score: int) -> dict:
     return ARENA_LADDER[-1] if ARENA_LADDER else {}
 
 
+# --- shown power ---------------------------------------------------------------------------------
+# The server's power (sum of the 7 base stats / 10000) drives robot scaling and win chances. The game
+# shows its own figure (TeamPlayerCalculator.CalcPower: skills, specialties, collections ...), 2-3x
+# higher, which the server cannot fully rebuild. PVPQuickBattleC2S.home_power is that figure for the
+# own team, so its ratio to the server power is remembered per player and applied to shown values.
+RATIO_RANGE = (0.5, 10.0)
+
+
+def _ratios() -> dict:
+    return state().setdefault("power_ratio", {})
+
+
+def calibrate(gid: int, client_power: int, strength: int):
+    if gid > 0 and client_power > 0 and strength > 0:
+        r = client_power / strength
+        if RATIO_RANGE[0] <= r <= RATIO_RANGE[1]:
+            _ratios()[str(gid)] = round(r, 4)
+            save()
+
+
+def shown(power: int, owner: int = 0, viewer: int = 0) -> int:
+    """Power as the game would show it: the owner's ratio, else the viewer's (robots look as
+    strong to the viewer as they really are relative to the own team)."""
+    r = (_ratios().get(str(owner)) if owner > 0 else None) or _ratios().get(str(viewer)) or 1.0
+    return int(power * r)
+
+
 # --- robots -------------------------------------------------------------------------------------
 def _robot_row(level: int) -> dict:
     if not ARENA_ROBOTS:
@@ -288,7 +315,7 @@ def opponent_score(entry: dict) -> int:
     return ladder(entry["gid"])["score"] if entry["gid"] > 0 else entry.get("score", START_SCORE)
 
 
-def arena_player(entry: dict) -> P.ArenaPlayer:
+def arena_player(entry: dict, viewer: int = 0) -> P.ArenaPlayer:
     team = opponent_team(entry)
     p = P.ArenaPlayer(gid=entry["gid"], score=opponent_score(entry))
     if entry["gid"] > 0:
@@ -299,9 +326,9 @@ def arena_player(entry: dict) -> P.ArenaPlayer:
         p.name, p.level = entry.get("name", "CPU"), entry.get("level", 1)
         p.icon, p.icon_frame = (team.icon, team.icon_frame) if team else (0, 0)
     if team:
-        p.power = team.power
+        p.power = shown(team.power, entry["gid"], viewer)
         p.team.pvp_formation.CopyFrom(team.formation)
-        p.team.power = team.power
+        p.team.power = p.power
     return p
 
 
@@ -324,7 +351,7 @@ def arena_info(gid: int, acc) -> bytes:
     c = info.challenge
     c.challenge_times, c.buy_times, c.challenge_up_times = me["times"], me["buys"], me["ups"]
     for entry in me["list"]:
-        c.challenge_list.append(arena_player(entry))
+        c.challenge_list.append(arena_player(entry, gid))
     info.gift.hisotry_score = me["history"]
     info.gift.season_gift_got.extend(me["gifts"])
     return info.SerializeToString()
@@ -397,7 +424,7 @@ def records(gid: int) -> bytes:
     for r in ladder(gid)["records"]:
         e = r["enemy"]
         out.arena_record.add(own_gid=gid, record_type=r["type"], enemy_id=e["gid"], enemy_name=e["name"],
-                             enemy_icon=e["icon"], enemy_icon_frame=e["frame"], enemy_power=e["power"],
+                             enemy_icon=e["icon"], enemy_icon_frame=e["frame"], enemy_power=shown(e["power"], e["gid"], gid),
                              enemy_score=e["score"], own_score=r["own"], own_change_score=r["change"],
                              record_id=-1, begin_time=r["begin"], end_time=r["end"], enemy_level=e["level"])
     return out.SerializeToString()
@@ -552,7 +579,7 @@ async def handle_lineup(client, pb: bytes):
     out = P.FightArenaPlayerLineupS2C()
     if team:
         out.team.pvp_formation.CopyFrom(team.formation)
-        out.team.power = team.power
+        out.team.power = shown(team.power, see, client.gid)
     else:
         out.err = 1
     await client.send_packet(MSG_ARENA_LINEUP, out.SerializeToString())
@@ -578,11 +605,11 @@ def _rank_elem(gid: int, place: int) -> P.RankListElem:
     snap = state()["snapshots"].get(str(gid), {})
     e = P.RankListElem(gid=gid, name=snap.get("name", ""), icon=snap.get("icon", 0),
                        icon_frame=snap.get("frame", 0), level=snap.get("level", 1), rank=place,
-                       score=ladder(gid)["score"], power=snap.get("power", 0))
+                       score=ladder(gid)["score"], power=shown(snap.get("power", 0), gid))
     team = snapshot_team(gid)
     if team:
         e.team.pvp_formation.CopyFrom(team.formation)
-        e.team.power = team.power
+        e.team.power = shown(team.power, gid)
     return e
 
 
@@ -633,6 +660,7 @@ async def handle_quick(client, pb: bytes):
         await client.send_packet(MSG_QUICK, P.PVPQuickBattleS2C(error=1).SerializeToString())
         return
     create, entry = room
+    calibrate(client.gid, req.home_power, create.info.home.power)
     ladder(client.gid, acc)["times"] += 1
     won = random.random() < matches.win_chance(create.info.home.power, create.info.away.power)
     m = matches.Match(create.info, won, 0b111 if won else 0)

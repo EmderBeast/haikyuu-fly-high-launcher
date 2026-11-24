@@ -33,6 +33,9 @@ JOB_LIBERO = 4  # battleconstant MaxCrossNetNum
 # often than the raw spike-vs-dig power suggests (best fit on the captured touches, scratch fit3.py)
 CATCH_BIAS = 1.5
 DIG_ROW = 4
+REROLL_FAIL = {DIG_SERVE: 0.8, SAVE: 0.35}
+# chance that a dig fails: spike result -> (dig weaker than the spike, dig stronger)
+DIG_FAIL = {4: (0.20, 0.0), 5: (0.20, 0.0), 6: (0.45, 0.27)}
 BLOCK_CHANCE = 1.0  # every captured dig after a spike came after a block attempt
 
 # attribute (proto AttrType) used by each formula, and whether it uses the attack or defence crit stats
@@ -247,6 +250,22 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
         ref = opp_ball if opp_ball is not None else (opp.ball if opp else None)
         x = advantage(pw.ball, ref, formula) if ref else 0.0
         result = forced if forced is not None else roll_result(formula, last_result, link, x, rng)
+        if formula == DIG_SPIKE and forced is None and ref:
+            # how often Garena's digs fail depends on the spike's result and on who is stronger (92
+            # captured digs: 45 % after a perfect spike against a weaker dig, none after a result-3 one)
+            fail = DIG_FAIL.get(last_spike_result, (0.0, 0.0))[0 if pw.ball < ref else 1]
+            if rng.random() < fail:
+                result = 0
+            else:
+                for _ in range(8):
+                    if result:
+                        break
+                    result = roll_result(formula, last_result, link, x, rng)
+                result = result or 3
+        # Garena's receives of a serve almost never fail (0 of 43 captured) and its saves fail less
+        # often than the table says (38 %): part of the failed rolls are rolled again
+        if forced is None and result == 0 and rng.random() < REROLL_FAIL.get(formula, 0.0):
+            result = roll_result(formula, last_result, link, x, rng)
         if formula == SPIKE:
             result = min(max(result, 3), 6)
         st = Step(formula, pid, result, link, pw)

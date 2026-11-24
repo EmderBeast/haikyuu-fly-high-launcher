@@ -267,11 +267,18 @@ def touches_from(court: Court, serve_team: int, steps: list, rng=random) -> list
 
 # ---------------------------------------------------------------- frame building
 
+INT_MIN = -2147483648
+
+
 def _skills(f, casts, buffs):
     """skill_data.casting_skills and buff_data.changed_buffs (decoded/analysis/frame_format.md 4.1/4.2)."""
     for c in casts:
         f.skill_data.casting_skills.add(skill_id=c.skill_id, player_id=c.player, skill_lv=c.level)
     for b in buffs:
+        if b.entity[0] == "e":  # stamina: the bar under the player's card follows these
+            pc = f.property_data.changed_property.add(player_id=b.entity[1], team_id=INT_MIN, buff_id=INT_MIN)
+            pc.attrs.add(type=8, val=b.count, base_val=b.count)
+            continue
         info = f.buff_data.changed_buffs.add(buff_id=b.buff_id, count=b.count, cd=b.cd)
         info.target.entity_type = 0 if b.entity[0] == "p" else 1
         info.target.entity_id = b.entity[1]
@@ -339,6 +346,10 @@ def _hit_data(h, t: Touch):
 
 
 NET_CLEAR = 2.58
+BALL_RADIUS = 0.1
+# The rally ends one frame after the last ball curve, as in Garena's rallies: the client lets the ball
+# bounce by itself from then on. With a later end the ball lay still on the floor until the end came.
+END_AFTER = 1
 
 
 def _ball_curve(f, start: tuple, end: tuple, g0: int, g1: int, flight_s: float):
@@ -792,7 +803,7 @@ def build(court: Court, serve_team: int, touches: list[Touch], g: int, start: di
         n, flight = _flight(src)
         t.frame = max(src.frame + n, prev.frame + 6)
         ann = prev.frame + 1
-        end = t.pos if t.touch_ball else (t.pos[0], 0.0, t.pos[2])
+        end = t.pos if t.touch_ball else (t.pos[0], BALL_RADIUS, t.pos[2])
         _ball_curve(fr(src.frame + 1), src.pos, end, g + src.frame, g + t.frame, flight)
         # run as early as the play allows (from the previous touch's call, like Garena's spikers who start
         # their approach while the ball is still on the way to the setter), never during his own animation
@@ -836,14 +847,14 @@ def build(court: Court, serve_team: int, touches: list[Touch], g: int, start: di
         s = side(1 - serve_team)
         land = (last.pos[0], 0.0, 10.5 * s)
         _ball_curve(fr(last.frame + 1), last.pos, land, g + last.frame, g + last.frame + 15, 1.3)
-        end_frame = last.frame + 15 + 8
+        end_frame = last.frame + 15 + END_AFTER
     elif last.result == 0 and last.touch_ball:  # e.g. block out: the ball flies off out of the court
         s = side(team_of(last.player))
         land = (5.5 if last.pos[0] >= 0 else -5.5, 0.0, 10.5 * s)
-        _ball_curve(fr(last.frame + 1), last.pos, land, g + last.frame, g + last.frame + 15, 1.2)
-        end_frame = last.frame + 15 + 8
+        _ball_curve(fr(last.frame + 1), last.pos, land, g + last.frame, g + last.frame + 24, 1.6)
+        end_frame = last.frame + 24 + END_AFTER
     else:
-        end_frame = last.frame + 10
+        end_frame = last.frame + END_AFTER
     e = fr(end_frame)
     e.round_data.end = True
     e.round_data.events.append(21)

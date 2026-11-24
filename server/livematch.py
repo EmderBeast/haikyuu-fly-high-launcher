@@ -238,7 +238,7 @@ class LiveMatch:
     PLAYER_PROPS = list(range(0, 15)) + [100]  # basic stats, morale, stamina, crit stats, stamina limit
     TEAM_PROPS = (7, 133, 134, 131, 137, 139, 132)
 
-    def _properties(self, f):
+    def _properties(self, f, energy=None):
         """property_data: every player's current attributes (stamina 120, buffed stats) and each team's
         morale block, as Garena sent in the rally setup frame. Without it the client shows the raw card
         values (stamina 1200000, stats x10000)."""
@@ -246,8 +246,8 @@ class LiveMatch:
         for pid in sorted(b.cards):
             pc = f.property_data.changed_property.add(player_id=pid, team_id=self.INT_MIN, buff_id=self.INT_MIN)
             for t in self.PLAYER_PROPS:
-                if t == 8:
-                    v = b.energy.get(pid, 120.0)
+                if t == 8:  # stamina as it is when the rally starts
+                    v = (energy or b.energy).get(pid, 120.0)
                 elif t == 100:
                     v = 120.0
                 elif t == 7:
@@ -325,6 +325,7 @@ class LiveMatch:
             rallygen.place(court, self.serve, {t: (l if l not in eff[t] else None) for t, l in self.libero.items()})
             start = dict(court.pos)
             behind = {p for p in self.lib_for.values() if p is not None}
+            energy0 = dict(self.battle.energy) if self.battle else None
             played = engine.simulate(court, self.serve, self.stats, rng=random.Random(self.seed),
                                      battle=self.battle, inputs=self.inputs, behind_libero=behind,
                                      auto=self.auto_skill)
@@ -366,7 +367,7 @@ class LiveMatch:
                     td.subs.on_stage.append(on)
                     td.subs.off_stage.append(off)
             if f.frame_index == 2 and self.battle:  # property block like Garena's setup frame (shown values)
-                self._properties(f)
+                self._properties(f, energy0 if self.generate else None)
             if morale_at_start and f.frame_index == 2:  # morale skill still available from before
                 td = f.team_data.add()
                 td.morale_skill.state, td.morale_skill.skill_id = P.Actived, 300

@@ -148,8 +148,8 @@ def snapshot(acc, gid: int, name: str):
     snap["freedom"] = team_of(acc, gid, name, "defend").SerializeToString().hex()
 
 
-def _pvp_team(team: P.PVPTeamInfo) -> P.PVPTeam:
-    out = P.PVPTeam(power=team.power)
+def _pvp_team(team: P.PVPTeamInfo, owner: int = 0, viewer: int = 0) -> P.PVPTeam:
+    out = P.PVPTeam(power=pvp.shown(team.power, owner, viewer))
     out.pvp_formation.CopyFrom(team.formation)
     return out
 
@@ -218,8 +218,8 @@ def match_msg(gid: int, e: dict, pattern: int, started=False) -> P.FightFreedomM
         if team:
             m.enemy_icon, m.enemy_icon_frame = team.icon, team.icon_frame
     if team:
-        m.team.CopyFrom(_pvp_team(team))
-        m.power = team.power
+        m.team.CopyFrom(_pvp_team(team, e["gid"], gid))
+        m.power = m.team.power
     return m
 
 
@@ -490,8 +490,8 @@ async def handle_lineup(client, pb: bytes):
     team = opponent_team(e) if see else None
     out = P.FightFreedomPlayerLineupS2C()
     if team:
-        out.team.CopyFrom(_pvp_team(team))
-        out.power = team.power
+        out.team.CopyFrom(_pvp_team(team, see, client.gid))
+        out.power = out.team.power
     else:
         out.err = 1
     await client.send_packet(MSG_LINEUP, out.SerializeToString())
@@ -542,11 +542,29 @@ async def handle_gift(client, pb: bytes):
     await pvp.HOOKS["grant_rewards"](client, teamcomp.kv(row["Reward"]), True)
 
 
+DAILY_CHESTS = pvp._cfg("freedailytaskconf")  # per season: chests after N score matches a day
+
+
+def daily_chests(season: int) -> list[dict]:
+    return sorted((r for r in DAILY_CHESTS if r.get("FreedomId") == season), key=lambda r: r["Value"])
+
+
 async def handle_reward(client, pb: bytes):
-    """Daily attempt chest: not in the tables we have; answered without a reward."""
+    """0x5209 FightFreedomRewardC2S{index}: daily match chest (freedailytaskconf). challenge_reward is
+    a bit mask over the row IDs (UIGenericUtils.IsRewarded); index = row ID or list position."""
+    idx = P.FightFreedomRewardC2S.FromString(pb).index
     d = entry(client.gid, client.account)
-    await client.send_packet(MSG_REWARD, P.FightFreedomRewardS2C(err=1, challenge_reward=d["reward"])
-                             .SerializeToString())
+    rows = daily_chests(current_season())
+    row = next((r for r in rows if r["ID"] == idx), None) or (rows[idx] if 0 <= idx < len(rows) else None)
+    if not row or d["reward"] & (1 << row["ID"]) or d["times"] < row["Value"]:
+        await client.send_packet(MSG_REWARD, P.FightFreedomRewardS2C(err=1, challenge_reward=d["reward"])
+                                 .SerializeToString())
+        return
+    d["reward"] |= 1 << row["ID"]
+    pvp.save()
+    rewards = [tuple(int(x) for x in s.split(":")) for s in row.get("TaskItemReward") or []]
+    await client.send_packet(MSG_REWARD, P.FightFreedomRewardS2C(challenge_reward=d["reward"]).SerializeToString())
+    await pvp.HOOKS["grant_rewards"](client, rewards, True)
 
 
 async def handle_team_save(client, pb: bytes):
@@ -567,8 +585,8 @@ async def handle_team_see(client, pb: bytes):
     team = opponent_team({"gid": see}) if see > 0 else None
     out = P.TeamFreedomSeeOtherS2C()
     if team:
-        out.team.CopyFrom(_pvp_team(team))
-        out.power = team.power
+        out.team.CopyFrom(_pvp_team(team, see, client.gid))
+        out.power = out.team.power
     else:
         out.err = 1
     await client.send_packet(MSG_TEAM_SEE, out.SerializeToString())
