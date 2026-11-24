@@ -28,14 +28,16 @@ from pathlib import Path
 
 import launcher_i18n as i18n
 
-GAME_PORT = 10104
+IN_GAME_PORT = 10104  # the port the game connects to (redirected inside the emulator)
+GAME_PORT = int(os.environ.get("HFH_PORT") or IN_GAME_PORT)  # our server; tests: HFH_PORT=10105
 PROXY_PORT = 8082
 GAME_PACKAGE = "com.garena.game.haikyu"
 GAME_ACTIVITY = f"{GAME_PACKAGE}/.icon_2_Activity"
-IPTABLES_RULE = (f"OUTPUT -p tcp --dport {GAME_PORT} "
+IPTABLES_RULE = (f"OUTPUT -p tcp --dport {IN_GAME_PORT} "
                  f"-j DNAT --to-destination 127.0.0.1:{GAME_PORT}")
 
-APP_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "HFH-Launcher"
+APP_DIR = Path(os.environ.get("HFH_LAUNCHER_DIR") or
+               Path(os.environ.get("LOCALAPPDATA", Path.home())) / "HFH-Launcher")  # tests: own folder
 SETTINGS_FILE = APP_DIR / "settings.json"
 FROZEN = getattr(sys, "frozen", False)
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -878,27 +880,35 @@ class Launcher:
         ok, out = self.su("iptables -t nat -S OUTPUT")
         if not ok:
             return None
-        return "private" if f"--dport {GAME_PORT}" in out and "DNAT" in out else "garena"
+        for line in out.splitlines():
+            if f"--dport {IN_GAME_PORT}" in line and f"127.0.0.1:{GAME_PORT}" in line:
+                return "private"
+        return "garena"
 
     def set_redirect(self, mode):
         """Add (private) or remove (garena) the iptables redirect. Returns True if changed."""
         before = self.emulator_mode()
         if mode == "private":
             if before != "private":
+                self.remove_redirects()  # a rule to another port would win
                 ok, out = self.su(f"iptables -t nat -A {IPTABLES_RULE}")
                 if not ok:
                     self.log(f"iptables fehlgeschlagen: {out}")
         else:
-            ok, out = self.su("iptables -t nat -S OUTPUT")
-            for line in out.splitlines():
-                if f"--dport {GAME_PORT}" in line and "DNAT" in line and line.startswith("-A "):
-                    self.su("iptables -t nat -D " + line[3:])
+            self.remove_redirects()
         after = self.emulator_mode()
         self.show_mode(after)
         if after == mode:
             self.log("Umleitung auf den Private Server aktiv." if mode == "private"
                      else "Umleitung entfernt – das Spiel verbindet sich mit Garena.")
         return before != after
+
+    def remove_redirects(self):
+        """Delete every DNAT rule for the game port."""
+        ok, out = self.su("iptables -t nat -S OUTPUT")
+        for line in out.splitlines():
+            if f"--dport {IN_GAME_PORT}" in line and "DNAT" in line and line.startswith("-A "):
+                self.su("iptables -t nat -D " + line[3:])
 
     def game_running(self):
         ok, out = self.adb("shell", "pidof", GAME_PACKAGE)

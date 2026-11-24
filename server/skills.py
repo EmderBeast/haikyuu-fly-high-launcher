@@ -168,6 +168,7 @@ class Battle:
         # Rule text of the game: Power Attack counters Receive, Receive counters Quick Attack, Quick
         # Attack counters Block, Block counters Power Attack.
         genre = {HOST: info.home.formation.genre.value, GUEST: info.away.formation.genre.value}
+        self.genre = genre
         self.counter = {t: COUNTERS.get(genre[t]) == genre[1 - t] for t in (HOST, GUEST)}
         self.cards = {}
         self.skills: dict[int, list[tuple[dict, int]]] = {}
@@ -552,8 +553,12 @@ class Battle:
         if key == "ParticipateMultipleBlock":  # our blocks: the front row joins every block
             return (ctx.formula == 6 and ctx.actor is not None and self.team_of(ctx.actor) == team
                     and (owner == ctx.actor or owner in self.front.get(team, ())))
-        if key == "TeamSpecific":  # line-up specialty: not modelled, reads as none (0)
-            return 0
+        if key == "TeamSpecific":  # Lineup Specialty of our team (arg 1: of the opponents)
+            return self.genre[1 - team if arg == 1 else team]
+        if key == "TeamSpecificGroup":
+            # skill text of 5701's ultimate: "when your Lineup Specialty is Power ATK or Receive" is
+            # group 1 (57015111), "Block or Quick ATK" group 0
+            return {0: 1, 3: 1, 1: 0, 2: 0}.get(self.genre[team], -1)
         if key == "BallOverNet":
             return ctx.event == "over"
         if key == "ComeOnPlayer":
@@ -790,6 +795,9 @@ class Battle:
             return P_([min(pool, key=lambda p: self.energy.get(p, 0))]) if pool else []
         if code in (100, 107):
             return P_(on(team))
+        if code == 27:  # PlayerAtkCritRateLEX: our players on court whose Awareness (attack crit rate)
+            # is at most arg / 10000
+            return P_([p for p in on(team) if self.attr(p, 9) <= arg / 10000])
         if code == 21:  # DiagonalPlayer: the teammate three rotation slots from the owner
             mine = self.slot.get(owner)
             if mine is None:
