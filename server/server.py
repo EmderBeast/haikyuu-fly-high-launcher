@@ -438,13 +438,23 @@ MSG_NOTIFY_REWARDS = 0x0404  # NotifyRewardsS2C{1=repeated Item{2=conf_id 3=numb
 MSG_LEVEL_CHANGE = 0x0406  # NotifyLevelChangeS2C{1=level 2=exp}: manager level
 
 
-async def grant_rewards(client: GameClient, rewards: list[tuple[int, int]], popup: bool = True):
-    """Credit rewards to the account, send the currency/item updates and (optionally) the reward popup."""
+async def grant_rewards(client: GameClient, rewards: list[tuple[int, int]], popup: bool = True,
+                        lineup: list[int] | None = None):
+    """Credit rewards to the account, send the currency/item updates and (optionally) the reward popup.
+    `lineup`: the 7 starters, for Match EXP (113); default = the starters of the last fight type's line-up."""
     acc = client.account
     updates, shown, levels = {}, [], []
     import clubs
     for conf_id, number in rewards:
         if clubs.credit(int(client.gid), conf_id, number):  # club points / funds / contribution
+            shown.append((1, 2, wire.build([(2, 0, conf_id), (3, 0, number)])))
+            continue
+        if conf_id == gameconfig.MATCH_EXP:  # onto the line-up cards, like the Garena server
+            if lineup is None:
+                lineup = matches._lineup(acc, getattr(client, "last_pvp", (0, 0))[0] or matches.P.FIGHT_TOKYO)[:7]
+            cards = acc.add_card_exp(lineup, number)
+            log.info(f"  MATCH EXP {number} -> {len(cards)} starter(s) below their level cap")
+            updates.setdefault(MSG_CARD_CHANGE, []).extend((1, 2, card_info(c)) for c in cards)
             shown.append((1, 2, wire.build([(2, 0, conf_id), (3, 0, number)])))
             continue
         if conf_id in gameconfig.MANAGER_EXP:
@@ -459,7 +469,8 @@ async def grant_rewards(client: GameClient, rewards: list[tuple[int, int]], popu
         shown.append((1, 2, wire.build([(2, 0, conf_id), (3, 0, number)])))
     acc.save()
     for mid, entries in updates.items():
-        await client.send_packet(mid, wire.build(entries))
+        if entries:
+            await client.send_packet(mid, wire.build(entries + ([(2, 0, CARD_UPDATE)] if mid == MSG_CARD_CHANGE else [])))
     if popup and shown:
         await client.send_packet(MSG_NOTIFY_REWARDS, wire.build(shown))
     if any(c in gameconfig.MANAGER_EXP for c, _ in rewards):
@@ -815,7 +826,8 @@ async def handle_preset_result(client: GameClient, match):
         if room.room_args.pvp_type == matches.P.FIGHT_CONTEST:  # Extreme Training: next floor opens
             updates += acc.clear_contest(stage - matches.CONTEST_STAGE_BASE)
     await client.send_packet(0x0304, matches.build_result(room, won, stars, rewards))
-    await grant_rewards(client, rewards, popup=False)
+    await grant_rewards(client, rewards, popup=False,
+                        lineup=[p.info.inst_id for p in room.home.formation.players[:7] if p.info.inst_id])
     for mid, pb in updates:
         await client.send_packet(mid, pb)
     log.info(f"  STAGE {stage} {'won' if won else 'lost'} stars={stars:03b} first={first} rewards={rewards}")
@@ -984,7 +996,7 @@ async def handle_pvp_result(client: GameClient, pb_data: bytes):
     result = wire.parse(wire.body_to_pb(bytes.fromhex(reply["body_hex"]), reply["flags"]))
     battle = wire.parse(wire.get(result, 2, b""))
     rewards = [(wire.get(wire.parse(raw), 2), wire.get(wire.parse(raw), 3, 0)) for num, _, raw in battle if num == 4]
-    # the result screen shows the rewards itself; 113 (card EXP) is not modelled and gets skipped
+    # the result screen shows the rewards itself; 113 (Match EXP) goes onto the line-up cards
     await grant_rewards(client, rewards, popup=False)
     log.info(f"  MATCH rewards {rewards}, manager level {client.account.level} exp {client.account.exp}")
     pvp_type, stage = getattr(client, "last_pvp", (0, 0))

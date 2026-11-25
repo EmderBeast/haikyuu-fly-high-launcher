@@ -81,7 +81,49 @@ def _unit(m: dict) -> P.ChatUnit:
                    quote_name=m.get("qn", ""), quote_content=m.get("qc", ""))
     if m.get("emoji"):
         u.args.add(type=P.CHAT_MSG_EMOJI, emoji=m["emoji"])
+    for a in m.get("args", []):  # club links (CHAT_MSG_ASSOC_RECRUIT / _INVITE): vals as strings
+        u.args.add(type=a["type"], vals=a["vals"])
     return u
+
+
+def message(gid: int, content: str = "", args: list | None = None) -> dict:
+    import personal
+    return {"gid": gid, "content": content, "time": int(time.time()),
+            "frame": personal.chosen(gid, 0x2111, 0) or 0, "emoji": 0, "qn": "", "qc": "", "args": args or []}
+
+
+def post_world(m: dict):
+    """A message in the world chat, to every online player (the sender too)."""
+    st = _state()
+    st["world"] = (st["world"] + [m])[-WORLD_KEEP:]
+    upd = P.ChatUpdateS2C()
+    upd.world_msg_list.append(_unit(m))
+    upd.new_chat_person.append(base(m["gid"]))
+    for other in list(mail.ONLINE):
+        _push(other, upd)
+    pvp.save()
+
+
+def post_private(m: dict, to: int) -> bool:
+    """A private message from m["gid"] to `to` (echoed to the sender); False when `to` blocked the sender."""
+    gid = m["gid"]
+    import friends
+    if friends.is_blocked(to, gid):
+        return False
+    st = _state()
+    key = _key(gid, to)
+    st["private"][key] = (st["private"].get(key, []) + [m])[-PRIVATE_KEEP:]
+    upd = P.ChatUpdateS2C()
+    upd.chat_list.add(friend_gid=gid).chat_list.append(_unit(m))
+    upd.new_chat_person.append(base(gid))
+    upd.recent_data.append(_recent(gid, m["time"]))
+    _push(to, upd)
+    echo = P.ChatUpdateS2C()
+    echo.chat_list.add(friend_gid=to).chat_list.append(_unit(m))
+    echo.recent_data.append(_recent(to, m["time"]))
+    _push(gid, echo)
+    pvp.save()
+    return True
 
 
 def _push(gid: int, upd: P.ChatUpdateS2C):
@@ -136,29 +178,9 @@ async def handle_send(client, pb: bytes):
          "qn": req.quote_name, "qc": req.quote_content}
     st = _state()
     if req.chan == P.WORLD_CHAN:
-        st["world"] = (st["world"] + [m])[-WORLD_KEEP:]
-        upd = P.ChatUpdateS2C()
-        upd.world_msg_list.append(_unit(m))
-        upd.new_chat_person.append(base(gid))
-        for other in list(mail.ONLINE):
-            _push(other, upd)
+        post_world(m)
     elif req.chan == P.FRIEND_CHAN and req.arg > 0 and req.arg != gid:
-        to = int(req.arg)
-        import friends
-        if friends.is_blocked(to, gid):  # blocked by the receiver: accepted, but not delivered
-            await client.send_packet(MSG_SEND, P.ChatMsgSendS2C(chan=req.chan).SerializeToString())
-            return
-        key = _key(gid, to)
-        st["private"][key] = (st["private"].get(key, []) + [m])[-PRIVATE_KEEP:]
-        upd = P.ChatUpdateS2C()
-        upd.chat_list.add(friend_gid=gid).chat_list.append(_unit(m))
-        upd.new_chat_person.append(base(gid))
-        upd.recent_data.append(_recent(gid, m["time"]))
-        _push(to, upd)
-        echo = P.ChatUpdateS2C()
-        echo.chat_list.add(friend_gid=to).chat_list.append(_unit(m))
-        echo.recent_data.append(_recent(to, m["time"]))
-        _push(gid, echo)
+        post_private(m, int(req.arg))  # blocked by the receiver: accepted, but not delivered
     elif req.chan == P.ASSOCIATION_CHAN and clubs_of(gid):
         c = clubs_of(gid)
         c["chat"] = (c.get("chat", []) + [m])[-WORLD_KEEP:]

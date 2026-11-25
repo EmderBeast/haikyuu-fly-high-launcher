@@ -25,8 +25,12 @@ Club funds: at most `association` DailyMaxFund a day (daliy_funds) and MaxFund i
 the club up for FundingConsume (leader / vice leader). Every week (weekly(), from seasons.run) each
 member with contribution gets the associationbenefit row of the club level as mail 214 ("Weekly Club
 Benefits"), then the week's contribution starts again. A kicked member gets mail 10.
-Wishes and donations, club boss, buffet: see the sections below. Not built: invite / recruit
-messages (answered with an error).
+Wishes and donations, club boss, buffet: see the sections below.
+Invite (0x2E0E {friend_id}, AssociationInvitationViewLogic): a private chat message from the member to a
+friend without a club; recruit (0x2E0F, MemberViewLogic.OnReleaseBtnEvent, leader / vice leaders): a
+message in the world chat, associationconstant 21 (3) a day per club (AssociationOrganization.recruit_count). Both carry one ChatArg
+CHAT_MSG_ASSOC_INVITE / _RECRUIT with vals [club id, name, members, level]: the client draws a club link
+(FriendsContactLogic.OnChatScrollViewUpdateCell) that opens the club's details (ReqAssociationDetail).
 Icon shop (0x2E22 AssociationIconBuyC2S{icon_id, day}, AssociationActiveHeadViewLogic): the
 associationicon rows of Type 2 can be rented by the leader / vice leaders from club level `Unlock` on,
 for `Price` club funds (associationconstant 40 = item 129) a day, at most `Limit` days a purchase; a
@@ -89,6 +93,7 @@ def _org(c: dict) -> P.AssociationOrganization:
         cur_funds=c.get("funds", 0), total_funds=c.get("total_funds", 0),
         daliy_funds=c.get("day_funds", 0) if c.get("day") == pvp._today() else 0,
         review_condtion=c.get("cond", 0), cur_count=len(c["members"]), cr_time=c["created"],
+        recruit_count=_recruits(c)["n"],
         icon_id=_wear(c), cur_day_lv=c.get("lv", 1), cur_week_lv=c.get("lv", 1),
         cur_all_notify=len(c.get("notices", [])))
 
@@ -550,8 +555,44 @@ async def handle_level(client, pb: bytes):
     _refresh(c)
 
 
-async def handle_unbuilt(client, pb: bytes, msg_id: int, cls: str):
-    await _reply(client, msg_id, cls, err=1)
+RECRUITS_PER_DAY = _CONST.get(21, {}).get("Number", 3)
+
+
+def _recruits(c: dict) -> dict:
+    r = c.setdefault("recruit", {"day": "", "n": 0})
+    if r["day"] != pvp._today():
+        r.update(day=pvp._today(), n=0)
+    return r
+
+
+def _link(c: dict, kind: int) -> list:
+    return [{"type": kind, "vals": [str(c["id"]), c["name"], str(len(c["members"])), str(c.get("lv", 1))]}]
+
+
+async def handle_invite(client, pb: bytes):
+    gid = int(client.gid)
+    to = P.AssociationInviteC2S.FromString(pb).friend_id
+    c = club_of(gid)
+    import chat
+    import friends
+    ok = (c is not None and str(to) in friends.me(gid)["friends"] and club_of(to) is None
+          and not _full(c)
+          and chat.post_private(chat.message(gid, args=_link(c, P.CHAT_MSG_ASSOC_INVITE)), to))
+    await _reply(client, MSG_INVITE, "AssociationInviteS2C", err=0 if ok else 1)
+
+
+async def handle_recruit(client, pb: bytes):
+    gid = int(client.gid)
+    c = _officer(client)  # the member view shows the recruit button to the leader / vice leaders only
+    r = _recruits(c) if c else None
+    if c is None or r["n"] >= RECRUITS_PER_DAY or _full(c):
+        await _reply(client, MSG_RECRUIT, "AssociationRecruitS2C", err=1)
+        return
+    r["n"] += 1
+    import chat
+    chat.post_world(chat.message(gid, args=_link(c, P.CHAT_MSG_ASSOC_RECRUIT)))
+    await _reply(client, MSG_RECRUIT, "AssociationRecruitS2C")
+    _refresh(c)
 
 
 # --- wishes and donations (0x2E11-0x2E16) ------------------------------------------------------------
@@ -1065,6 +1106,5 @@ HANDLERS = {
     MSG_BUFFET_DONATE: handle_buffet_donate, MSG_BUFFET_OPEN: handle_buffet_open,
     MSG_BUFFET_EAT: handle_buffet_eat, MSG_BUFFET_BUY: handle_buffet_buy, MSG_ICON_BUY: handle_icon_buy,
     MSG_WISH: handle_wish, MSG_DONATE: handle_donate, MSG_RECEIVE: handle_receive, MSG_THANK: handle_thank,
-    MSG_INVITE: lambda c, pb: handle_unbuilt(c, pb, MSG_INVITE, "AssociationInviteS2C"),
-    MSG_RECRUIT: lambda c, pb: handle_unbuilt(c, pb, MSG_RECRUIT, "AssociationRecruitS2C"),
+    MSG_INVITE: handle_invite, MSG_RECRUIT: handle_recruit,
 }

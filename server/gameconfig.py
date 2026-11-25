@@ -109,6 +109,7 @@ def task_rewards(task_id: int) -> list[tuple[int, int]] | None:
 
 MAX_CARD_LEVEL = 80
 CARD_EXP = 102  # "EXP" currency spent on card levels
+MATCH_EXP = 113  # "Match EXP": goes straight onto each starter below its level cap (not a currency)
 GOLD = 100
 
 

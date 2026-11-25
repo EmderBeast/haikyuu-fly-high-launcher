@@ -375,7 +375,8 @@ class Account:
         """Match EXP (113): every listed card below its level cap gets the full amount on its EXP (field 5)
         and levels up as far as the level table allows; cards at the cap get nothing. Seen on Garena: a
         Practice Match with 113 x300 raised the only line-up card below its cap (lv16, star 2) from 1030
-        to 1330 EXP (one 0x0902 UPDATE before the result); the capped line-up cards stayed at 0.
+        to 1330 EXP (one 0x0902 UPDATE before the result); the capped line-up cards stayed at 0. The
+        result screen shows the bar ("+N" / "MAX") for the 7 starters only, so callers pass the starters.
         Returns the changed cards."""
         changed = []
         for inst in dict.fromkeys(i for i in inst_ids if i):

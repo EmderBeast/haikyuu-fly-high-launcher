@@ -277,6 +277,31 @@ async def main():
     assert err(a, C.MSG_ICON, "AssociationIconS2C") != 0
     assert P.AssociationInfoS2C.FromString(C.info(9822)).association.icon_id == C.DEFAULT_ICON
 
+    # invite: a private chat message with the club link to a friend without a club; recruit: world chat
+    import friends
+    d = await login(9824)
+    await call(a, C.MSG_INVITE, P.AssociationInviteC2S(friend_id=9824))
+    assert err(a, C.MSG_INVITE, "AssociationInviteS2C") != 0  # not friends
+    friends._befriend(9821, 9824)
+    await call(a, C.MSG_INVITE, P.AssociationInviteC2S(friend_id=9824))
+    assert err(a, C.MSG_INVITE, "AssociationInviteS2C") == 0
+    unit = P.ChatUpdateS2C.FromString(d.last(chat.MSG_UPDATE)).chat_list[0].chat_list[0]
+    print("invite:", unit.gid, unit.args[0].type, list(unit.args[0].vals))
+    assert unit.gid == 9821 and unit.args[0].type == P.CHAT_MSG_ASSOC_INVITE
+    assert list(unit.args[0].vals) == [str(club.id), "Karasuno", "3", "2"]
+    assert P.ChatUpdateS2C.FromString(a.last(chat.MSG_UPDATE)).chat_list[0].friend_gid == 9824  # echo
+    friends._befriend(9821, 9822)
+    await call(a, C.MSG_INVITE, P.AssociationInviteC2S(friend_id=9822))
+    assert err(a, C.MSG_INVITE, "AssociationInviteS2C") != 0  # b is in a club already
+    await call(c, C.MSG_RECRUIT, P.AssociationRecruitC2S(target_id=club.id))
+    assert err(c, C.MSG_RECRUIT, "AssociationRecruitS2C") != 0  # c is no officer
+    for i in range(C.RECRUITS_PER_DAY + 1):
+        await call(b, C.MSG_RECRUIT, P.AssociationRecruitC2S(target_id=club.id))
+        assert (err(b, C.MSG_RECRUIT, "AssociationRecruitS2C") == 0) == (i < C.RECRUITS_PER_DAY)
+    w = P.ChatUpdateS2C.FromString(d.last(chat.MSG_UPDATE)).world_msg_list[0]
+    assert w.gid == 9822 and w.args[0].type == P.CHAT_MSG_ASSOC_RECRUIT and w.args[0].vals[0] == str(club.id)
+    assert a.info().association.recruit_count == C.RECRUITS_PER_DAY
+
     # kick c (leader), c gets the kick message
     await call(a, C.MSG_EXIT, P.AssociationExitC2S(target_id=9823))
     assert P.AssociationExitS2C.FromString(c.last(C.MSG_EXIT)).target_id == 9823

@@ -34,6 +34,8 @@ T_MATCH, T_SET, T_RALLY, T_OWN_SCORE, T_OTHER_SCORE, T_NET, T_TOUCH = 1, 2, 3, 4
 T_SERVE, T_DIG_SERVE, T_SAVE, T_SET_TOUCH, T_SPIKE, T_BLOCK, T_DIG_SPIKE, T_DIG_NO_ATTACK = range(8, 16)
 T_BOTH_TOUCH, T_OWN_TOUCH, T_OTHER_SPIKE = 18, 19, 20
 ENERGY_MAX = 120.0
+BOND_NEEDS_MEMBERS = True
+BUFF_CHANGE_EVENT = True
 FRESH_AT_END = True
 SNAPSHOT = True  # ArgsType 10 values are fixed when the buff is given
 TEAM_BUFF_EVENT = True
@@ -210,9 +212,22 @@ class Battle:
                 if sl and lead is not None:
                     # a bond's skills belong to its SkillCharacterID (trammel.json): triggers such as
                     # "I serve" are about that player, not about the first one of the line-up
-                    who = _num(TRAMMEL.get(fid // 100, {}).get("SkillCharacterID"))
+                    tram = TRAMMEL.get(fid // 100, {})
+                    # "Activate by deploying N players from this Bond": the room lists every bond the
+                    # account owns, but only those with enough members in the line-up are active
+                    # (captures: bond 1184 needs 5501, 5502 and 5503; with two of them its buff never came)
+                    need = _num(tram.get("CharacterNumber"))
+                    here = {self.cards[p].conf_id % 10000 for p in self.cards
+                            if self.team_of(p) == team and p % TEAM_IDS < 7}
+                    if BOND_NEEDS_MEMBERS and need and len(here & set(_flat(tram.get("CharacterID")))) < need:
+                        continue
+                    who = _num(tram.get("SkillCharacterID"))
                     owner = next((p for p in self.cards if self.team_of(p) == team
-                                  and self.cards[p].conf_id % 10000 == who), lead) if who else lead
+                                  and self.cards[p].conf_id % 10000 == who), None if who else lead)
+                    if owner is None:
+                        # the bond's skill character is not in this team: its skill does not run
+                        # (captures: bond 1184 with only 5501 and 5502 never gave its round-start buff)
+                        continue
                     self.skills[owner] += [(SKILLS[s], _num(sl.get("Skilllevel"), 1))
                                            for s in _list(sl.get("Skillid")) if s in SKILLS]
         self.cd: dict[tuple[int, int], list] = {}  # (pid, skill id) -> [unit, left]
@@ -233,6 +248,7 @@ class Battle:
         self._cd_tag: int | None = None  # tag of the skill whose cooldown just ended (see _cd_done)
         self._tbuff: int | None = None  # team buff whose count just changed (see _team_buff_changed)
         self._fresh: set | None = None  # buffs given while the rally-end skills run
+        self._pbuff: set = set()  # buffs whose change is being handled (see _buff_changed)
         self.history: list[tuple] = []  # (team, link, formula, result, player, crit) this rally
         self.casts: list[Cast] = []  # collected since the last flush
         self.changes: list[BuffChange] = []
@@ -344,6 +360,7 @@ class Battle:
         self.changes.append(BuffChange(entity, buff_id, b.stacks, b.left or 0))
         if self._fresh is not None:
             self._fresh.add((entity, buff_id))
+        self._buff_changed(entity, buff_id)
         if entity[0] == "t":
             self._team_buff_changed(entity[1], buff_id)
         btype = _num(row.get("Type"))
@@ -358,6 +375,23 @@ class Battle:
             self.morale[team] = min(MORALE_MAX, max(0.0, self.morale[team] + self._args(row)[0] / 10000 * stacks))
         elif btype == 5:  # cooldown change
             self._cd_change(entity, row)
+
+    def _buff_changed(self, entity: tuple, buff_id: int):
+        """Skills with a BuffNumberChange trigger for that buff run for its holder (a team buff: for
+        everyone on the team)."""
+        if not BUFF_CHANGE_EVENT or buff_id in self._pbuff:
+            return
+        self._pbuff.add(buff_id)
+        try:
+            ctx = Ctx("pbuff")
+            pids = [entity[1]] if entity[0] == "p" else [p for p in self.cards if self.team_of(p) == entity[1]]
+            for pid in pids:
+                for skill, lv in list(self.skills.get(pid, [])):
+                    if any(t.get("Key") == "BuffNumberChange" and _num(t.get("Args")) == buff_id
+                           for t in skill.get("Trigger") or []):
+                        self._run(skill, pid, lv, ctx)
+        finally:
+            self._pbuff.discard(buff_id)
 
     def _team_buff_changed(self, team: int, buff_id: int):
         """Skills with a TeamBuffNumberChange trigger for that buff run (e.g. system skill 803: every
@@ -751,6 +785,10 @@ class Battle:
             if not me or ctx.event not in ("touch", "after", "crit"):
                 return 0
             return max(_flat(SKILLS.get(ctx.skill_id, {}).get("EnergyCostList")) or [0])
+        if key == "BuffNumberChange":  # see _buff_changed: the count the buff has now
+            if ctx.event != "pbuff" or arg not in self._pbuff:
+                return 0
+            return self.stacks(("p", owner), arg) or self.stacks(("t", team), arg)
         if key == "TeamBuffNumberChange":  # see _team_buff_changed
             return 0xFFFF if ctx.event == "tbuff" and arg == self._tbuff else 0
         if key == "HaveBuffTag":  # comes with a BuffNumber condition that names the buff
@@ -919,6 +957,13 @@ class Battle:
             elif k == "AddBuffByLevel":
                 for ent in self._targets(v2, owner, ctx, v3):
                     self.add_buff(ent, v1 + level - 1, 1, owner, level)
+            elif k == "AddBuffBySelfBuffValue":
+                # V2 with as many stacks as there are of V1 (58013171: the [Maintain] stacks consumed
+                # at the end of the rally are kept as 58013151 for the next rally's bonus)
+                n = self.stacks(("p", owner), v1) or self.stacks(("t", self.team_of(owner)), v1)
+                if n > 0:
+                    for ent in self._targets(v3, owner, ctx, v4):
+                        self.add_buff(ent, v2, n, owner, level)
             elif k == "RemoveBuff":
                 for ent in self._targets(v3, owner, ctx, v4):
                     self.remove_buff(ent, v1, v2 or 99)
@@ -975,6 +1020,8 @@ class Battle:
             return "cd"
         if "TeamBuffNumberChange" in keys:
             return "tbuff"
+        if "BuffNumberChange" in keys:
+            return "pbuff"
         if keys & {"RoundEnd", "Score"}:
             return "end"
         if "BallOverNet" in keys:
