@@ -148,7 +148,8 @@ def crit_stats(get, formula: int, prop: int) -> tuple[float, float, float]:
     return rate, dmg, bonus
 
 
-def power(stats: dict, pid: int, formula: int, rng=random, multiplier: float = 1.0, battle=None) -> Power:
+def power(stats: dict, pid: int, formula: int, rng=random, multiplier: float = 1.0, battle=None,
+          ctx=None) -> Power:
     """power_des: attribute * multiplier * crit damage * damage bonus * power * restraint * k.
     With a skills.Battle the attributes include buffs and Type 6 buffs add to the multiplier."""
     get = (lambda p: battle.attr(pid, p)) if battle else (lambda p: stats.get(pid, {}).get(p, 0.0))
@@ -158,12 +159,16 @@ def power(stats: dict, pid: int, formula: int, rng=random, multiplier: float = 1
         fast = get(ATTR_FAST)
         if fast > attr:
             attr, prop = fast, ATTR_FAST
-    attr = attr or 1000.0
-    if battle:
-        multiplier *= battle.power_mult(pid, prop)
     rate, dmg, bonus = crit_stats(get, formula, prop)
     # crit stats are percentages stored x10000 (2500 = 25 %), already divided
     crit = rng.random() < min(rate, 0.8) or bool(battle and battle.force_crit(pid, formula))
+    if battle and ctx is not None:  # skills for a critical touch count for this touch
+        battle.crit_known(ctx, crit)
+        attr = get(prop)
+        rate, dmg, bonus = crit_stats(get, formula, prop)
+    attr = attr or 1000.0
+    if battle:
+        multiplier *= battle.power_mult(pid, prop)
     crit_dmg = 1.5 + dmg if crit else 1.0
     dmg_bonus = 1.0 + bonus
     k = K.get(formula, 1)
@@ -252,7 +257,7 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
             mult = HAND_SERVE.get(inputs["hand"], 1.0)
             if ctx:
                 ctx.hand = inputs["hand"]
-        pw = power(stats, pid, formula, rng, multiplier=mult, battle=battle)
+        pw = power(stats, pid, formula, rng, multiplier=mult, battle=battle, ctx=ctx)
         ref = opp_ball if opp_ball is not None else (opp.ball if opp else None)
         x = advantage(pw.ball, ref, formula) if ref else 0.0
         result = forced if forced is not None else roll_result(formula, last_result, link, x, rng)

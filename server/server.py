@@ -976,6 +976,8 @@ async def handle_pvp_result(client: GameClient, pb_data: bytes):
                 await mission_event(client, missions.PEAK_MATCH, 1)
             return
         await handle_preset_result(client, room)
+        if room.info.room_args.pvp_type == matches.P.FIGHT_ASSOC_BOSS:  # club boss: score for the club
+            log.info(f"  CLUB BOSS score {clubs.boss_result(int(client.gid), room)}")
         return
     await handle_generic(client, pb_data, 0x0304)
     reply = REPLIES["0x0304"]

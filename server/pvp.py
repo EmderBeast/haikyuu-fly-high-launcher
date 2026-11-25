@@ -626,6 +626,12 @@ def rank_list(gid: int) -> P.RankListData:
 
 async def handle_rank_list(client, pb: bytes):
     req = P.RankListC2S.FromString(pb)
+    if req.rank_type in (P.RANK_ASSOC_BOSS, P.RANK_ASSOCIATION_TOTAL_FOUNDS):  # club rankings
+        import clubs
+        out = P.RankListS2C(rank_type=req.rank_type)
+        out.rank_data.CopyFrom(clubs.club_ranking(int(client.gid), req.rank_type))
+        await client.send_packet(MSG_RANK_LIST, out.SerializeToString())
+        return
     if req.rank_type != P.RANK_ARENA:
         await HOOKS["generic"](client, pb, MSG_RANK_LIST)
         return
@@ -637,6 +643,12 @@ async def handle_rank_list(client, pb: bytes):
 
 async def handle_rank_self(client, pb: bytes):
     req = P.RankSelfC2S.FromString(pb)
+    if req.rank_type in (P.RANK_ASSOC_BOSS, P.RANK_ASSOCIATION_TOTAL_FOUNDS):  # own club's place
+        import clubs
+        out = P.RankSelfS2C(rank_type=req.rank_type, params=req.params)
+        out.own.CopyFrom(clubs.club_ranking(int(client.gid), req.rank_type).own)
+        await client.send_packet(MSG_RANK_SELF, out.SerializeToString())
+        return
     if req.rank_type != P.RANK_ARENA:
         await HOOKS["generic"](client, pb, MSG_RANK_SELF)
         return
@@ -652,6 +664,10 @@ async def handle_quick(client, pb: bytes):
     if req.args.pvp_type == P.FIGHT_PEAK:  # Triple Clash: one game of a best-of-three series
         import peak
         await peak.handle_quick(client, pb)
+        return
+    if req.args.pvp_type == P.FIGHT_ASSOC_BOSS:  # club boss quick finish: the week's best again
+        import clubs
+        await clubs.handle_boss_quick(client, req)
         return
     if req.args.pvp_type != P.FIGHT_ARENA:
         await HOOKS["generic"](client, pb, MSG_QUICK)

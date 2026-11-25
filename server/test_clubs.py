@@ -170,6 +170,52 @@ async def main():
     await call(a, C.MSG_THANK, P.AssociationVowThankC2S(inst_id=got[0].inst_id))
     assert P.AssociationVowRecordS2C.FromString(b.last(C.MSG_VOW_RECORD)).donate_record[0].is_thank or         P.AssociationVowRecordS2C.FromString(b.last(C.MSG_VOW_RECORD)).donate_record[1].is_thank
 
+    # club boss: a fight's score (own attack + defence power) goes to the club and the player's day best
+    boss = P.AssociationBossInfoS2C.FromString(C.boss_info(9821))
+    print("boss", boss.common.boss_id, "stage", C.boss_stage(C.club_of(9821)), "index", boss.stage_index)
+    assert boss.common.boss_id in C.BOSS_STAGES and C.boss_stage(C.club_of(9821)) > 0
+
+    class Live:
+        power_tot = {0: [30000.0, 12000.0], 3: [8000.0, 0.0], 14: [99999.0, 99999.0]}  # 14 = the boss side
+
+    class Fight:
+        live, info = Live(), P.PVPRoomInfo()
+    assert C.boss_result(9821, Fight()) == 50000
+    assert C.boss_result(9822, Fight()) == 50000
+    await asyncio.sleep(0.05)
+    boss = P.AssociationBossInfoS2C.FromString(a.last(C.MSG_BOSS_INFO))
+    print("club score", boss.common.current_score, "my day", boss.info.day_score, "fights", boss.info.day_challenge_num)
+    assert boss.common.current_score == 100000 and boss.info.day_score == 50000 and boss.info.day_challenge_num == 1
+    gold = a.info().self_number.gold
+    await call(a, C.MSG_BOSS_REWARD, P.AssociationBossReceiveRewardC2S(reward_type=1))  # personal tiers <= 50000
+    assert err(a, C.MSG_BOSS_REWARD, "AssociationBossReceiveRewardS2C") == 0
+    own = list(P.AssociationBossInfoS2C.FromString(a.last(C.MSG_BOSS_INFO)).info.own_receive)
+    print("personal tiers claimed", own, "club points", gold, "->", a.info().self_number.gold)
+    assert own and a.info().self_number.gold > gold
+    await call(a, C.MSG_BOSS_REWARD, P.AssociationBossReceiveRewardC2S(reward_type=1))
+    assert err(a, C.MSG_BOSS_REWARD, "AssociationBossReceiveRewardS2C") != 0  # nothing new
+    await call(a, C.MSG_BOSS_REWARD, P.AssociationBossReceiveRewardC2S(reward_type=2))  # club tiers <= 100000
+    assert list(P.AssociationBossInfoS2C.FromString(a.last(C.MSG_BOSS_INFO)).info.common_receive)
+
+    # the view's member ranking: boss_score = the member's week total; club ranking (rank type 14 / 5)
+    assert {x.base.id: x.base.boss_score for x in a.info().numbers}[9821] == 50000
+    await call(a, 0x1301, P.RankListC2S(rank_type=P.RANK_ASSOC_BOSS))
+    rk = P.RankListS2C.FromString(a.last(0x1301)).rank_data
+    print("club ranking", [(r.rank, r.name, r.score) for r in rk.rank], "own", rk.own.rank)
+    assert rk.rank[0].name == "Karasuno" and rk.rank[0].score == 100000 and rk.own.rank == 1
+    await call(a, 0x1302, P.RankSelfC2S(rank_type=P.RANK_ASSOCIATION_TOTAL_FOUNDS))
+    assert P.RankSelfS2C.FromString(a.last(0x1302)).own.gid == C.club_of(9821)["id"]
+
+    # quick finish: the week's best counts again once today's best is below it
+    C.club_of(9821)["members"]["9821"]["boss"]["day_score"] = 1000
+    q = P.PVPQuickBattleC2S(args=P.PVPRoomArgs(pvp_type=P.FIGHT_ASSOC_BOSS, pvp_args=[0, C.boss_stage(C.club_of(9821))]))
+    await call(a, 0x0306, q)
+    r = P.PVPQuickBattleS2C.FromString(a.last(0x0306))
+    assert r.error == 0 and r.battle_result.info.room_args.pvp_type == P.FIGHT_ASSOC_BOSS
+    assert C._boss_club(C.club_of(9821))["score"] == 149000  # only the improvement 1000 -> 50000 counts
+    await call(a, 0x0306, q)  # today's best = week's best now: no more quick finish
+    assert P.PVPQuickBattleS2C.FromString(a.last(0x0306)).error != 0
+
     # kick c (leader), c gets the kick message
     await call(a, C.MSG_EXIT, P.AssociationExitC2S(target_id=9823))
     assert P.AssociationExitS2C.FromString(c.last(C.MSG_EXIT)).target_id == 9823

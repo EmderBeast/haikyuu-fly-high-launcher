@@ -35,6 +35,7 @@ T_SERVE, T_DIG_SERVE, T_SAVE, T_SET_TOUCH, T_SPIKE, T_BLOCK, T_DIG_SPIKE, T_DIG_
 T_BOTH_TOUCH, T_OWN_TOUCH, T_OTHER_SPIKE = 18, 19, 20
 ENERGY_MAX = 120.0
 EARLY_TP5 = True
+CRIT_EVENT = True
 RESULT_KEYS = {"TouchBallEvaluate", "IsFormulaCrit", "IsCurrentFormulaCrit", "OwnFRWithStep", "OtherFRWithStep",
                "OwnFormulaResult", "OwnTounchBallNumber", "LastFormula"}
 TOUCH_OK = {1: 1, 2: 3, 3: 3, 4: 4, 5: 4, 6: 2, 7: 3, 8: 3}  # formula -> lowest result that is not BAD
@@ -576,13 +577,13 @@ class Battle:
             c = self.cd.get((owner, arg))
             return c[1] if c else 0
         if key == "GetSelfFormulaType":
-            return ctx.formula if me and ctx.event in ("touch", "after") else -1
+            return ctx.formula if me and ctx.event in ("touch", "after", "crit") else -1
         if key in ("SelfFormulaIsCatch",):
             return me and ctx.formula in CATCH
         if key in ("SelfTouchBallMan", "MyTouchBallSkillTagType", "OwnPlayerTouchBallSkillTagType"):
             if key == "OwnPlayerTouchBallSkillTagType":
-                return ctx.actor is not None and self.team_of(ctx.actor) == team and ctx.event in ("touch", "after")
-            return me and ctx.event in ("touch", "after") and (
+                return ctx.actor is not None and self.team_of(ctx.actor) == team and ctx.event in ("touch", "after", "crit")
+            return me and ctx.event in ("touch", "after", "crit") and (
                 not arg or _num(SKILLS.get(ctx.skill_id, {}).get("SkillTagType")) == arg)
         if key == "TouchBallTeam":
             return ctx.actor is not None and self.team_of(ctx.actor) == team
@@ -605,6 +606,8 @@ class Battle:
             return h[2] if h else 0
         if key == "Link":
             return ctx.link == arg
+        if key in ("IsFormulaCrit", "IsCurrentFormulaCrit") and ctx.event == "crit":
+            return ctx.crit
         if key in ("IsFormulaCrit", "IsCurrentFormulaCrit"):
             return ctx.event == "after" and ctx.crit
         if key == "TouchBallSkillUnique":
@@ -671,7 +674,7 @@ class Battle:
                 return -1
             return max(self._cd_length(owner, sk) for sk in mine)
         if key in ("TouchBallSkillTagType", "OwnPlayerUniqueSkillTagType"):
-            if ctx.event not in ("touch", "after") or ctx.actor is None:
+            if ctx.event not in ("touch", "after", "crit") or ctx.actor is None:
                 return False
             sk = SKILLS.get(ctx.skill_id, {})
             if key == "OwnPlayerUniqueSkillTagType" and (self.team_of(ctx.actor) != team
@@ -694,7 +697,7 @@ class Battle:
         if key == "OwnTounchBallNumber":
             # (sic) a touch of our team after which the ball stays with us: captures of 58011121, which
             # never ran after serves, spikes and stuff blocks
-            if ctx.event not in ("touch", "after") or ctx.actor is None or self.team_of(ctx.actor) != team:
+            if ctx.event not in ("touch", "after", "crit") or ctx.actor is None or self.team_of(ctx.actor) != team:
                 return False
             return ctx.formula not in (1, 5) and not (ctx.formula == 6 and ctx.result == 3)
         if key == "TouchBallEvaluate":
@@ -921,6 +924,8 @@ class Battle:
         captures (57011121: the toucher's own touch already has the bonus) unless they ask for the
         outcome of the touch."""
         tp = _num(skill.get("TimePoint"))
+        if tp == 6 and "IsCurrentFormulaCrit" in keys and CRIT_EVENT:
+            return "crit"  # "when performing Critical plays": the critical touch itself has the bonus
         if tp == 5 and EARLY_TP5:
             return "after" if keys & RESULT_KEYS else "touch"
         return "after" if tp in (4, 5, 6, 8, 9) else "touch"
@@ -1116,6 +1121,18 @@ class Battle:
         self._arm_all()
         self.fire(ctx)
         return ctx
+
+    def crit_known(self, ctx: Ctx, crit: bool):
+        """Called once the touch is known to be critical or not, before its power is worked out: skills
+        that ask for the current touch being critical (TimePoint 6) run now, so that their buff counts
+        for this touch (5701's ultimate: "an additional 50 % when performing Critical plays")."""
+        if not CRIT_EVENT:
+            return
+        event, ctx.event, ctx.crit = ctx.event, "crit", crit
+        try:
+            self.fire(ctx)
+        finally:
+            ctx.event = event
 
     def after_touch(self, ctx: Ctx, result: int, crit: bool):
         ctx.event, ctx.result, ctx.crit = "after", result, crit

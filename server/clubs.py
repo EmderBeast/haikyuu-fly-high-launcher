@@ -25,7 +25,7 @@ Club funds: at most `association` DailyMaxFund a day (daliy_funds) and MaxFund i
 the club up for FundingConsume (leader / vice leader). Every week (weekly(), from seasons.run) each
 member with contribution gets the associationbenefit row of the club level as mail 214 ("Weekly Club
 Benefits"), then the week's contribution starts again. A kicked member gets mail 10.
-Wishes and donations: see the section below. Not built: boss, buffet, icon shop, invite / recruit
+Wishes and donations, club boss: see the sections below. Not built: buffet, icon shop, invite / recruit
 messages (answered with an error). Rejoin cooldown: associationconstant 2 (24 h).
 Member limit: association PlayerCount of the level (level 1: 30). State in pvp.json ("clubs").
 """
@@ -93,7 +93,9 @@ def _number(c: dict, gid: int) -> P.AssociationNumber:
     return P.AssociationNumber(id=gid, association_id=c["id"], position=m["pos"], in_come_time=m["joined"],
                                update_time=m["joined"], daily_status=daily, read_notify=m.get("read", []),
                                gold=m.get("gold", 0), contribution=m.get("contrib", 0),
-                               contribution_total=m.get("contrib_total", 0))
+                               contribution_total=m.get("contrib_total", 0),
+                               boss_score=m.get("boss", {}).get("week_total", 0)
+                               if m.get("boss", {}).get("week") == _week() else 0)
 
 
 def base(gid: int):
@@ -148,7 +150,8 @@ def _refresh(c: dict, also: list[int] = ()):
 
 def on_login(client) -> list[tuple[int, bytes]]:
     gid = int(client.gid)
-    return [(MSG_INFO, info(gid)), (MSG_VOW_INFO, vow_info(club_of(gid))), (MSG_VOW_RECORD, vow_record(gid))]
+    return [(MSG_INFO, info(gid)), (MSG_VOW_INFO, vow_info(club_of(gid))), (MSG_VOW_RECORD, vow_record(gid)),
+            (MSG_BOSS_INFO, boss_info(gid))]
 
 
 def _add_member(c: dict, gid: int, pos=NORMAL):
@@ -674,12 +677,192 @@ async def handle_thank(client, pb: bytes):
     _vow_refresh(c)
 
 
+# --- club boss (0x2E1B / 0x2E1C, fights with FIGHT_ASSOC_BOSS) ----------------------------------------------
+# The fight itself is a stage of the matches engine (stage row of associationbossstage[boss_id].StageID
+# [stage_index], timed, power_hit_ball_data as the score display). Its score = the own team's summed attack
+# and defence power of the match (what the client shows). Only the improvement of the player's best of
+# the day counts for the club's week score (AssocBossCommon.current_score) and the player's week
+# contribution - the client's quick-finish result says so ("Meine Kraft heute 2000 >> 8000, um 6000
+# Punkte erhöht, ... zur Gesamtkraft des Clubs hinzugefügt"); best of the day / week / ever are kept
+# (day_score, week_score, history_score). Rewards (AssociationBossViewUtils.GetRewardState): personal = rows of
+# associationbosspersonal of the difficulty with PersonalScore <= day_score (claimed GroupIds in
+# own_receive, new every day), club = associationbosswhole rows with AssociationScore <= current_score
+# (claimed GroupIds in common_receive, new every week); 0x2E1C{reward_type 1 personal / 2 club} claims all
+# reached ones. A new week: the difficulty goes up (NextHardID) when last week's club score reached the
+# stage's Rank, the boss of the week is stage_index = ISO week % number of bosses.
+# The boss view's member ranking (top 10, podium, own rank) is built by the client from the members'
+# AssociationNumber.boss_score = the member's summed scores of the week ("Wettbewerbsbeitrag").
+# Quick finish (PVPQuickBattleC2S, type 9, args [line-up, stage]; AssociationBossViewLogic.
+# OnFightQuicklyBtnEvent): counts the week's best score as a fight without playing it (the client offers
+# it only when today's best is below the week's best); the reply's battle_result.info.room_args.pvp_type
+# must be 9 (AssociationMessageHandler.OnQuickBattleBack).
+# Club ranking (rank view, clubs tab): RankListC2S rank_type 14 RANK_ASSOC_BOSS = the clubs' week score,
+# rank_type 5 RANK_ASSOCIATION_TOTAL_FOUNDS = total funds; one RankListElem per club (gid = club id).
+MSG_BOSS_INFO, MSG_BOSS_REWARD = 0x2E1B, 0x2E1C
+BOSS_STAGES = {r["ID"]: r for r in pvp._cfg("associationbossstage")}
+BOSS_PERSONAL = pvp._cfg("associationbosspersonal")
+BOSS_WHOLE = pvp._cfg("associationbosswhole")
+BOSS_FIGHTS_PER_DAY = 3
+
+
+def _boss_club(c: dict, now: float | None = None) -> dict:
+    b = c.setdefault("boss", {"week": "", "id": min(BOSS_STAGES) if BOSS_STAGES else 1, "score": 0})
+    week = _week(now)
+    if b["week"] != week:
+        row = BOSS_STAGES.get(b["id"], {})
+        if b["week"] and b["score"] >= row.get("Rank", 1 << 62) and row.get("NextHardID") in BOSS_STAGES:
+            b["id"] = row["NextHardID"]
+        b.update(week=week, score=0)
+    return b
+
+
+def _boss_me(c: dict, gid: int, now: float | None = None) -> dict:
+    m = c["members"][str(gid)].setdefault("boss", {"day": "", "week": "", "history": 0})
+    if m["day"] != pvp._today(now):
+        m.update(day=pvp._today(now), day_score=0, day_power=0, fights=0, own=[])
+    if m["week"] != _week(now):
+        m.update(week=_week(now), week_score=0, week_total=0, common=[])
+    return m
+
+
+def boss_stage(c: dict) -> int:
+    b = _boss_club(c)
+    ids = BOSS_STAGES.get(b["id"], {}).get("StageID") or [0]
+    return ids[int(_week().split("-")[1]) % len(ids)]
+
+
+def boss_info(gid: int) -> bytes:
+    c = club_of(gid)
+    out = P.AssociationBossInfoS2C(all=True)
+    if c is None:
+        return out.SerializeToString()
+    b, m = _boss_club(c), _boss_me(c, gid)
+    ids = BOSS_STAGES.get(b["id"], {}).get("StageID") or [0]
+    out.common.CopyFrom(P.AssocBossCommon(boss_id=b["id"], current_score=b["score"]))
+    out.info.CopyFrom(P.AssocBossInfo(day_challenge_num=m["fights"], history_score=m["history"],
+                                      day_score=m["day_score"], day_power=m["day_power"], own_receive=m["own"],
+                                      common_receive=m["common"], week_score=m["week_score"]))
+    out.stage_index = int(_week().split("-")[1]) % len(ids)
+    return out.SerializeToString()
+
+
+def _boss_refresh(c: dict):
+    for g in c["members"]:
+        _push(int(g), MSG_BOSS_INFO, boss_info(int(g)))
+
+
+def boss_score(match) -> int:
+    """The own team's summed attack + defence power of the match (power_hit_ball_data, ids 0-12)."""
+    live = getattr(match, "live", None)
+    tot = getattr(live, "power_tot", {}) if live else {}
+    return int(sum(a + d for pid, (a, d) in tot.items() if 0 <= pid <= 12))
+
+
+def boss_result(gid: int, match) -> int:
+    c = club_of(gid)
+    if c is None:
+        return 0
+    b, m = _boss_club(c), _boss_me(c, gid)
+    score = boss_score(match)
+    gain = max(0, score - m["day_score"])
+    b["score"] += gain
+    m["week_total"] = m.get("week_total", 0) + gain
+    m["fights"] += 1
+    if score > m["day_score"]:
+        m["day_score"], m["day_power"] = score, int(getattr(match.info.home, "power", 0))
+    m["week_score"] = max(m["week_score"], score)
+    m["history"] = max(m["history"], score)
+    pvp.save()
+    _boss_refresh(c)
+    _refresh(c)  # members' boss_score (the view's ranking)
+    return score
+
+
+class _Quick:
+    """A finished boss fight without a match: the week's best score."""
+    def __init__(self, score: int, power: int):
+        self.live = type("L", (), {"power_tot": {0: [score, 0]}})()
+        self.info = P.PVPRoomInfo()
+        self.info.home.power = power
+
+
+async def handle_boss_quick(client, req):
+    gid = int(client.gid)
+    c = club_of(gid)
+    m = _boss_me(c, gid) if c else None
+    out = P.PVPQuickBattleS2C()
+    out.battle_result.info.room_args.CopyFrom(req.args)
+    if not m or m["week_score"] <= m["day_score"]:
+        out.error = 1
+        await client.send_packet(0x0306, out.SerializeToString())
+        return
+    score = boss_result(gid, _Quick(m["week_score"], m.get("day_power", 0)))
+    await client.send_packet(0x0306, out.SerializeToString())
+    await client.send_packet(MSG_BOSS_INFO, boss_info(gid))
+    return score
+
+
+RANK_BOSS, RANK_FUNDS = P.RANK_ASSOC_BOSS, P.RANK_ASSOCIATION_TOTAL_FOUNDS
+
+
+def _club_elem(c: dict, rank: int, kind: int) -> P.RankListElem:
+    leader = next((int(g) for g, mm in c["members"].items() if mm["pos"] == LEADER), 0)
+    value = _boss_club(c)["score"] if kind == RANK_BOSS else c.get("total_funds", 0)
+    return P.RankListElem(gid=c["id"], icon=c.get("icon", 0), name=c["name"], level=c.get("lv", 1), rank=rank,
+                          score=value, power=len(c["members"]), privilege_id=0,
+                          title=base(leader).title if leader else 0)
+
+
+def club_ranking(gid: int, kind: int) -> P.RankListData:
+    def value(c):
+        return _boss_club(c)["score"] if kind == RANK_BOSS else c.get("total_funds", 0)
+    order = sorted(_st()["clubs"].values(), key=lambda c: (-value(c), c["id"]))
+    order = [c for c in order if value(c) > 0] if kind == RANK_BOSS else order
+    out = P.RankListData()
+    out.rank.extend(_club_elem(c, i + 1, kind) for i, c in enumerate(order[:100]))
+    mine = club_of(gid)
+    if mine:
+        place = next((i + 1 for i, c in enumerate(order) if c is mine), -1)
+        out.own.CopyFrom(_club_elem(mine, place, kind))
+    return out
+
+
+async def handle_boss_reward(client, pb: bytes):
+    gid = int(client.gid)
+    kind = P.AssociationBossReceiveRewardC2S.FromString(pb).reward_type
+    c = club_of(gid)
+    if c is None:
+        await _reply(client, MSG_BOSS_REWARD, "AssociationBossReceiveRewardS2C", err=1)
+        return
+    b, m = _boss_club(c), _boss_me(c, gid)
+    if kind == 1:
+        rows = [r for r in BOSS_PERSONAL if r.get("AssociationBossStageId") == b["id"]
+                and r.get("PersonalScore", 0) <= m["day_score"] and r["GroupId"] not in m["own"]]
+        got, items = m["own"], [i for r in rows for i in _kv(r.get("PersonalReward"))]
+    else:
+        rows = [r for r in BOSS_WHOLE if r.get("AssociationBossStageId") == b["id"]
+                and r.get("AssociationScore", 0) <= b["score"] and r["GroupId"] not in m["common"]]
+        got, items = m["common"], [i for r in rows for i in _kv(r.get("AssociationReward"))]
+    if not rows:
+        await _reply(client, MSG_BOSS_REWARD, "AssociationBossReceiveRewardS2C", err=1)
+        return
+    got.extend(r["GroupId"] for r in rows)
+    pvp.save()
+    await _reply(client, MSG_BOSS_REWARD, "AssociationBossReceiveRewardS2C")
+    await client.send_packet(MSG_BOSS_INFO, boss_info(gid))
+    merged: dict[int, int] = {}
+    for conf, n in items:
+        merged[conf] = merged.get(conf, 0) + n
+    await pvp.HOOKS["grant_rewards"](client, list(merged.items()), True)
+
+
 HANDLERS = {
     MSG_LIST: handle_list, MSG_SELECT: handle_select, MSG_CREATE: handle_create, MSG_APPLY: handle_apply,
     MSG_JOIN: handle_join, MSG_REVIEW: handle_review, MSG_APPOINT: handle_appoint, MSG_EXIT: handle_exit,
     MSG_DISBAND: handle_disband, MSG_DECL: handle_declaration, MSG_ICON: handle_icon, MSG_NAME: handle_name,
     MSG_NOTIFY: handle_notify, MSG_READ: handle_read, MSG_DAILY: handle_daily,
     MSG_LV: lambda c, pb: handle_level(c, pb),
+    MSG_BOSS_REWARD: handle_boss_reward,
     MSG_WISH: handle_wish, MSG_DONATE: handle_donate, MSG_RECEIVE: handle_receive, MSG_THANK: handle_thank,
     MSG_INVITE: lambda c, pb: handle_unbuilt(c, pb, MSG_INVITE, "AssociationInviteS2C"),
     MSG_RECRUIT: lambda c, pb: handle_unbuilt(c, pb, MSG_RECRUIT, "AssociationRecruitS2C"),

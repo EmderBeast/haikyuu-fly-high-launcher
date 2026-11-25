@@ -57,7 +57,7 @@ SCRUB = {
     "0x1B01", "0x1B02", "0x1B03", "0x1B06", "0x1B07",  # chat
     "0x2E01", "0x2E11", "0x2E12", "0x2E1B", "0x2E1D",  # club
     "0x1301", "0x1302", "0x1303", "0x1404",  # rankings
-    "0x2301", "0x2302", "0x2304", "0x2308", "0x230E", "0x230F", "0x2314", "0x2316", "0x2317",
+    "0x2302", "0x2304", "0x2308", "0x230E", "0x230F", "0x2314", "0x2316", "0x2317",
     "0x2318", "0x2319", "0x231A", "0x231F", "0x2320", "0x2321", "0x2322",  # home visits
     "0x1401", "0x2703", "0x2704", "0x2705", "0x2708",  # arena info, opponents, records
     "0x4A06",  # player lists
@@ -67,6 +67,10 @@ SCRUB = {
 NAME_SOURCES = {"0x1001", "0x1002", "0x2E12", "0x1301", "0x1302", "0x1404", "0x1401", "0x2703",
                 "0x2704", "0x2705", "0x2708", "0x4A06", "0x2301", "0x1B06", "0x210D"}
 EMPTY_BODY = {"flags": 1, "body_hex": "00"}
+# messages a new player's login needs: only these top-level fields stay (the rest has other players)
+# HomeInfoS2C: the client reads base info unchecked - emptied, a starter account hangs at 41 % loading
+# ("No HomesteadBaseData"); 4/5/7/8/9/14/16 = visitors, messages, likes (same cut as server/starter.py)
+PARTIAL = {"0x2301": {1, 2, 3, 6, 10, 11, 12, 13}}
 PUBLIC_GITIGNORE = """__pycache__/
 *.pyc
 *.log
@@ -132,14 +136,32 @@ def _mask(m, names) -> dict:
     return {**m, "body_hex": body.hex()}
 
 
+def _keep_fields(m, keep: set[int]) -> dict:
+    """Message reduced to the given top-level protobuf fields (body = 0x00 + protobuf)."""
+    sys.path.insert(0, str(HERE / "server"))
+    import wire
+    pb = _pb(m)
+    head, pb = (pb[:1], pb[1:]) if pb[:1] == b"\x00" else (b"", pb)
+    new = head + wire.build([f for f in wire.parse(pb) if f[0] in keep])
+    return {**m, "flags": m["flags"] & ~0x02, "body_hex": new.hex()}
+
+
+def _clean(msg_id: str, m, names) -> dict:
+    if msg_id in SCRUB:
+        return {**m, **EMPTY_BODY}
+    if msg_id in PARTIAL:
+        m = _keep_fields(m, PARTIAL[msg_id])
+    return _mask(m, names)
+
+
 def scrub(path: str, data: bytes, names: set[bytes]) -> bytes:
     if path == "server/data/login_sync.json":
         msgs = json.loads(data)
-        msgs = [{**m, **EMPTY_BODY} if m["msg_id"] in SCRUB else _mask(m, names) for m in msgs]
+        msgs = [_clean(m["msg_id"], m, names) for m in msgs]
         return json.dumps(msgs, indent=1).encode("utf-8")
     if path == "server/data/replies.json":
         replies = json.loads(data)
-        replies = {k: ({**m, **EMPTY_BODY} if k in SCRUB else _mask(m, names)) for k, m in replies.items()}
+        replies = {k: _clean(k, m, names) for k, m in replies.items()}
         return json.dumps(replies, indent=1).encode("utf-8")
     return data
 
