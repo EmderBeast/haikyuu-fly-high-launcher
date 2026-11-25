@@ -234,6 +234,9 @@ PHRASES = [
     ("Installation fehlgeschlagen:", "Installation failed:"),
     ("Haikyuu Fly High installiert.", "Haikyuu Fly High installed."),
     ("installiert", "installed"),
+    ("Alle meine Konten", "All my accounts"),
+    ("Zuletzt eingeloggt: noch niemand", "Last login: nobody yet"),
+    ("Zuletzt eingeloggt:", "Last login:"),
     # single words (whole words only)
     ("Spiel", "Game"),
     ("läuft", "running"),

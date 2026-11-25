@@ -84,6 +84,10 @@ class TrVar(tk.StringVar):
         super().set(i18n.tr(value))
 
 
+ALL = "*"  # target "all my accounts"
+ALL_LABEL = "Alle meine Konten"
+
+
 class AdminWindow:
     def __init__(self, launcher):
         if i18n.LANG != "de":  # rarity names are compared with the box's value: translate once
@@ -109,17 +113,19 @@ class AdminWindow:
         self.gid = tk.StringVar()  # the chosen account's gid (the box shows "name (gid)")
         gids = sorted(self.unlocked())
         names = self.players()
-        self.gid_labels = {(f"{names[g]} ({g})" if names.get(g) else g): g for g in gids}
+        self.gid_labels = {i18n.tr(ALL_LABEL): ALL}
+        self.gid_labels.update({(f"{names[g]} ({g})" if names.get(g) else g): g for g in gids})
         self.gid_label = tk.StringVar()
         self.gid_box = ttk.Combobox(top, textvariable=self.gid_label, values=list(self.gid_labels),
                                     state="readonly", width=30)
         self.gid_box.pack(side="left")
         self.gid_box.bind("<<ComboboxSelected>>", self.account_chosen)
-        if gids:
-            owner = str(self.admins().get("owner") or "")
-            first = owner if owner in gids else gids[-1]
-            self.gid.set(first)
-            self.gid_label.set(next(lbl for lbl, g in self.gid_labels.items() if g == first))
+        if gids:  # default: all own accounts, so it does not matter which Garena login the game uses
+            self.gid.set(ALL)
+            self.gid_label.set(next(iter(self.gid_labels)))
+        self.login_var = TrVar(value=self.last_login_text())
+        tk.Label(self.win, textvariable=self.login_var, bg=BG, fg="#aaaaaa", font=("Segoe UI", 9)).pack(
+            anchor="w", padx=14)
 
         nb = ttk.Notebook(self.win)
         nb.pack(fill="both", expand=True, padx=14, pady=6)
@@ -149,8 +155,31 @@ class AdminWindow:
         if hasattr(self, "status"):
             self.status.set(self.last_report())
 
+    def target_gid(self) -> str:
+        """The single account behind the choice ("all my accounts": the one that logged in last)."""
+        gid = self.gid.get()
+        if gid != ALL:
+            return gid
+        last = self.last_login().get("gid", "")
+        return last if last in self.unlocked() else next(iter(sorted(self.unlocked())), "")
+
+    def last_login(self) -> dict:
+        try:
+            return json.loads((self.base / "server" / "accounts" / "last_login.json").read_text("utf-8"))
+        except Exception:
+            return {}
+
+    def last_login_text(self) -> str:
+        d = self.last_login()
+        if not d.get("gid"):
+            return "Zuletzt eingeloggt: noch niemand"
+        name = self.players().get(d["gid"], "")
+        who = f"{name} ({d['gid']})" if name else d["gid"]
+        return "Zuletzt eingeloggt: " + who + ", " + time.strftime("%d.%m. %H:%M", time.localtime(d["time"]))
+
     def unlocked(self):
-        """Accounts to edit: admins, and on a shared server every player the server knows."""
+        """Accounts to edit: admins; on an own server every account (all belong to the PC's owner),
+        on a shared server every player the server knows."""
         acc_dir = self.base / "server" / "accounts"
         out = {}
         try:
@@ -161,7 +190,7 @@ class AdminWindow:
         if st.get("owner"):
             out[str(st["owner"])] = "owner"
         out.update({g: "admin" for g in st["admins"]})
-        if self.shared():
+        if self.shared() or out:  # own server: unlocked once = all accounts on it
             out.update({g: n for g, n in self.players().items() if g not in out})
         return out
 
@@ -200,7 +229,7 @@ class AdminWindow:
 
     def last_report(self):
         try:
-            d = json.loads((self.base / "server" / "accounts" / "admin_done" / f"{self.gid.get()}.json")
+            d = json.loads((self.base / "server" / "accounts" / "admin_done" / f"{self.target_gid()}.json")
                            .read_text("utf-8"))
             return "Zuletzt übernommen (" + time.strftime("%d.%m. %H:%M", time.localtime(d["time"])) + "): " \
                 + ", ".join(d["done"])
@@ -402,7 +431,7 @@ class AdminWindow:
             sys.path.insert(0, server)
         import starter
         import wire
-        gid = int(self.gid.get() or 0)
+        gid = int(self.target_gid() or 0)
         base = starter.baseline_for(gid)
         cards = dict(base.cards)
         acc_dir = self.base / "server" / "accounts"
@@ -588,26 +617,45 @@ class AdminWindow:
             return
         queue = self.base / "server" / "accounts" / "admin_queue"
         queue.mkdir(parents=True, exist_ok=True)
-        path = queue / f"{gid}.json"
-        try:
-            old = json.loads(path.read_text("utf-8"))
-        except Exception:
-            old = []
-        path.write_text(json.dumps(old + actions, indent=1), encoding="utf-8")
+        if gid == ALL:  # every own account applies each batch once (server/admin.py apply_pending)
+            path = queue / "all.json"
+            try:
+                old = json.loads(path.read_text("utf-8"))
+            except Exception:
+                old = []
+            nid = max([int(e.get("id", 0)) for e in old] + [int(time.time())]) + 1
+            path.write_text(json.dumps(old + [{"id": nid, "actions": actions}], indent=1), encoding="utf-8")
+            who = "alle eigenen Konten"
+        else:
+            path = queue / f"{gid}.json"
+            try:
+                old = json.loads(path.read_text("utf-8"))
+            except Exception:
+                old = []
+            path.write_text(json.dumps(old + actions, indent=1), encoding="utf-8")
+            who = f"Konto {gid}"
         self.clear_specs()
         self.status.set("Gespeichert – Spiel startet neu, Änderungen kommen beim Login an. "
                         "Im Spiel einmal auf START tippen.")
-        self.l.log(f"Admin Mode: {len(actions)} Änderung(en) für Konto {gid} vorgemerkt.")
+        self.l.log(f"Admin Mode: {len(actions)} Änderung(en) für {who} vorgemerkt.")
         self.l.restart_game_clicked()
-        self.win.after(5000, self.watch_done, path)
+        self.win.after(5000, self.watch_done, time.time())
 
-    def watch_done(self, path):
+    def watch_done(self, since):
+        """Show the report once the account that logs in has applied the changes."""
         if not self.win.winfo_exists():
             return
-        if path.exists():
-            self.win.after(3000, self.watch_done, path)
-        else:
+        self.login_var.set(self.last_login_text())
+        try:
+            d = json.loads((self.base / "server" / "accounts" / "admin_done" / f"{self.target_gid()}.json")
+                           .read_text("utf-8"))
+            done = d["time"] >= since
+        except Exception:
+            done = False
+        if done:
             self.status.set(self.last_report())
+        elif time.time() - since < 600:
+            self.win.after(3000, self.watch_done, since)
 
     # --- rights (shared server) -------------------------------------------------------------
 
@@ -733,7 +781,10 @@ class AdminWindow:
         f = self.base / "server" / "accounts" / "admin_unlocked.json"
         try:
             state = json.loads(f.read_text("utf-8"))
-            state.pop(self.gid.get(), None)
+            if self.shared():
+                state.pop(self.gid.get(), None)
+            else:  # own server: the unlock covers all accounts
+                state = {}
             f.write_text(json.dumps(state, indent=1), encoding="utf-8")
         except Exception:
             pass

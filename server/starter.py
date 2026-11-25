@@ -69,8 +69,10 @@ def _starter_roster() -> list[int]:
             court += _packed(v) if wt == 2 else [v]
     jobs = [gameconfig.PLAYERS.get(wire.get(wire.parse(CAPTURED.cards.get(i, b"")), 3, 0), {}).get("Job")
             for i in court[:7]]
+    # 5xxxx: copies of the real characters (opponent/special versions), not obtainable in game
     r_cards = [cid for cid, p in sorted(gameconfig.PLAYERS.items())
-               if p.get("Rare") == 1 and gameconfig.new_card_fields(cid) and gameconfig.new_card_fields(cid)[1]]
+               if cid < 50000 and p.get("Rare") == 1 and gameconfig.new_card_fields(cid)
+               and gameconfig.new_card_fields(cid)[1]]
     roster = []
     for job in jobs:
         pick = next((c for c in r_cards if gameconfig.PLAYERS[c].get("Job") == job and c not in roster), None)

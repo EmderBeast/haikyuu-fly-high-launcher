@@ -61,11 +61,14 @@ UNLOCKED = ACCOUNTS / "admin_unlocked.json"
 ADMINS = ACCOUNTS / "admins.json"  # shared server: {"owner": "<gid>", "admins": {"<gid>": "<name>"}}
 QUEUE = ACCOUNTS / "admin_queue"
 DONE = ACCOUNTS / "admin_done"
+ALL_QUEUE = QUEUE / "all.json"  # [{"id": n, "actions": [...]}]: for every own account, once each
+LAST_LOGIN = ACCOUNTS / "last_login.json"  # {"gid": ..., "time": ...}: shown in the Admin Mode window
 
 MSG_GIFT_CODE = 0x2403
 MSG_SPECIALTY_ON = 0x1804
 MSG_SPECIALTY_OFF = 0x1805
 MAX_STAR = 6
+TWIN_BASE = 50000  # card ids from here on are copies of real characters (not obtainable)
 SPECIALTY_INST_BASE = 1 << 61  # far away from captured and starter instance ids
 
 
@@ -102,7 +105,13 @@ def is_admin(gid) -> bool:
     if multiplayer():
         st = admins_state()
         return str(gid) == str(st.get("owner")) or str(gid) in st["admins"]
-    return str(gid) in unlocked()
+    # own server: every account on it belongs to the PC's owner - unlocked once = all accounts
+    return bool(unlocked())
+
+
+def is_own(gid) -> bool:
+    """Target of "all my accounts": every account on an own server, owner/admins on a shared one."""
+    return is_admin(gid)
 
 
 def flag(acc, key: str) -> bool:
@@ -161,10 +170,22 @@ def _apply(acc, action: dict) -> list[str]:
         done.append(f"Währung {cid} = {amount}")
     if action.get("all_cards") and gameconfig.AVAILABLE:
         owned = acc.owned_conf_ids()
-        new = [c for c in sorted(gameconfig.PLAYERS) if c not in owned]
+        # 5xxxx: copies of the real characters (opponent/special versions), not obtainable in game
+        new = [c for c in sorted(gameconfig.PLAYERS) if c < TWIN_BASE and c not in owned]
         for conf in new:
             acc.add_card(conf)
         done.append(f"{len(new)} Charaktere freigeschaltet")
+    if action.get("remove_twins"):
+        cards = {**acc.b.cards, **{wire.get(wire.parse(c), 1): c for c in acc.cards}}
+        conf = {i: wire.get(wire.parse(c), 3, 0) for i, c in cards.items() if i not in acc.removed_cards}
+        swapped = _swap_twins_in_team(acc, conf)
+        team = _team_insts(acc)
+        gone = [i for i, c in conf.items() if c >= TWIN_BASE and i not in team]
+        for inst in gone:
+            acc.remove_card(inst)
+            acc.removed_cards.add(inst)  # also baseline (starter) cards
+        done.append(f"{len(gone)} doppelte Charaktere entfernt"
+                    + (f", {swapped} in der Aufstellung durch das Original ersetzt" if swapped else ""))
     if action.get("cards") and gameconfig.AVAILABLE:
         confs = [int(c) for c in action["cards"] if int(c) in gameconfig.PLAYERS]
         for conf in confs:
@@ -225,6 +246,59 @@ def _apply(acc, action: dict) -> list[str]:
     return done
 
 
+def _team_insts(acc) -> set[int]:
+    """Card instances used in any saved line-up (never removed by a clean-up)."""
+    from accounts import _packed
+    try:
+        team = acc.team or acc.b.pb("0x0B01")
+        out = set()
+        for num, _, v in wire.parse(team):
+            if num != 1:
+                continue
+            for n2, wt, v2 in wire.parse(v):
+                if n2 == 3:
+                    out |= set(_packed(v2) if wt == 2 else [v2])
+        return out
+    except Exception:
+        return set()
+
+
+def _swap_twins_in_team(acc, conf: dict) -> int:
+    """In every line-up, a copy (5xxxx) is replaced by the owned original (id - 50000)."""
+    from accounts import _packed
+    best = {}  # original conf -> an owned instance (the strongest = highest level/star wins later)
+    for inst, c in sorted(conf.items()):
+        if c < TWIN_BASE:
+            best.setdefault(c, inst)
+    swapped, out = 0, []
+    for num, wt, v in wire.parse(acc.team_info()):
+        if num != 1:
+            out.append((num, wt, v))
+            continue
+        fields = wire.parse(v)
+        insts = []
+        for n2, w2, v2 in fields:
+            if n2 == 3:
+                insts += _packed(v2) if w2 == 2 else [v2]
+        new = []
+        for i in insts:
+            orig = best.get(conf.get(i, 0) - TWIN_BASE) if conf.get(i, 0) >= TWIN_BASE else None
+            if orig is not None and orig not in insts and orig not in new:
+                new.append(orig)
+                swapped += 1
+            else:
+                new.append(i)
+        if new == insts:
+            out.append((num, wt, v))
+            continue
+        rest = [f for f in fields if f[0] != 3]
+        rest.append((3, 2, b"".join(wire.varint(i) for i in new)))
+        out.append((1, 2, wire.build(sorted(rest, key=lambda f: f[0]))))
+    if swapped:
+        acc.team = wire.build(out)
+    return swapped
+
+
 def apply_pending(acc):
     """Apply the queued Admin Mode changes for this account (called at login).
 
@@ -232,22 +306,46 @@ def apply_pending(acc):
     need not be admin; admin-only switches stay without effect for normal players (flag())."""
     if not enabled():
         return
+    try:
+        ACCOUNTS.mkdir(exist_ok=True)
+        LAST_LOGIN.write_text(json.dumps({"gid": str(acc.gid), "time": time.time()}), encoding="utf-8")
+    except OSError:
+        pass
     path = QUEUE / f"{acc.gid}.json"
     actions = _json(path, None)
-    if actions is None:
+    batch = []
+    seen = int(acc.admin_flags.get("all_seen", 0))
+    if is_own(acc.gid):  # "all my accounts": each batch once per account
+        for entry in _json(ALL_QUEUE, []):
+            if int(entry.get("id", 0)) > seen:
+                batch += entry.get("actions", [])
+                seen = max(seen, int(entry["id"]))
+    if actions is None and not batch:
         return
     report = []
-    for action in actions if isinstance(actions, list) else [actions]:
+    for action in (actions if isinstance(actions, list) else [actions] if actions else []) + batch:
         try:
             report += _apply(acc, action)
         except Exception as e:  # a bad entry must never block the login
             log.error(f"  ADMIN change failed {action}: {e!r}")
             report.append(f"Fehler: {e}")
+    if batch:
+        acc.admin_flags["all_seen"] = seen
     path.unlink(missing_ok=True)
     DONE.mkdir(parents=True, exist_ok=True)
     (DONE / f"{acc.gid}.json").write_text(json.dumps({"time": time.time(), "done": report},
                                                      ensure_ascii=False, indent=1), encoding="utf-8")
     log.info(f"  ADMIN applied for {acc.gid}: {report}")
+    acc.save()
+
+
+def queue_all(actions: list):
+    """Queue changes for all own accounts (each applies them once at its next login)."""
+    QUEUE.mkdir(parents=True, exist_ok=True)
+    entries = _json(ALL_QUEUE, [])
+    nid = max([int(e.get("id", 0)) for e in entries] + [int(time.time())]) + 1
+    entries.append({"id": nid, "actions": actions})
+    ALL_QUEUE.write_text(json.dumps(entries, indent=1), encoding="utf-8")
 
 
 def apply_power(acc, team):
