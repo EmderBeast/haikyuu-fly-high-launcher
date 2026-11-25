@@ -12,6 +12,18 @@ players: 0x2105-0x210C, 0x2111) were replayed from the capture before, so the ga
 back to the owner's captured choice. They are stored per player here and sent again after login as
 the same *SetS2C replies (the client's handlers simply take the value). A time-limited choice that
 has expired is dropped, so the baseline value shows again.
+
+Other players' profiles (0x210D PersonalOtherC2S{gid}, tapping a player in chat, friends, the club or
+a ranking): built from that player's stored state, i.e. name / level from the arena snapshot every login
+makes, the profile choices above over the account's baseline PersonalInfo, the showcase players as
+PlayerCardInfo of the account's own cards, the club, arena and Triple Clash points. Unknown players
+(never logged in here) get err 1. This replaced the captured reply, which showed a stranger.
+
+Game settings (0x2402 SettingModifyC2S{setting_data: bits_data, bytes_data}, GAMER_SETTING_BIT): stored
+per player and sent again after login as 0x2401 SettingInfoS2C (the captured reply answered every change
+with the owner's bits). Others see them where the server decides: PersonalOtherS2C.setting (bit 3
+PERSONAL_INFO_SHOW: the client greys out "personal info" without it), friend requests need bit 2
+FRIEND_INVITE, club invites bit 4 CLUB_INVITE of the receiver (allows()).
 """
 import time
 
@@ -121,7 +133,91 @@ def _handler(msg_id: int):
     return handle
 
 
+MSG_OTHER = 0x210D
+MSG_SETTING_INFO, MSG_SETTING = 0x2401, 0x2402
+
+
+def setting(gid: int, acc=None) -> P.SettingData:
+    """The player's game settings: stored since a change, else the account's baseline."""
+    v = _choices(gid).get("2402") if str(gid) in pvp.state().get("profile", {}) else None
+    if v is not None:
+        return P.SettingData(bits_data=v["bits"], bytes_data=bytes.fromhex(v["bytes"]))
+    try:
+        return P.SettingInfoS2C.FromString((acc or _account(gid)).b.pb("0x2401")).setting_data
+    except Exception:
+        return P.SettingData(bits_data=124)  # the baseline value: bits 2-6 on
+
+
+def allows(gid: int, bit: int) -> bool:
+    """GAMER_SETTING_BIT `bit` switched on by this player (e.g. FRIEND_INVITE, CLUB_INVITE)."""
+    return bool(setting(gid).bits_data >> bit & 1)
+
+
+async def handle_setting(client, pb: bytes):
+    data = P.SettingModifyC2S.FromString(pb).setting_data
+    _choices(client.gid)["2402"] = {"bits": data.bits_data, "bytes": data.bytes_data.hex()}
+    pvp.save()
+    out = P.SettingModifyS2C()
+    out.setting_data.CopyFrom(data)
+    await client.send_packet(MSG_SETTING, out.SerializeToString())
+
+
+def _account(gid: int):
+    """The player's account: the live one when online, else loaded from disk (not saved)."""
+    import mail
+    client = mail.ONLINE.get(gid)
+    if client is not None:
+        return client.account
+    import accounts
+    import starter
+    return accounts.Account(gid, starter.baseline_for(gid))
+
+
+def other(gid: int) -> P.PersonalOtherS2C:
+    snap = pvp.state().get("snapshots", {}).get(str(gid))
+    if not snap:
+        return P.PersonalOtherS2C(err=1, gid=gid)
+    acc = _account(gid)
+    info = P.PersonalInfoS2C()
+    try:
+        info.ParseFromString(acc.b.pb("0x2101"))
+    except Exception:
+        pass
+    out = P.PersonalOtherS2C(
+        gid=gid, name=snap.get("name") or info.name, level=acc.level, exp=acc.exp, sex_type=info.sex_type,
+        icon_id=chosen(gid, 0x2105, info.icon_id) or 0, icon_frame_id=chosen(gid, 0x2106, info.icon_frame_id) or 0,
+        sentence=chosen(gid, 0x2107, info.sentence) or "", setting=setting(gid, acc).bits_data, show_banner_id=chosen(gid, 0x2109, info.show_banner_id) or 0,
+        title_id=chosen(gid, 0x210B, info.title_id) or 0, birth=chosen(gid, 0x210C, info.birth) or "",
+        arena_fight_score=pvp.state().get("arena", {}).get(str(gid), {}).get("score", 0),
+        peak_score=pvp.state().get("peak", {}).get(str(gid), {}).get("score", 0))
+    out.show_badge_ids.extend(chosen(gid, 0x210A, list(info.show_badge_ids)) or [])
+    for inst in chosen(gid, 0x2108, list(info.show_player_inst_ids)) or []:
+        raw = acc.get_card(inst) if inst else None
+        if raw:
+            out.show_players.append(matches.card_entry(P.PlayerCard.FromString(raw)))
+    out.card_record_sum = len({P.PlayerCard.FromString(c).conf_id for c in _all_cards(acc)})
+    import clubs
+    c = clubs.club_of(gid)
+    if c:
+        out.association_id, out.association_name = c["id"], c["name"]
+        out.position = c["members"][str(gid)]["pos"]
+    return out
+
+
+def _all_cards(acc) -> list[bytes]:
+    own = {P.PlayerCard.FromString(c).inst_id: c for c in acc.cards}
+    base = {i: c for i, c in acc.b.cards.items() if i not in own and i not in acc.removed_cards}
+    return list(own.values()) + list(base.values())
+
+
+async def handle_other(client, pb: bytes):
+    gid = P.PersonalOtherC2S.FromString(pb).gid
+    await client.send_packet(MSG_OTHER, other(gid).SerializeToString())
+
+
 HANDLERS = {m: _handler(m) for m in SETTINGS}
+HANDLERS[MSG_OTHER] = handle_other
+HANDLERS[MSG_SETTING] = handle_setting
 
 
 def on_login(client) -> list[tuple[int, bytes]]:
@@ -132,4 +228,8 @@ def on_login(client) -> list[tuple[int, bytes]]:
         v = chosen(client.gid, m)
         if v is not None:
             out.append((m, _reply(m, v)))
+    if "2402" in pvp.state().get("profile", {}).get(str(client.gid), {}):
+        info = P.SettingInfoS2C()
+        info.setting_data.CopyFrom(setting(client.gid, client.account))
+        out.append((MSG_SETTING_INFO, info.SerializeToString()))
     return out

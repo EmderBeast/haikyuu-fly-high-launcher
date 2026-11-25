@@ -109,6 +109,33 @@ async def main():
     assert [x.friend.base.gid for x in P.FriendInfoS2C.FromString(b.last(F.MSG_INFO)).black_list] == [9813]
     await call(b, F.MSG_BLACK, P.FriendBlackHandleC2S(handle_type=P.BLACK_DEL, gid=9813))
     assert not F.me(9812)["black"]
+
+    # another player's profile (0x210D): b's own choices, showcase cards, unknown player -> err
+    import personal
+    cards = [P.PlayerCard.FromString(x) for x in personal._all_cards(b.account)][:2]
+    await call(b, 0x2107, P.PersonalSentenceSetC2S(sentence="Fly high!"))
+    await call(b, 0x2108, P.PersonalShowPlayerListSetC2S(inst_ids=[x.inst_id for x in cards]))
+    await call(a, personal.MSG_OTHER, P.PersonalOtherC2S(gid=9812))
+    prof = P.PersonalOtherS2C.FromString(a.last(personal.MSG_OTHER))
+    print("profile", prof.gid, prof.name, prof.level, repr(prof.sentence), [x.info.conf_id for x in prof.show_players],
+          prof.card_record_sum, prof.arena_fight_score)
+    assert prof.err == 0 and prof.gid == 9812 and prof.name == name_b and prof.sentence == "Fly high!"
+    assert [x.info.inst_id for x in prof.show_players] == [x.inst_id for x in cards] and prof.card_record_sum > 0
+    assert prof.setting >> P.PERSONAL_INFO_SHOW & 1  # public by default (baseline bits 124)
+    # settings: stored, echoed, private profile, no friend requests; sent again after login
+    await call(c, 0x2402, P.SettingModifyC2S(setting_data=P.SettingData(bits_data=0)))
+    assert P.SettingModifyS2C.FromString(c.last(0x2402)).setting_data.bits_data == 0
+    await call(a, personal.MSG_OTHER, P.PersonalOtherC2S(gid=9813))
+    assert P.PersonalOtherS2C.FromString(a.last(personal.MSG_OTHER)).setting == 0
+    await call(a, F.MSG_APPLY, P.FriendApplyC2S(apply_gid=9813))
+    assert P.FriendApplyS2C.FromString(a.last(F.MSG_APPLY)).err != 0  # c takes no friend requests
+    c = await login(9813)
+    assert P.SettingInfoS2C.FromString(c.last(0x2401)).setting_data.bits_data == 0
+    del server.mail.ONLINE[9812]  # offline: loaded from disk
+    await call(a, personal.MSG_OTHER, P.PersonalOtherC2S(gid=9812))
+    assert P.PersonalOtherS2C.FromString(a.last(personal.MSG_OTHER)).sentence == "Fly high!"
+    await call(a, personal.MSG_OTHER, P.PersonalOtherC2S(gid=4242))
+    assert P.PersonalOtherS2C.FromString(a.last(personal.MSG_OTHER)).err != 0
     print("OK", TMP)
 
 

@@ -84,6 +84,8 @@ class TrVar(tk.StringVar):
         super().set(i18n.tr(value))
 
 
+RESO_CHOICES = {"unverändert": None, "aus": 0, "1. Stufe": "t1", "2. Stufe": "t2", "3. Stufe": "t3",
+                "4. Stufe": "t4", "5. Stufe": "t5", "max": "max"}  # skill resonance tiers of a card
 ALL = "*"  # target "all my accounts"
 ALL_LABEL = "Alle meine Konten"
 
@@ -98,6 +100,7 @@ class AdminWindow:
         self.data = GameData(self.base)
         self.pending_specs = []
         self.pending_power = {}
+        self.pending_reso = {}
 
         self.win = tk.Toplevel(launcher.root)
         self.win.title("Admin Mode")
@@ -290,6 +293,14 @@ class AdminWindow:
         tk.Spinbox(r, from_=0, to=99999, textvariable=self.items, width=7).pack(side="left", padx=6)
         tk.Label(f, text="Alle Sorten aus dem normalen Inventar (Tickets, Material, Geschenke …).",
                  bg=PANEL, fg="#aaaaaa", font=("Segoe UI", 9)).pack(anchor="w", padx=36)
+        r = tk.Frame(f, bg=PANEL)
+        r.pack(anchor="w", padx=12, pady=(14, 2))
+        tk.Label(r, text="Skill-Resonance aller Karten:", bg=PANEL, fg=FG).pack(side="left")
+        self.reso_all = TrVar(value=i18n.tr("unverändert"))
+        ttk.Combobox(r, textvariable=self.reso_all, values=[i18n.tr(k) for k in RESO_CHOICES], state="readonly",
+                     width=14).pack(side="left", padx=6)
+        tk.Label(f, text="Stufen je Karte (4/6/8/10/12 Skill-Level). Einzelne Karten: Tab „Stärke“.",
+                 bg=PANEL, fg="#aaaaaa", font=("Segoe UI", 9)).pack(anchor="w", padx=36)
         return f
 
     def tab_potentials(self, nb):
@@ -409,6 +420,8 @@ class AdminWindow:
         self.pending_specs.clear()
         self.spec_list.delete(0, "end")
         self.pending_power.clear()
+        self.pending_reso.clear()
+        self.reso_all.set("unverändert")
 
     def describe(self, s):
         d = self.data
@@ -496,6 +509,12 @@ class AdminWindow:
             self.stat_vars[t] = v
             self.base_labels[t] = lbl
 
+        rr = tk.Frame(f, bg=PANEL)
+        rr.pack(anchor="w", padx=12, pady=(4, 0))
+        tk.Label(rr, text="Skill-Resonance:", bg=PANEL, fg=FG).pack(side="left")
+        self.reso_card = TrVar(value=i18n.tr("unverändert"))
+        ttk.Combobox(rr, textvariable=self.reso_card, values=[i18n.tr(k) for k in RESO_CHOICES],
+                     state="readonly", width=14).pack(side="left", padx=6)
         btns = tk.Frame(f, bg=PANEL)
         btns.pack(anchor="w", padx=12, pady=6)
         tk.Button(btns, text="Hinzufügen", command=self.add_power, bg="#0f3460", fg="white",
@@ -561,12 +580,26 @@ class AdminWindow:
                     messagebox.showerror("Admin Mode", f"Ungültiger Wert: {v.get()}", parent=self.win)
                     return
                 stats[str(t)] = int(text)
+        reso = self.reso_choice(self.reso_card.get())
+        if reso is not None:
+            self.pending_reso[key] = reso
+            self.power_list.insert("end", f"{self.card_label(key)}: Skill-Resonance {self.reso_card.get()}")
+            self.reso_card.set("unverändert")
         m = {"pct": max(1, int(self.pct.get())), "stats": stats}
-        self.pending_power[key] = m
-        self.power_list.insert("end", i18n.tr(self.describe_power(key, m)))
+        if reso is None or stats or m["pct"] != 100:
+            self.pending_power[key] = m
+            self.power_list.insert("end", i18n.tr(self.describe_power(key, m)))
         self.pct.set(100)  # fresh fields for the next card
         for v in self.stat_vars.values():
             v.set("")
+
+    @staticmethod
+    def reso_choice(text):
+        """Value for the server ({"resonance": ...}) of a box entry, None = unchanged."""
+        for k, v in RESO_CHOICES.items():
+            if text in (k, i18n.tr(k)):
+                return v
+        return None
 
     def reset_power(self):
         key, _ = self.selected_card()
@@ -598,6 +631,11 @@ class AdminWindow:
             actions.append({"items": int(self.items.get())})
         if self.pending_power:
             actions.append({"power": dict(self.pending_power)})
+        reso = dict(self.pending_reso)
+        if self.reso_choice(self.reso_all.get()) is not None:
+            reso.setdefault("*", self.reso_choice(self.reso_all.get()))
+        if reso:
+            actions.append({"resonance": reso})
         if self.pending_specs:
             actions.append({"specialties": list(self.pending_specs)})
         return actions

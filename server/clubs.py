@@ -575,8 +575,9 @@ async def handle_invite(client, pb: bytes):
     c = club_of(gid)
     import chat
     import friends
+    import personal
     ok = (c is not None and str(to) in friends.me(gid)["friends"] and club_of(to) is None
-          and not _full(c)
+          and not _full(c) and personal.allows(to, P.CLUB_INVITE)  # the friend switched club invites off
           and chat.post_private(chat.message(gid, args=_link(c, P.CHAT_MSG_ASSOC_INVITE)), to))
     await _reply(client, MSG_INVITE, "AssociationInviteS2C", err=0 if ok else 1)
 

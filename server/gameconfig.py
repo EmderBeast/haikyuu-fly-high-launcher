@@ -260,3 +260,45 @@ def milestones(lottery_id: int) -> dict[int, list[tuple[int, int]]]:
         parts = e.split("-")
         out.setdefault(int(parts[0]), []).append((int(parts[1]), int(parts[2])))
     return out
+
+
+# --- skill resonance ----------------------------------------------------------------------------
+# PlayerCard field 11 (SkillResonanceUnlockLevel, tags from Config.dll) = the highest unlocked tier
+# threshold. A tier (resonanceskilldetail.TotalLevel: 4/6/8/10/12) can be unlocked once the card's 4
+# skill levels add up to it (checked against all 1390 cards of the captured account).
+RESONANCE_FIELD = 11
+
+
+def resonance_tiers(conf_id: int) -> list[int]:
+    """TotalLevel thresholds of the card's resonance tiers, ascending (empty: no resonance)."""
+    if not AVAILABLE:
+        return []
+    plate = PLAYERS.get(conf_id, {}).get("Resonanceplate")
+    model = _cached("resonanceskillmodel").get(plate) or {}
+    detail = _cached("resonanceskilldetail")
+    return sorted({int(detail[e]["TotalLevel"]) for e in model.get("ResonanceEffect", []) if e in detail})
+
+
+def skill_level_sum(skill_ids) -> int:
+    """Sum of the levels of a card's skills (skilllist.Skilllevel)."""
+    table = _cached("skilllist")
+    total = 0
+    for sid in skill_ids:
+        try:
+            total += int(table.get(sid, {}).get("Skilllevel") or 0)
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
+_CACHE: dict = {}
+
+
+def _cached(name: str) -> dict:
+    if name not in _CACHE:
+        try:
+            _CACHE[name] = _table(name)
+        except Exception:
+            _CACHE[name] = {}
+    return _CACHE[name]
+

@@ -237,6 +237,13 @@ PHRASES = [
     ("Alle meine Konten", "All my accounts"),
     ("Zuletzt eingeloggt: noch niemand", "Last login: nobody yet"),
     ("Zuletzt eingeloggt:", "Last login:"),
+    ("Skill-Resonance aller Karten:", "Skill resonance of all cards:"),
+    ("Stufen je Karte (4/6/8/10/12 Skill-Level). Einzelne Karten: Tab „Stärke“.",
+     "Tiers per card (4/6/8/10/12 skill levels). Single cards: tab “Strength”."),
+    ("Skill-Resonance:", "Skill resonance:"),
+    ("Skill-Resonance", "Skill resonance"),
+    ("1. Stufe", "Tier 1"), ("2. Stufe", "Tier 2"), ("3. Stufe", "Tier 3"), ("4. Stufe", "Tier 4"),
+    ("5. Stufe", "Tier 5"),
     # single words (whole words only)
     ("Spiel", "Game"),
     ("läuft", "running"),

@@ -191,6 +191,34 @@ def _apply(acc, action: dict) -> list[str]:
         for conf in confs:
             acc.add_card(conf)
         done.append(f"{len(confs)} Karte(n): " + ", ".join(card_names().get(c, str(c)) for c in confs))
+    if "resonance" in action:
+        # {"resonance": {"<inst>"|"*": level}}: threshold (4/6/...), 0 = off, "t<n>" = n-th tier, "max".
+        # Admin override: the skill-level requirement of the game does not apply here.
+        wanted = action["resonance"]
+        cards = {**acc.b.cards, **{wire.get(wire.parse(c), 1): c for c in acc.cards}}
+        changed = []
+        for inst, card in cards.items():
+            if inst in acc.removed_cards:
+                continue
+            lv = wanted.get(str(inst), wanted.get("*"))
+            if lv is None:
+                continue
+            f = wire.parse(card)
+            tiers = gameconfig.resonance_tiers(wire.get(f, 3, 0))
+            if not tiers:
+                continue
+            if lv == "max":
+                level = tiers[-1]
+            elif str(lv).startswith("t"):
+                level = tiers[min(int(str(lv)[1:]), len(tiers)) - 1] if int(str(lv)[1:]) > 0 else 0
+            else:
+                level = max([t for t in tiers if t <= int(lv)], default=0)
+            if wire.get(f, gameconfig.RESONANCE_FIELD, 0) != level:
+                changed.append(wire.build(wire.set_varint(f, gameconfig.RESONANCE_FIELD, level)))
+        if changed:
+            keep = {wire.get(wire.parse(c), 1) for c in changed}
+            acc.cards = [c for c in acc.cards if wire.get(wire.parse(c), 1) not in keep] + changed
+        done.append(f"Resonance bei {len(changed)} Karte(n) gesetzt")
     if action.get("max_cards"):
         cards = {**acc.b.cards, **{wire.get(wire.parse(c), 1): c for c in acc.cards}}
         maxed = []

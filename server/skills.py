@@ -42,6 +42,7 @@ TEAM_BUFF_EVENT = True
 EARLY_TP5 = True
 CRIT_EVENT = True
 RESULT_KEYS = {"TouchBallEvaluate", "IsFormulaCrit", "IsCurrentFormulaCrit", "OwnFRWithStep", "OtherFRWithStep",
+               "OtherFormulaResult", "OwnFormulaResultAfterPower", "OwnFormulaResultByLink",
                "OwnFormulaResult", "OwnTounchBallNumber", "LastFormula"}
 TOUCH_OK = {1: 1, 2: 3, 3: 3, 4: 4, 5: 4, 6: 2, 7: 3, 8: 3}  # formula -> lowest result that is not BAD
 TOUCH_TOP = {1: 1, 2: 5, 3: 5, 4: 6, 5: 6, 6: 3, 7: 5, 8: 5}  # formula -> the PERFECT result
@@ -60,7 +61,8 @@ FORMULA_PROP = {1: 5, 2: 4, 3: 6, 4: 2, 5: 1, 6: 3, 7: 4, 8: 4}  # stat each for
 TOUCH_KEYS = {"GetSelfFormulaType", "SelfFormulaIsCatch", "SelfTouchBallMan", "MyTouchBallSkillTagType",
               "TouchBallSkillTagType", "OwnPlayerUniqueSkillTagType", "TouchBallPlayerProfile",
               "SelfFormulaTypeIsAttack", "OwnTounchBallNumber", "TouchBallEvaluate",
-              "TouchBallSkillEnergyCostList",
+              "TouchBallSkillEnergyCostList", "TeamParticipateMultipleBlock", "FormulaType", "SomeoneTouchBall",
+              "OtherFormulaResult", "OwnFormulaResultAfterPower", "OwnFormulaResultByLink",
               "OwnPlayerTouchBallSkillTagType", "TouchBallTeam", "Link", "IsFormulaCrit", "IsCurrentFormulaCrit",
               "TouchBallSkillUnique", "LastFormula", "IAttackType", "OwnFRWithStep", "OtherFRWithStep",
               "OwnFormulaResult", "SelfIsLastTouchBallMan", "OwnLastTouchBallManIsSelf", "ParticipateMultipleBlock"}
@@ -249,6 +251,8 @@ class Battle:
         self._tbuff: int | None = None  # team buff whose count just changed (see _team_buff_changed)
         self._fresh: set | None = None  # buffs given while the rally-end skills run
         self._pbuff: set = set()  # buffs whose change is being handled (see _buff_changed)
+        self._entered: int | None = None  # ultimate that just went on cooldown (SkillEnterCD)
+        self.points = [0, 0]  # rallies won by each team in this match
         self.history: list[tuple] = []  # (team, link, formula, result, player, crit) this rally
         self.casts: list[Cast] = []  # collected since the last flush
         self.changes: list[BuffChange] = []
@@ -637,6 +641,38 @@ class Battle:
         if key == "ParticipateMultipleBlock":  # our blocks: the front row joins every block
             return (ctx.formula == 6 and ctx.actor is not None and self.team_of(ctx.actor) == team
                     and (owner == ctx.actor or owner in self.front.get(team, ())))
+        if key == "FormulaType":  # the touch being played is of that kind
+            return ctx.event in ("touch", "after", "crit") and ctx.formula == arg
+        if key == "SomeoneTouchBall":
+            return ctx.event in ("touch", "after", "crit") and ctx.actor is not None
+        if key == "OtherHaveDebuff":
+            return any(_num(b.row.get("BuffType2")) == 1 for p in self.court(1 - team) for b in self._active(p))
+        if key == "OtherFormulaResult":
+            h = self._last(1 - team, formula=arg)
+            return h[3] if h else -1
+        if key == "OwnFormulaResultAfterPower":
+            h = self._last(team, formula=arg)
+            return h[3] if h else -1
+        if key == "OwnFormulaResultByLink":
+            h = self._last(team, link=arg)
+            return h[3] if h else -1
+        if key == "OurTeamHavePlayer":
+            return any(self.cards[p].conf_id % 10000 == arg % 10000 for p in self.court(team))
+        if key == "InAttackArea":  # the owner stands in the front row
+            return owner in self.front.get(team, ())
+        if key in ("OurFrontPlayerTagNumber", "GetSkillTagNumber"):
+            # how many of our front-row players / players on court have a skill of that tag
+            pool = self.front.get(team, ()) if key == "OurFrontPlayerTagNumber" else self.court(team)
+            return sum(1 for p in pool if self._tagged(p, arg, False))
+        if key == "TeamScore" and arg == 1 and ctx is not None:
+            # own points minus the opponents': "L" / "G" without a value = behind / ahead
+            return self.points[team] - self.points[1 - team]
+        if key == "SkillEnterCD":  # see _entered_cd
+            return ctx.event == "entercd" and arg == self._entered
+        if key == "TeamParticipateMultipleBlock":  # our team blocks with more than one player: the
+            # engine's blocks always have the front row jumping along (and so do nearly all captured ones)
+            return (ctx.event in ("touch", "after", "crit") and ctx.formula == 6 and ctx.actor is not None
+                    and self.team_of(ctx.actor) == team)
         if key == "TeamSpecific":  # Lineup Specialty of our team (arg 1: of the opponents)
             return self.genre[1 - team if arg == 1 else team]
         if key == "TeamSpecificGroup":
@@ -1004,6 +1040,14 @@ class Battle:
             length = self._cd_length(owner, skill)
             if length > 0:
                 self.cd[(owner, sid)] = [skill["CDType"], length]
+                if _num(skill.get("Type")) & DRIVING and self._entered is None:
+                    self._entered = sid
+                    try:
+                        for sk, lv in list(self.skills.get(owner, [])):
+                            if any(t.get("Key") == "SkillEnterCD" for t in sk.get("Trigger") or []):
+                                self._run(sk, owner, lv, Ctx("entercd", owner))
+                    finally:
+                        self._entered = None
         self.casts.append(Cast(sid, owner, level))
         return True
 
@@ -1018,6 +1062,8 @@ class Battle:
             return "start"
         if "TagTypeSkillCDComplete" in keys:
             return "cd"
+        if "SkillEnterCD" in keys:
+            return "entercd"
         if "TeamBuffNumberChange" in keys:
             return "tbuff"
         if "BuffNumberChange" in keys:
@@ -1269,6 +1315,7 @@ class Battle:
 
     def rally_end(self, winner: int):
         self.last_winner = winner
+        self.points[winner] += 1
         self.morale[winner] = min(MORALE_MAX, self.morale[winner] + 10)
         self.morale[1 - winner] = min(MORALE_MAX, self.morale[1 - winner] + 30)
         # buffs given by the rally-end skills are for the next rally: they do not lose a rally right
@@ -1355,11 +1402,12 @@ class Battle:
                  for e, have in self.buffs.items()},
                 {k: list(v) for k, v in self.cd.items()}, dict(self.energy), list(self.morale),
                 set(self.on_court), set(self.was_on_court), list(self.morale_active),
-                set(self.ever_on_court), set(self.behind_libero), self.last_winner, dict(self.slot))
+                set(self.ever_on_court), set(self.behind_libero), self.last_winner, dict(self.slot),
+                list(self.points))
 
     def restore(self, snap):
-        buffs, cd, energy, morale, on, was, active, ever, behind, self.last_winner, slot = snap
-        self.slot = dict(slot)
+        buffs, cd, energy, morale, on, was, active, ever, behind, self.last_winner, slot, points = snap
+        self.slot, self.points = dict(slot), list(points)
         self.ever_on_court, self.behind_libero = set(ever), set(behind)
         self.buffs = {e: {k: Buff(b.id, b.row, b.stacks, b.left, b.caster, b.level, list(b.lefts) if b.lefts else None, b.snap) for k, b in have.items()}
                       for e, have in buffs.items()}

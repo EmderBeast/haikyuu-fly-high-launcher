@@ -160,7 +160,10 @@ async def handle_apply(client, pb: bytes):
     gid = int(client.gid)
     d, t = me(gid), me(to) if _known(to) else None
     err = 0
+    import personal
     if t is None or to == gid or str(to) in d["friends"] or is_blocked(to, gid):
+        err = 1
+    elif not personal.allows(to, P.FRIEND_INVITE):  # the receiver switched friend requests off
         err = 1
     elif len(d["friends"]) >= MAX_FRIENDS or len(t["friends"]) >= MAX_FRIENDS or len(t["invites"]) >= MAX_REQUESTS:
         err = 1

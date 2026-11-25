@@ -585,6 +585,43 @@ async def handle_card_level_up(client: GameClient, pb_data: bytes):
     await mission_event(client, missions.LEVEL_UP_CARD, steps)
 
 
+def _card_skill_ids(fields) -> list[int]:
+    from accounts import _packed
+    out = []
+    for n, wt, v in fields:
+        if n == 8:
+            out += _packed(v) if wt == 2 else [v]
+    return out
+
+
+async def handle_card_resonance(client: GameClient, pb_data: bytes):
+    """0x090B PlayerCardSkillResonanceUnlockC2S{1=inst_id 2=level}: unlock a skill resonance tier
+    (allowed once the card's skill levels add up to the tier's TotalLevel); S2C{1=error 2=level}."""
+    req = wire.parse(pb_data)
+    inst, want = wire.get(req, 1, 0), wire.get(req, 2, 0)
+    acc = client.account
+    card = acc.get_card(inst)
+    if card is None:
+        log.info(f"  RESONANCE inst={inst}: unknown card")
+        return await client.send_packet(0x090B, wire.build([(1, 0, 1)]))
+    f = wire.parse(card)
+    conf = wire.get(f, 3, 0)
+    have = wire.get(f, gameconfig.RESONANCE_FIELD, 0)
+    tiers = gameconfig.resonance_tiers(conf)
+    total = gameconfig.skill_level_sum(_card_skill_ids(f))
+    reachable = [t for t in tiers if t <= total]
+    if want not in tiers or want > total:
+        log.info(f"  RESONANCE inst={inst} conf={conf}: tier {want} refused (tiers {tiers}, skill sum {total})")
+        return await client.send_packet(0x090B, wire.build([(1, 0, 1), (2, 0, have)]))
+    level = max(have, want)
+    card = wire.build(wire.set_varint(f, gameconfig.RESONANCE_FIELD, level))
+    acc.put_card(card)
+    acc.save()
+    await client.send_packet(MSG_CARD_CHANGE, wire.build([(1, 2, card_info(card)), (2, 0, CARD_UPDATE)]))
+    await client.send_packet(0x090B, wire.build([(2, 0, level)]))
+    log.info(f"  RESONANCE inst={inst} conf={conf}: unlocked {level} (skill sum {total}, reachable {reachable})")
+
+
 async def handle_card_train(client: GameClient, pb_data: bytes):
     """0x0908 PlayerCardTrainC2S{1=inst_id}: next training step (train table: items + gold)."""
     inst = wire.get(wire.parse(pb_data), 1, 0)
@@ -1015,6 +1052,19 @@ async def handle_pause(client: GameClient, pb_data: bytes):
     await client.send_packet(0x030F, wire.build([(2, 0, session), (3, 0, is_pause)]))
 
 
+def refresh_snapshots(client: GameClient):
+    """What other players fight against (arena, Triple Clash, Freedom Championship teams), made
+    again at once after a line-up change instead of at the next login or PvP action."""
+    gid, acc = int(client.gid), client.account
+    name = pvp._name(client)
+    for mod in (pvp, peak, freedom):
+        try:
+            mod.snapshot(acc, gid, name)
+        except Exception as e:  # a mode the account has no line-up for yet
+            log.info(f"  snapshot {mod.__name__} skipped: {e}")
+    pvp.save()
+
+
 async def handle_team_save(client: GameClient, pb_data: bytes):
     """0x0B02 TeamFormationSaveC2S{1=formation 2=module}: keeps the line-up (players, libero preset,
     auto switch); matches are built from it."""
@@ -1025,6 +1075,7 @@ async def handle_team_save(client: GameClient, pb_data: bytes):
         f = matches.P.TeamFormation.FromString(formation)
         log.info(f"  TEAM line-up {f.lineup} saved: {len(f.inst_ids)} players, libero preset "
                  f"{f.libero_replace_type}, auto switch {f.auto_replace}")
+        refresh_snapshots(client)
     await client.send_packet(0x0B02, wire.build([(2, 0, wire.get(fields, 2, 0))]))
 
 
@@ -1051,6 +1102,7 @@ MESSAGE_HANDLERS = {
     0x0E04: handle_activation_chest,
     0x0905: handle_card_level_up,
     0x0908: handle_card_train,
+    0x090B: handle_card_resonance,
     0x0906: handle_card_star,
     0x0907: handle_card_skill,
     0x0302: handle_pvp_create,

@@ -12,7 +12,9 @@ Client flow (hotfix Arena.* / IL dump):
   0x1405 ChallengeBuy     buy extra attempts (row 3 max, row 5 diamond prices)
   0x1404 Record           fight log; 0x1406 PlayerLineup: an opponent's team (rank list detail)
   0x1403 Gift             season chests by highest score (arenaladder Reward)
-  0x1301/0x1302           rank list / own rank, RANK_ARENA (other rank types: captured replies)
+  0x1301/0x1302           rank list / own rank: RANK_ARENA, the player rankings of PLAYER_RANKS (power,
+                          Triple Clash, Freedom Championship, Extreme Training floor) and the club rankings;
+                          any other type gets an empty list (the captured reply showed strangers)
   0x0302 PVPCreate        pvp_args = [line-up index, challenge list index] -> live match
   0x0306 PVPQuickBattle   when the own team is >= 15 % stronger (row 23): result right away
 
@@ -155,7 +157,9 @@ def snapshot(acc, gid: int, name: str) -> dict:
     team = matches.home_team(_template().home, acc, gid, name, P.FIGHT_ARENA)
     team.icon, team.icon_frame = prof["icon"], prof["frame"]
     team.is_robot = False
-    snap = dict(prof, team=team.SerializeToString().hex(), power=team.power, time=int(time.time()))
+    old = state()["snapshots"].get(str(gid), {})
+    snap = dict(old, **prof, team=team.SerializeToString().hex(), power=team.power, time=int(time.time()),
+                contest=acc.contest_floor())
     state()["snapshots"][str(gid)] = snap
     return snap
 
@@ -624,6 +628,47 @@ def rank_list(gid: int) -> P.RankListData:
     return data
 
 
+def _peak_score(gid: int) -> int:
+    d = state().get("peak", {}).get(str(gid))
+    return d["score"] if d else 0
+
+
+def _freedom_score(gid: int) -> int:
+    if str(gid) not in state().get("freedom", {}):
+        return 0
+    import freedom
+    return freedom.entry(gid)["score"]
+
+
+# rank type -> value of a player (0 = not ranked); every player with a snapshot (logged in here) counts
+PLAYER_RANKS = {
+    P.RANK_POWER: lambda g: state()["snapshots"][str(g)].get("power", 0),
+    P.RANK_PEAK: _peak_score,
+    P.RANK_FIGHTFREEDOM: _freedom_score,
+    P.RANK_CONTEST: lambda g: state()["snapshots"][str(g)].get("contest", 0),
+}
+
+
+def player_ranking(gid: int, kind: int) -> P.RankListData:
+    value = PLAYER_RANKS.get(kind)
+    data = P.RankListData()
+    if value is None:  # no data on this server: an empty list instead of the captured strangers
+        data.own.CopyFrom(P.RankListElem(gid=gid, rank=-1))
+        return data
+    order = sorted(((value(int(g)), int(g)) for g in state()["snapshots"]), key=lambda vg: (-vg[0], vg[1]))
+    order = [(v, g) for v, g in order if v > 0]
+
+    def elem(g: int, place: int, v: int) -> P.RankListElem:
+        e = _rank_elem(g, place)
+        e.score = int(shown(v, g) if kind == P.RANK_POWER else v)
+        return e
+    for i, (v, g) in enumerate(order[:RANK_PAGE]):
+        data.rank.append(elem(g, i + 1, v))
+    place = next((i + 1 for i, (_, g) in enumerate(order) if g == gid), -1)
+    data.own.CopyFrom(elem(gid, place, value(gid) if str(gid) in state()["snapshots"] else 0))
+    return data
+
+
 async def handle_rank_list(client, pb: bytes):
     req = P.RankListC2S.FromString(pb)
     if req.rank_type in (P.RANK_ASSOC_BOSS, P.RANK_ASSOCIATION_TOTAL_FOUNDS):  # club rankings
@@ -633,7 +678,9 @@ async def handle_rank_list(client, pb: bytes):
         await client.send_packet(MSG_RANK_LIST, out.SerializeToString())
         return
     if req.rank_type != P.RANK_ARENA:
-        await HOOKS["generic"](client, pb, MSG_RANK_LIST)
+        out = P.RankListS2C(rank_type=req.rank_type)
+        out.rank_data.CopyFrom(player_ranking(int(client.gid), req.rank_type))
+        await client.send_packet(MSG_RANK_LIST, out.SerializeToString())
         return
     ladder(client.gid, client.account)
     out = P.RankListS2C(rank_type=P.RANK_ARENA)
@@ -650,7 +697,9 @@ async def handle_rank_self(client, pb: bytes):
         await client.send_packet(MSG_RANK_SELF, out.SerializeToString())
         return
     if req.rank_type != P.RANK_ARENA:
-        await HOOKS["generic"](client, pb, MSG_RANK_SELF)
+        out = P.RankSelfS2C(rank_type=req.rank_type, params=req.params)
+        out.own.CopyFrom(player_ranking(int(client.gid), req.rank_type).own)
+        await client.send_packet(MSG_RANK_SELF, out.SerializeToString())
         return
     ladder(client.gid, client.account)
     out = P.RankSelfS2C(rank_type=P.RANK_ARENA, params=req.params)
