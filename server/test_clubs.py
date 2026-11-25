@@ -15,6 +15,8 @@ accounts.ACCOUNTS = TMP
 import pvp  # noqa: E402
 pvp.ACCOUNTS, pvp.STORE = TMP, TMP / "pvp.json"
 import server  # noqa: E402
+import admin  # noqa: E402
+admin.CONFIG = TMP / "admin.json"  # no Admin Mode: the PC's "all my accounts" queue must not reach test accounts
 import matches  # noqa: E402
 import chat  # noqa: E402
 import clubs as C  # noqa: E402
@@ -215,6 +217,65 @@ async def main():
     assert C._boss_club(C.club_of(9821))["score"] == 149000  # only the improvement 1000 -> 50000 counts
     await call(a, 0x0306, q)  # today's best = week's best now: no more quick finish
     assert P.PVPQuickBattleS2C.FromString(a.last(0x0306)).error != 0
+
+    # buffet: donate food into the pool, captain opens a meal, members eat once
+    food = 205000001
+    await call(c, C.MSG_BUFFET_DONATE, P.AssociationBuffetDonateC2S(item_id=food))
+    assert err(c, C.MSG_BUFFET_DONATE, "AssociationBuffetDonateS2C") != 0  # c has no food
+    c.account.set_item(food, 3)
+    for _ in range(2):
+        await call(c, C.MSG_BUFFET_DONATE, P.AssociationBuffetDonateC2S(item_id=food))
+        assert err(c, C.MSG_BUFFET_DONATE, "AssociationBuffetDonateS2C") == 0
+    info = P.AssociationBuffetInfoS2C.FromString(a.last(C.MSG_BUFFET_INFO))
+    assert [(f.conf_id, f.number) for f in info.common.foods] == [(food, 2)] and c.account.item_count(food) == 1
+    assert P.AssociationBuffetInfoS2C.FromString(c.last(C.MSG_BUFFET_INFO)).info.day_donate_num == 2
+    c.account.set_currency(108, 25)
+    await call(c, C.MSG_BUFFET_BUY, P.AssociationBuffetBuyC2S(item_id=food, num=2))
+    assert err(c, C.MSG_BUFFET_BUY, "AssociationBuffetBuyS2C") == 0 and c.account.get_currency(108) == 5
+    C.OPEN_DAYS = set(range(1, 8))  # opening days: Fri-Sun only; the test may run on any day
+    await call(c, C.MSG_BUFFET_OPEN, P.AssociationBuffetOpenC2S(set_meal_id=201))
+    assert err(c, C.MSG_BUFFET_OPEN, "AssociationBuffetOpenS2C") != 0  # c is no officer
+    await call(a, C.MSG_BUFFET_OPEN, P.AssociationBuffetOpenC2S(set_meal_id=201))
+    assert err(a, C.MSG_BUFFET_OPEN, "AssociationBuffetOpenS2C") != 0  # not enough food for 201
+    await call(a, C.MSG_BUFFET_OPEN, P.AssociationBuffetOpenC2S(set_meal_id=101))  # 101 needs no food
+    assert err(a, C.MSG_BUFFET_OPEN, "AssociationBuffetOpenS2C") == 0
+    await call(a, C.MSG_BUFFET_OPEN, P.AssociationBuffetOpenC2S(set_meal_id=101))
+    assert err(a, C.MSG_BUFFET_OPEN, "AssociationBuffetOpenS2C") != 0  # already open (and once a week)
+    exp = b.account.get_currency(102) if b.account.is_currency(102) else b.account.item_count(102)
+    await call(b, C.MSG_BUFFET_EAT)
+    assert err(b, C.MSG_BUFFET_EAT, "AssociationBuffetEatS2C") == 0
+    after = b.account.get_currency(102) if b.account.is_currency(102) else b.account.item_count(102)
+    print("buffet: ate meal 101, 102:", exp, "->", after)
+    assert after == exp + 67200 and P.AssociationBuffetInfoS2C.FromString(b.last(C.MSG_BUFFET_INFO)).info.is_received
+    await call(b, C.MSG_BUFFET_EAT)
+    assert err(b, C.MSG_BUFFET_EAT, "AssociationBuffetEatS2C") != 0  # once per meal
+    C._buffet(C.club_of(9821))["opened"] -= C.EAT_TIME  # the meal is over; still no second one this week
+    await call(a, C.MSG_BUFFET_OPEN, P.AssociationBuffetOpenC2S(set_meal_id=101))
+    assert err(a, C.MSG_BUFFET_OPEN, "AssociationBuffetOpenS2C") != 0
+
+    # icon shop: icon 6 (club level 2, 1000 funds a day), rented by the leader, extended, then runs out
+    cl = C.club_of(9821)
+    cl["funds"] = 2500
+    await call(c, C.MSG_ICON_BUY, P.AssociationIconBuyC2S(icon_id=6, day=1))
+    assert err(c, C.MSG_ICON_BUY, "AssociationIconBuyS2C") != 0  # c is no officer
+    await call(a, C.MSG_ICON_BUY, P.AssociationIconBuyC2S(icon_id=7, day=1))
+    assert err(a, C.MSG_ICON_BUY, "AssociationIconBuyS2C") != 0  # icon 7 needs club level 3
+    await call(a, C.MSG_ICON_BUY, P.AssociationIconBuyC2S(icon_id=6, day=3))
+    assert err(a, C.MSG_ICON_BUY, "AssociationIconBuyS2C") != 0  # 3000 > 2500 funds
+    await call(a, C.MSG_ICON_BUY, P.AssociationIconBuyC2S(icon_id=6, day=1))
+    assert err(a, C.MSG_ICON_BUY, "AssociationIconBuyS2C") == 0
+    await call(a, C.MSG_ICON_BUY, P.AssociationIconBuyC2S(icon_id=6, day=1))
+    assert err(a, C.MSG_ICON_BUY, "AssociationIconBuyS2C") == 0
+    org, icons = b.info().association, list(b.info().assoc_icon_list)
+    print("icon shop:", org.icon_id, org.cur_funds, [(i.icon_id, i.end_unix - int(C._client_now())) for i in icons])
+    assert org.icon_id == 6 and org.cur_funds == 500 and icons[0].end_unix - C._client_now() > 2 * 86400 - 5
+    await call(a, C.MSG_ICON, P.AssociationIconC2S(icon_id=2))
+    await call(a, C.MSG_ICON, P.AssociationIconC2S(icon_id=6))  # back to the rented one
+    assert err(a, C.MSG_ICON, "AssociationIconS2C") == 0 and b.info().association.icon_id == 6
+    cl["icons"]["6"] = int(C._client_now()) - 1  # ran out: default icon, can't be put on
+    await call(a, C.MSG_ICON, P.AssociationIconC2S(icon_id=6))
+    assert err(a, C.MSG_ICON, "AssociationIconS2C") != 0
+    assert P.AssociationInfoS2C.FromString(C.info(9822)).association.icon_id == C.DEFAULT_ICON
 
     # kick c (leader), c gets the kick message
     await call(a, C.MSG_EXIT, P.AssociationExitC2S(target_id=9823))

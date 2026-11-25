@@ -47,7 +47,8 @@ FIGHT_TOKYO = 1  # Training Camp
 FIGHT_SOURCE = 3  # Practice Match
 
 STAMINA = 105  # onigiri
-# item-table entries that are counters, not inventory: activity points, card EXP, manager EXP
+# item-table entries that are counters, not inventory: activity points, Match EXP (113, credited to the
+# line-up cards by add_card_exp), manager EXP
 PSEUDO_ITEMS = {107, 114, 113, 106, 137}
 MAX_PLAYER_LEVEL = gameconfig.MAX_PLAYER_LEVEL  # the captured account is max level
 
@@ -370,6 +371,38 @@ class Account:
                 return c
         return self.b.cards.get(inst_id)
 
+    def add_card_exp(self, inst_ids: list[int], amount: int) -> list[bytes]:
+        """Match EXP (113): every listed card below its level cap gets the full amount on its EXP (field 5)
+        and levels up as far as the level table allows; cards at the cap get nothing. Seen on Garena: a
+        Practice Match with 113 x300 raised the only line-up card below its cap (lv16, star 2) from 1030
+        to 1330 EXP (one 0x0902 UPDATE before the result); the capped line-up cards stayed at 0.
+        Returns the changed cards."""
+        changed = []
+        for inst in dict.fromkeys(i for i in inst_ids if i):
+            card = self.get_card(inst)
+            if card is None:
+                continue
+            f = wire.parse(card)
+            conf, level, exp, star = wire.get(f, 3), wire.get(f, 4, 1), wire.get(f, 5, 0), wire.get(f, 6, 0)
+            cap = gameconfig.level_cap(star)
+            if level >= cap:
+                continue
+            exp += amount
+            while level < cap:
+                need = gameconfig.level_up_cost(conf, level, 1)
+                if not need or exp < need:
+                    break
+                exp -= need
+                level += 1
+            if level >= cap:
+                exp = 0
+            f = wire.set_varint(f, 4, level)
+            f = wire.set_varint(f, 5, exp) if exp else [x for x in f if x[0] != 5]
+            card = wire.build(f)
+            self.put_card(card)
+            changed.append(card)
+        return changed
+
     def put_card(self, card: bytes):
         """Store a new or changed card (replaces the entry with the same inst_id)."""
         inst = wire.get(wire.parse(card), 1)
@@ -389,8 +422,28 @@ class Account:
         return {wire.get(wire.parse(c), 3) for i, c in cards.items() if i not in self.removed_cards}
 
     def team_info(self) -> bytes:
-        """0x0B01 TeamInfoS2C: the baseline line-ups with the ones saved since (0x0B02)."""
-        return self.team or self.b.pb("0x0B01")
+        """0x0B01 TeamInfoS2C: the baseline line-ups with the ones saved since (0x0B02). Cards a saved
+        line-up names but the account no longer has (removed, or gone from the starter set such as the
+        5xxxx copies) become empty places, so the client never gets a line-up with an unknown card."""
+        if not self.team:
+            return self.b.pb("0x0B01")
+        out = []
+        for num, wt, v in wire.parse(self.team):
+            if num != 1:
+                out.append((num, wt, v))
+                continue
+            form = []
+            for n, w, x in wire.parse(v):
+                if n == 3:
+                    ids = _packed(x) if w == 2 else [x]
+                    # the place in the list is the place in the line-up: a missing card becomes an
+                    # empty place (0), as in the captured line-ups
+                    keep = [i if i == 0 or self.get_card(i) is not None else 0 for i in ids]
+                    form.append((3, 2, b"".join(wire.varint(i) for i in keep)))
+                else:
+                    form.append((n, w, x))
+            out.append((1, 2, wire.build(form)))
+        return wire.build(out)
 
     def save_formation(self, formation: bytes):
         """Stores a TeamFormation (0x0B02) in place of the line-up with the same number (field 1)."""

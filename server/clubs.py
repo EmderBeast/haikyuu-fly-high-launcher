@@ -25,11 +25,17 @@ Club funds: at most `association` DailyMaxFund a day (daliy_funds) and MaxFund i
 the club up for FundingConsume (leader / vice leader). Every week (weekly(), from seasons.run) each
 member with contribution gets the associationbenefit row of the club level as mail 214 ("Weekly Club
 Benefits"), then the week's contribution starts again. A kicked member gets mail 10.
-Wishes and donations, club boss: see the sections below. Not built: buffet, icon shop, invite / recruit
-messages (answered with an error). Rejoin cooldown: associationconstant 2 (24 h).
+Wishes and donations, club boss, buffet: see the sections below. Not built: invite / recruit
+messages (answered with an error).
+Icon shop (0x2E22 AssociationIconBuyC2S{icon_id, day}, AssociationActiveHeadViewLogic): the
+associationicon rows of Type 2 can be rented by the leader / vice leaders from club level `Unlock` on,
+for `Price` club funds (associationconstant 40 = item 129) a day, at most `Limit` days a purchase; a
+purchase extends a running one and puts the icon on (BuyHeadSuccess). AssociationInfoS2C.
+assoc_icon_list lists the club's rented icons with end_unix; an expired icon falls back to the default. Rejoin cooldown: associationconstant 2 (24 h).
 Member limit: association PlayerCount of the level (level 1: 30). State in pvp.json ("clubs").
 """
 import asyncio
+import os
 import time
 
 import matches
@@ -83,7 +89,7 @@ def _org(c: dict) -> P.AssociationOrganization:
         cur_funds=c.get("funds", 0), total_funds=c.get("total_funds", 0),
         daliy_funds=c.get("day_funds", 0) if c.get("day") == pvp._today() else 0,
         review_condtion=c.get("cond", 0), cur_count=len(c["members"]), cr_time=c["created"],
-        icon_id=c.get("icon", 0), cur_day_lv=c.get("lv", 1), cur_week_lv=c.get("lv", 1),
+        icon_id=_wear(c), cur_day_lv=c.get("lv", 1), cur_week_lv=c.get("lv", 1),
         cur_all_notify=len(c.get("notices", [])))
 
 
@@ -126,6 +132,8 @@ def info(gid: int, joined: bool = False) -> bytes:
         for g, t in c.get("applies", {}).items():
             out.reviews.add(base=P.AssociationNumber(id=int(g)), friend=base(int(g)), state=chat._status(int(g)),
                             review_time=t)
+    for icon, end in sorted(c.get("icons", {}).items()):
+        out.assoc_icon_list.add(icon_id=int(icon), end_unix=end)
     for n in c.get("notices", []):
         out.association_ex.notify.add(uid=n["uid"], title=n["title"], content=n["content"], name=n["name"],
                                       pisiton=n["pos"], crtime=n["time"])
@@ -151,7 +159,7 @@ def _refresh(c: dict, also: list[int] = ()):
 def on_login(client) -> list[tuple[int, bytes]]:
     gid = int(client.gid)
     return [(MSG_INFO, info(gid)), (MSG_VOW_INFO, vow_info(club_of(gid))), (MSG_VOW_RECORD, vow_record(gid)),
-            (MSG_BOSS_INFO, boss_info(gid))]
+            (MSG_BOSS_INFO, boss_info(gid)), (MSG_BUFFET_INFO, buffet_info(gid))]
 
 
 def _add_member(c: dict, gid: int, pos=NORMAL):
@@ -433,12 +441,47 @@ async def handle_declaration(client, pb: bytes):
 async def handle_icon(client, pb: bytes):
     c = _officer(client)
     icon = P.AssociationIconC2S.FromString(pb).icon_id
-    ok = c is not None and icon in FREE_ICONS
+    ok = c is not None and (icon in FREE_ICONS or str(icon) in _icons(c))
     if ok:
         c["icon"] = icon
         pvp.save()
         _refresh(c)
     await _reply(client, MSG_ICON, "AssociationIconS2C", err=0 if ok else 1)
+
+
+MSG_ICON_BUY = 0x2E22
+ICONS = {r.get("ID", 0): r for r in pvp._cfg("associationicon")}
+DEFAULT_ICON = next((i for i, r in ICONS.items() if r.get("Iswear") == 1), 0)
+ICON_COST = _CONST.get(40, {}).get("Number", 129)  # club funds
+
+
+def _icons(c: dict) -> dict:
+    """The club's rented icons that have not run out: {"icon": end_unix}."""
+    now = _client_now()
+    return {i: end for i, end in c.get("icons", {}).items() if end > now}
+
+
+def _wear(c: dict) -> int:
+    icon = c.get("icon", 0)
+    return icon if icon in FREE_ICONS or str(icon) in _icons(c) else DEFAULT_ICON
+
+
+async def handle_icon_buy(client, pb: bytes):
+    req = P.AssociationIconBuyC2S.FromString(pb)
+    c = _officer(client)
+    row = ICONS.get(req.icon_id, {})
+    cost = row.get("Price", 0) * req.day
+    if (not c or row.get("Type") != 2 or c.get("lv", 1) < row.get("Unlock", 1)
+            or not 0 < req.day <= row.get("Limit", 0) or cost <= 0 or c.get("funds", 0) < cost):
+        await _reply(client, MSG_ICON_BUY, "AssociationIconBuyS2C", err=1)
+        return
+    c["funds"] -= cost
+    icons = c.setdefault("icons", {})
+    icons[str(req.icon_id)] = max(int(_client_now()), icons.get(str(req.icon_id), 0)) + req.day * 86400
+    c["icon"] = req.icon_id
+    pvp.save()
+    await _reply(client, MSG_ICON_BUY, "AssociationIconBuyS2C")
+    _refresh(c)
 
 
 async def handle_name(client, pb: bytes):
@@ -856,6 +899,162 @@ async def handle_boss_reward(client, pb: bytes):
     await pvp.HOOKS["grant_rewards"](client, list(merged.items()), True)
 
 
+# --- club buffet (0x2E1D-0x2E21; activity 4, club level 2) ---------------------------------------------------
+# Rules as the client's AssociationBuffetData / AssociationBuffetViewLogic check them:
+#   donate (0x2E1E {item_id}): one food (item type 204) from the bag into the club's pool, at most
+#     associationconstant 35 (10) a day, at most 34 (125) of each food in the pool; donor reward 32
+#     ("128_10,129_30,130_15": club points / funds / contribution)
+#   buy (0x2E21 {item_id, num}): constant 36 (10) diamonds (108 on Global) each, the requested item
+#   open (0x2E1F {set_meal_id}): captain / vice captain, on the days of constant 38 ("5,6,7" = Fri-Sun),
+#     once a week (the client's confirmation says so); uses the meal's associationsetconf FoodNumber
+#     from the pool. Times are on the clock the client sees (it compares last_open_t_ime with it).
+#   eat (0x2E20): within constant 37 (86400 s) after the opening, once per member and meal:
+#     associationsetconf MealReward ([weight, item, number] triples)
+# 0x2E1D AssociationBuffetInfoS2C{all, common: set_meal_id / foods / last_open_t_ime, info: day_donate_num,
+# is_received} goes to every online member after a change.
+MSG_BUFFET_INFO, MSG_BUFFET_DONATE, MSG_BUFFET_OPEN, MSG_BUFFET_EAT, MSG_BUFFET_BUY = range(0x2E1D, 0x2E22)
+FOODS = {r["ID"] for r in pvp._cfg("item") if r.get("Itemtype") == 204}
+MEALS = {r["ID"]: r for r in pvp._cfg("associationsetconf")}
+DONATE_PER_DAY = _CONST.get(35, {}).get("Number", 10)
+POOL_MAX = _CONST.get(34, {}).get("Number", 125)
+FOOD_PRICE = _CONST.get(36, {}).get("Number", 10)
+EAT_TIME = _CONST.get(37, {}).get("Number", 86400)
+OPEN_DAYS = {int(x) for x in str(_CONST.get(38, {}).get("Data") or "5,6,7").split(",") if x.strip()}
+DONOR_REWARD = [tuple(int(x) for x in p.split("_")) for p in str(_CONST.get(32, {}).get("Data") or "").split(",") if "_" in p]
+
+
+def _triples(spec) -> list[tuple[int, int]]:
+    """MealReward [weight, item, number] (as tag-value pairs 8/16/24) -> [(item, number)]."""
+    flat, out = [], []
+    for v in spec or []:
+        flat.extend(v if isinstance(v, list) else [v])
+    row = {}
+    for i in range(0, len(flat) - 1, 2):
+        tag, val = flat[i], flat[i + 1]
+        if tag == 8 and row:
+            out.append(row)
+            row = {}
+        row[tag] = val
+    if row:
+        out.append(row)
+    return [(r[16], r.get(24, 1)) for r in out if 16 in r]
+
+
+def _buffet(c: dict) -> dict:
+    return c.setdefault("buffet", {"meal": 0, "foods": {}, "opened": 0})
+
+
+def _buffet_me(c: dict, gid: int) -> dict:
+    m = c["members"][str(gid)].setdefault("buffet", {"day": "", "donated": 0, "ate": 0})
+    if m["day"] != pvp._today():
+        m.update(day=pvp._today(), donated=0)
+    return m
+
+
+def _client_now() -> float:
+    """The time the client sees (HFH_TIME_OFFSET shifts it for tests only)."""
+    return time.time() + int(os.environ.get("HFH_TIME_OFFSET", "0"))
+
+
+def _meal_open(b: dict, now: float | None = None) -> bool:
+    return b["opened"] > 0 and (_client_now() if now is None else now) < b["opened"] + EAT_TIME
+
+
+def buffet_info(gid: int) -> bytes:
+    c = club_of(gid)
+    out = P.AssociationBuffetInfoS2C(all=True)
+    if c is None:
+        return out.SerializeToString()
+    b, m = _buffet(c), _buffet_me(c, gid)
+    out.common.set_meal_id = b["meal"]
+    out.common.last_open_t_ime = b["opened"]
+    for conf, n in sorted(b["foods"].items()):
+        out.common.foods.add(conf_id=int(conf), number=n)
+    out.info.day_donate_num = m["donated"]
+    out.info.is_received = bool(b["opened"]) and m["ate"] == b["opened"]
+    out.info.last_time = m["ate"]
+    return out.SerializeToString()
+
+
+def _buffet_refresh(c: dict):
+    for g in c["members"]:
+        _push(int(g), MSG_BUFFET_INFO, buffet_info(int(g)))
+
+
+async def _bag_change(client, conf: int, count: int):
+    await client.send_packet(0x0802, wire.build([(1, 2, client.account.set_item(conf, count))]))
+
+
+async def handle_buffet_donate(client, pb: bytes):
+    gid, acc = int(client.gid), client.account
+    item = P.AssociationBuffetDonateC2S.FromString(pb).item_id
+    c = club_of(gid)
+    if c is None or item not in FOODS:
+        await _reply(client, MSG_BUFFET_DONATE, "AssociationBuffetDonateS2C", err=1)
+        return
+    b, m = _buffet(c), _buffet_me(c, gid)
+    if m["donated"] >= DONATE_PER_DAY or b["foods"].get(str(item), 0) >= POOL_MAX or acc.item_count(item) < 1:
+        await _reply(client, MSG_BUFFET_DONATE, "AssociationBuffetDonateS2C", err=1)
+        return
+    await _bag_change(client, item, acc.item_count(item) - 1)
+    acc.save()
+    b["foods"][str(item)] = b["foods"].get(str(item), 0) + 1
+    m["donated"] += 1
+    pvp.save()
+    await _reply(client, MSG_BUFFET_DONATE, "AssociationBuffetDonateS2C")
+    await pvp.HOOKS["grant_rewards"](client, DONOR_REWARD, True)
+    _buffet_refresh(c)
+
+
+async def handle_buffet_buy(client, pb: bytes):
+    req = P.AssociationBuffetBuyC2S.FromString(pb)
+    acc = client.account
+    num, cost = max(1, req.num), max(1, req.num) * FOOD_PRICE
+    if club_of(int(client.gid)) is None or req.item_id <= 0 or acc.get_currency(pvp.DIAMONDS) < cost:
+        await _reply(client, MSG_BUFFET_BUY, "AssociationBuffetBuyS2C", err=1)
+        return
+    entry = acc.set_currency(pvp.DIAMONDS, acc.get_currency(pvp.DIAMONDS) - cost)
+    acc.save()
+    await client.send_packet(MSG_CURRENCY_CHANGE, wire.build([(1, 2, entry)]))
+    await _reply(client, MSG_BUFFET_BUY, "AssociationBuffetBuyS2C")
+    await pvp.HOOKS["grant_rewards"](client, [(req.item_id, num)], True)
+
+
+async def handle_buffet_open(client, pb: bytes):
+    meal_id = P.AssociationBuffetOpenC2S.FromString(pb).set_meal_id
+    c = _officer(client)
+    meal = MEALS.get(meal_id)
+    b = _buffet(c) if c else None
+    now = _client_now()
+    weekday = time.localtime(now).tm_wday + 1  # 1 = Monday ... 7 = Sunday
+    need = dict(_kv(meal.get("FoodNumber"))) if meal else {}
+    if (not c or not meal or _meal_open(b) or weekday not in OPEN_DAYS or b.get("week") == _week(now)
+            or any(b["foods"].get(str(f), 0) < n for f, n in need.items())):
+        await _reply(client, MSG_BUFFET_OPEN, "AssociationBuffetOpenS2C", err=1)
+        return
+    for f, n in need.items():
+        b["foods"][str(f)] -= n
+    b.update(meal=meal_id, opened=int(now), week=_week(now))
+    pvp.save()
+    await _reply(client, MSG_BUFFET_OPEN, "AssociationBuffetOpenS2C")
+    _buffet_refresh(c)
+
+
+async def handle_buffet_eat(client, pb: bytes):
+    gid = int(client.gid)
+    c = club_of(gid)
+    b = _buffet(c) if c else None
+    m = _buffet_me(c, gid) if c else None
+    if not c or not _meal_open(b) or m["ate"] == b["opened"]:
+        await _reply(client, MSG_BUFFET_EAT, "AssociationBuffetEatS2C", err=1)
+        return
+    m["ate"] = b["opened"]
+    pvp.save()
+    await _reply(client, MSG_BUFFET_EAT, "AssociationBuffetEatS2C")
+    await client.send_packet(MSG_BUFFET_INFO, buffet_info(gid))
+    await pvp.HOOKS["grant_rewards"](client, _triples(MEALS[b["meal"]].get("MealReward")), True)
+
+
 HANDLERS = {
     MSG_LIST: handle_list, MSG_SELECT: handle_select, MSG_CREATE: handle_create, MSG_APPLY: handle_apply,
     MSG_JOIN: handle_join, MSG_REVIEW: handle_review, MSG_APPOINT: handle_appoint, MSG_EXIT: handle_exit,
@@ -863,6 +1062,8 @@ HANDLERS = {
     MSG_NOTIFY: handle_notify, MSG_READ: handle_read, MSG_DAILY: handle_daily,
     MSG_LV: lambda c, pb: handle_level(c, pb),
     MSG_BOSS_REWARD: handle_boss_reward,
+    MSG_BUFFET_DONATE: handle_buffet_donate, MSG_BUFFET_OPEN: handle_buffet_open,
+    MSG_BUFFET_EAT: handle_buffet_eat, MSG_BUFFET_BUY: handle_buffet_buy, MSG_ICON_BUY: handle_icon_buy,
     MSG_WISH: handle_wish, MSG_DONATE: handle_donate, MSG_RECEIVE: handle_receive, MSG_THANK: handle_thank,
     MSG_INVITE: lambda c, pb: handle_unbuilt(c, pb, MSG_INVITE, "AssociationInviteS2C"),
     MSG_RECRUIT: lambda c, pb: handle_unbuilt(c, pb, MSG_RECRUIT, "AssociationRecruitS2C"),
