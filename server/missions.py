@@ -9,6 +9,7 @@ plus 1 = total), not currencies. Activity chests: dailyactivityreward (Type 1 da
 Wire: Task{1=id 2=state 3=progress}, TaskActivation{1=total 2=daily 3=week},
 TaskActivationRewardState{1=id 2=state}; TaskChangeS2C{1=tasks 2=activation 3=chest states}.
 """
+import struct
 import time
 
 import gameconfig
@@ -38,6 +39,10 @@ TRAIN_CARD = 30006  # "Perform Player Training Once"
 PROMOTE_CARD = 30003  # "Promote Any Player ..."
 UPGRADE_SKILL = 30002  # "Upgrade any Player Skill ..."
 
+def _float32(bits: int) -> float:
+    return round(struct.unpack("<f", struct.pack("<I", bits))[0], 4)
+
+
 def _cfg(task_id):
     return gameconfig.TASKS.get(task_id, {}) if gameconfig.AVAILABLE else {}
 
@@ -56,6 +61,8 @@ class Missions:
         d = acc.missions or {}
         self.period = d.get("period") or periods(acc.b.sign["time"])  # baseline's last activity
         self.activation = d.get("activation") or dict(acc.b.activation)
+        # stored stamina of the activity level (TaskActivation.physical_num, a float32), baseline's to start
+        self.activation.setdefault("physical", _float32(wire.get(acc.b.activation_fields, 5, 0)))
         self.chests = {int(k): v for k, v in (d.get("chests") or acc.b.chests).items()}
         self.changed_tasks = []
         # achievement point rewards claimed by this account on top of the baseline's (TaskInfoS2C field 4)
@@ -179,6 +186,13 @@ class Missions:
         self.chests[chest_id] = CHEST_RECEIVED
         return gameconfig.open_rewards(gameconfig.parse_rewards(row.get("Reward")))
 
+    def extract_physical(self, wanted: int, stamina: int, memory_max: int) -> int:
+        """Take whole points out of the stored stamina (TaskActiveExtractPhysical): at most what is stored
+        and what still fits below playerphysical.MemoryMax (ActiveLevelViewLogic::OnBtnGetEvent)."""
+        n = max(0, min(wanted, int(self.activation["physical"]), memory_max - stamina))
+        self.activation["physical"] -= n
+        return n
+
     # --- wire --------------------------------------------------------------
     def change_message(self, all_tasks: bool = False) -> bytes:
         """TaskChangeS2C with changed tasks (or all account-changed ones), activation and chest states."""
@@ -190,6 +204,8 @@ class Missions:
         act = self.acc.b.activation_fields
         for num, key in ((1, "total"), (2, "daily"), (3, "week")):
             act = wire.set_varint(act, num, a[key])
+        bits = struct.unpack("<I", struct.pack("<f", a["physical"]))[0]
+        act = sorted([f for f in act if f[0] != 5] + ([(5, 5, bits)] if a["physical"] else []), key=lambda f: f[0])
         out.append((2, 2, wire.build(act)))
         out += [(3, 2, wire.build([(1, 0, cid), (2, 0, st)])) for cid, st in sorted(self.chests.items())]
         # achievement_rewards_state (4, packed): the client adds these ids to the ones it knows

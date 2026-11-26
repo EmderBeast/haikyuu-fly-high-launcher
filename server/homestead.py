@@ -25,7 +25,9 @@ Assumptions (no capture):
   - the state starts from the account's captured HomeInfoS2C, moved in time so that its last earning
     is the last 15-minute step before the first login on this server
 
-Not served here (docs/garena-abgleich.md): planning players (0x2318), collecting (0x2308, 0x2316).
+Collecting everything (0x2317) and the daily comfort reward (0x2315) are further down.
+Not served here (docs/garena-abgleich.md): planning players (0x2318), collecting one schedule (0x2308)
+or one player's reward (0x2316).
 """
 import logging
 import time
@@ -156,6 +158,109 @@ async def handle_refresh(client, pb: bytes):
     log.info(f"  HOME refresh {req.schedule_level_id}: {n} earning(s)")
 
 
+# --- collecting what the schedules earned --------------------------------------------------------------
+# 0x2317 HomeRewardC2S (no fields): take everything. Garena capture (decrypted_1, messages 0068-0071):
+#   - HomeUpdateS2C with the schedules only, now without rewards and without first / next reward time
+#     (all three had stopped), then the currency change, NotifyRewardsS2C with the sum per currency and
+#     the empty HomeRewardS2C
+#   - the sums are exactly 50 earnings of each schedule (300 energy / 6): 102 x56000 = 50 x 1120,
+#     100 x168750 = 50 x 3375, 227 x3350 = 50 x 67
+# Assumptions: a schedule that is still running keeps running (its next reward time stays); with
+# nothing to take only the reply is sent.
+MSG_COLLECT = 0x2317
+
+
+async def handle_collect(client, pb: bytes):
+    d = entry(client)
+    advance(d)
+    rewards: dict[int, int] = {}
+    for s in d["schedules"].values():
+        if s["amount"]:
+            rewards[s["item"]] = rewards.get(s["item"], 0) + s["amount"]
+            s["amount"], s["first"] = 0, 0
+    pvp.save()
+    if rewards:
+        up = update(d)
+        del up.players[:]
+        await client.send_packet(MSG_UPDATE, up.SerializeToString())
+        await pvp.HOOKS["grant_rewards"](client, list(rewards.items()), False)
+        popup = P.NotifyRewardsS2C()
+        for item, n in rewards.items():
+            popup.items.add(conf_id=item, number=n)
+        await client.send_packet(0x0404, popup.SerializeToString())
+    await client.send_packet(MSG_COLLECT, b"")
+    log.info(f"  HOME collect: {rewards}")
+
+
+# --- comfort: the daily reward ----------------------------------------------------------------------
+# 0x2315 HomeComfortRewardC2S{level = -1}. Garena captures (decrypted_3 / decrypted_2_reconnect, one claim):
+#   - the account had comfort 5085 = level 20 of homesteadcomfort (ComfortNumber 5000); it got that row's
+#     DailyGiftPack: 227 x3900, 117 x48 and the box 102000011, which opened at once (popup: 102 x2500, one
+#     of the entries of its gift 1074)
+#   - order: currency change, NotifyRewardsS2C, TaskChangeS2C (weekly mission 6000015 "earn 117": +48),
+#     then HomeComfortRewardS2C{level = -1, comfort_daily_reward_unix = the next 06:00}
+# Assumptions: asked again before that time, the reply only repeats the time; the comfort value is the
+# account's baseline value (nothing on this server changes it yet). The level rewards (level >= 1) are
+# not served: no capture of such a claim.
+MSG_COMFORT = 0x2315
+DAILY_REWARD, HOME_COIN, EARN_CURRENCY = -1, 117, 80104
+COMFORT = sorted(pvp._cfg("homesteadcomfort"), key=lambda r: r.get("ComfortNumber") or 0)
+
+
+def comfort_row(total: int) -> dict | None:
+    """The highest comfort level reached with that comfort value."""
+    reached = [r for r in COMFORT if (r.get("ComfortNumber") or 0) <= total]
+    return reached[-1] if reached else None
+
+
+def daily_pack(row: dict, rng=None) -> list[tuple[int, int]]:
+    """DailyGiftPack of the level, boxes that open by themselves replaced by what they hold."""
+    import monthcard
+    import pack
+    import random
+    won: dict[int, int] = {}
+    for item, n in monthcard.pairs(row.get("DailyGiftPack")):
+        gift = pack.GIFTS.get(pack.ITEMS.get(item, {}).get("Itemresult"))             if isinstance(pack.ITEMS.get(item, {}).get("Itemresult"), int) else None
+        if gift and gift.get("Autoopen") == 1 and pack.ITEMS[item].get("Droptype") == pack.DROP_GIFT:
+            for i, k in pack.open_boxes(gift, n, rng or random):
+                won[i] = won.get(i, 0) + k
+        else:
+            won[item] = won.get(item, 0) + n
+    return list(won.items())
+
+
+async def handle_comfort_reward(client, pb: bytes):
+    import freepack
+    req = P.HomeComfortRewardC2S.FromString(pb)
+    if req.level != DAILY_REWARD:
+        await pvp.HOOKS["generic"](client, pb, MSG_COMFORT)
+        return
+    info = P.HomeInfoS2C()
+    try:
+        info.ParseFromString(client.account.b.pb("0x2301"))
+    except Exception:
+        pass
+    d = entry(client)
+    now = int(time.time())
+    due = d.get("comfort_next", info.base_info.comfort_daily_reward_unix)
+    row = comfort_row(info.base_info.comfort.total)
+    if now >= due and row:
+        rewards = daily_pack(row)
+        d["comfort_next"] = due = freepack.day_start(now) + 86400
+        pvp.save()
+        await pvp.HOOKS["grant_rewards"](client, rewards, False)
+        popup = P.NotifyRewardsS2C()
+        for item, n in rewards:
+            popup.items.add(conf_id=item, number=n)
+        await client.send_packet(0x0404, popup.SerializeToString())
+        coins = sum(n for item, n in rewards if item == HOME_COIN)
+        if coins:
+            await pvp.HOOKS["mission_event"](client, EARN_CURRENCY, coins, (HOME_COIN,))
+        log.info(f"  HOME comfort level {row['ID']}: daily reward {rewards}")
+    await client.send_packet(MSG_COMFORT, P.HomeComfortRewardS2C(
+        level=DAILY_REWARD, comfort_daily_reward_unix=due).SerializeToString())
+
+
 def on_login(client) -> list[tuple[int, bytes]]:
     """Brings the schedules up to date and tells the client (the baseline HomeInfoS2C is the capture's)."""
     d = entry(client)
@@ -164,4 +269,4 @@ def on_login(client) -> list[tuple[int, bytes]]:
     return [(MSG_UPDATE, update(d).SerializeToString())] if d["schedules"] else []
 
 
-HANDLERS = {MSG_REFRESH: handle_refresh}
+HANDLERS = {MSG_REFRESH: handle_refresh, MSG_COMFORT: handle_comfort_reward, MSG_COLLECT: handle_collect}

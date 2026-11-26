@@ -44,16 +44,21 @@ TIME_ZONE_HOURS = 1  # LoginBySessionS2C.time_zone as server.py sends it
 RESET_HOUR = 6
 
 
-def _daily(group: int) -> list[tuple[int, int]]:
-    """EveryDayItemReward of the card: raw key/value pairs [8, item, 16, number, ...]."""
-    row = next((r for r in pvp._cfg("mallrecharge") if r.get("LimitGroup") == group), {})
+def pairs(value) -> list[tuple[int, int]]:
+    """A reward column of mallrecharge: raw key/value pairs [8, item, 16, number, ...] -> [(item, number)]."""
     flat = []
 
     def walk(v):
         for x in v if isinstance(v, list) else [v]:
             walk(x) if isinstance(x, list) else flat.append(x)
-    walk(row.get("EveryDayItemReward") or [])
+    walk(value or [])
     return [(flat[i + 1], flat[i + 3]) for i in range(0, len(flat) - 3, 4) if flat[i] == 8 and flat[i + 2] == 16]
+
+
+def _daily(group: int) -> list[tuple[int, int]]:
+    """EveryDayItemReward of the card."""
+    row = next((r for r in pvp._cfg("mallrecharge") if r.get("LimitGroup") == group), {})
+    return pairs(row.get("EveryDayItemReward"))
 
 
 REWARDS = {MONTH: _daily(MONTH), QUARTER: _daily(QUARTER)}

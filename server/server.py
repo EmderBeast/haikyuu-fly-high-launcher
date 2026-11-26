@@ -377,8 +377,17 @@ async def handle_login(client: GameClient, pb_data: bytes):
         if m["msg_id"].upper() == "0X0B01" and client.account.team:  # line-ups saved since the baseline
             await client.send_packet(0x0B01, client.account.team)
             continue
+        if m["msg_id"].upper() == "0X5501":  # coaches: this player's own coaches (levels, dismantled ones)
+            await client.send_packet(0x5501, coach.info(int(gid), client.account))
+            continue
+        if m["msg_id"].upper() == "0X1701":  # Extreme Training: this player's idle rewards, not the capture
+            await client.send_packet(0x1701, hangup.info(client.account))
+            continue
         if m["msg_id"].upper() == "0X2F01":  # weekly activity: this player's own counts, not the capture
             await client.send_packet(0x2F01, weekly.info(int(gid), client.account))
+            continue
+        if m["msg_id"].upper() == "0X3701":  # assistant settings: the baseline's plus this player's changes
+            await client.send_packet(MSG_ASSIST_INFO, assistant_info(client.account))
             continue
         if m["msg_id"].upper() == "0X2901":  # Specialty Trial: this player's own state, not the capture
             await client.send_packet(0x2901, trial.info(int(gid), client.account))
@@ -402,7 +411,8 @@ async def handle_login(client: GameClient, pb_data: bytes):
                         + freedom.on_login(client) + mail.on_login(client) + personal.on_login(client)
                         + chat.on_login(client) + friends.on_login(client) + clubs.on_login(client)
                         + homestead.on_login(client) + memorybook.on_login(client)
-                        + monthcard.on_login(client)):
+                        + monthcard.on_login(client) + freepack.on_login(client)
+                        + honor.on_login(client)):
             await client.send_packet(mid, pb)
     except Exception as e:  # never block the login
         log.error(f"  PVP login update failed: {e!r}")
@@ -990,6 +1000,150 @@ async def handle_task_one_key(client: GameClient, pb_data: bytes):
     await client.send_packet(0x0E05, b"")
 
 
+MSG_ASSIST_INFO, MSG_ASSIST_SET, MSG_ASSIST_DO = 0x3701, 0x3703, 0x3704
+# Assistant functions that claim missions (AssistantUtils.CheckFunctionFinish: 16 -> GetAllTaskIsFinish(5),
+# 17 -> type 1 + IsAwardsGainData(1), 18 -> type 6 + IsAwardsGainData(6), 19 -> type 23):
+# func_type -> (TaskType, dailyactivityreward Type of the activity chests opened with it, or None)
+ASSIST_TASKS = {16: (5, None), 17: (1, 1), 18: (6, 6), 19: (23, None)}
+
+
+def assistant_settings(acc) -> dict[int, tuple[int, int]]:
+    """func_type -> (is_open, arg): the baseline's ShareDataInfoS2C{1=mark 2=repeated AssistantUnit{1=func_type
+    2=is_open 3=arg}}, overlaid with what this account changed (ShareAssistSet)."""
+    out, mark = {}, 0
+    for m in acc.b.sync:
+        if m["msg_id"].upper() == "0X3701":
+            for num, wt, v in wire.parse(bytes.fromhex(m["body_hex"])[1:]):
+                if num == 2 and wt == 2:
+                    u = wire.parse(v)
+                    out[wire.get(u, 1, 0)] = (wire.get(u, 2, 0), wire.get(u, 3, 0))
+    for f, (is_open, arg) in acc.assistant.items():
+        out[f] = (is_open, arg)
+    return out
+
+
+def _assist_unit(func: int, is_open: int, arg: int) -> bytes:
+    return wire.build([(1, 0, func)] + ([(2, 0, is_open)] if is_open else []) + ([(3, 0, arg)] if arg else []))
+
+
+def assistant_info(acc) -> bytes:
+    """ShareDataInfoS2C with this account's assistant settings (mark 2 as in every capture)."""
+    return wire.build([(1, 0, 2)] + [(2, 2, _assist_unit(f, *s)) for f, s in assistant_settings(acc).items()])
+
+
+async def handle_share_assist_set(client: GameClient, pb_data: bytes):
+    """0x3703 ShareAssistSetC2S{1=AssistantUnit}: switch one assistant function on/off or set its count;
+    S2C{1=err 2=set_data}, the client stores set_data (AssistantMessageHandler::OnAssistantSet)."""
+    unit = wire.parse(wire.get(wire.parse(pb_data), 1, b""))
+    func, is_open, arg = wire.get(unit, 1, 0), wire.get(unit, 2, 0), wire.get(unit, 3, 0)
+    if gameconfig.AVAILABLE and func not in gameconfig.ASSISTANT:
+        log.info(f"  ASSIST set func={func}: unknown function")
+        await client.send_packet(MSG_ASSIST_SET, wire.build([(1, 0, 1)]))
+        return
+    client.account.assistant[func] = [is_open, arg]
+    client.account.save()
+    log.info(f"  ASSIST set func={func} open={is_open} arg={arg}")
+    await client.send_packet(MSG_ASSIST_SET, wire.build([(2, 2, _assist_unit(func, is_open, arg))]))
+
+
+def _merge_shown(rewards) -> list[tuple[int, int]]:
+    """Rewards of one assistant function as Garena lists them: one entry per item, in order of first
+    appearance; manager EXP 106 shows as 137 (capture: activity chests 106:300+420+720+900 -> 137 2340)."""
+    out = {}
+    for item, amount in rewards:
+        key = 137 if item == 106 else item
+        out[key] = out.get(key, 0) + amount
+    return list(out.items())
+
+
+async def _assist_claim_tasks(client: GameClient, task_type: int, chest_type) -> list[tuple[int, int]]:
+    """Claim every completed mission of a type, then every reachable activity chest of chest_type."""
+    acc, m = client.account, client.missions
+    shown, grant = [], []
+    tids = [t for t in acc.finished_tasks() if gameconfig.TASKS.get(t, {}).get("TaskType") == task_type]
+    for tid in tids:
+        raw = gameconfig.task_rewards(tid) or []
+        acc.mark_task_claimed(tid)
+        m.changed_tasks.append(tid)
+        grant += m.on_claimed(tid, raw)
+        shown += raw
+    if tids:
+        m.save()
+        await client.send_packet(MSG_TASK_CHANGE, m.change_message())
+    chests = []
+    if chest_type is not None:
+        for cid in sorted(gameconfig.ACTIVITY_CHESTS):
+            if gameconfig.ACTIVITY_CHESTS[cid].get("Type") == chest_type:
+                rewards = m.claim_chest(cid)
+                if rewards is not None:
+                    chests.append(cid)
+                    shown += rewards
+                    grant += rewards
+    if grant:
+        await grant_rewards(client, grant, popup=False)
+    if chests:
+        m.save()
+        await client.send_packet(MSG_TASK_CHANGE, m.change_message())
+    log.info(f"  ASSIST tasks type {task_type}: {len(tids)} missions, chests {chests}")
+    return _merge_shown(shown)
+
+
+def _memory_max(acc) -> int:
+    return (gameconfig.PHYSICAL.get(acc.level, {}).get("MemoryMax") if gameconfig.AVAILABLE else None) or 9999
+
+
+async def _extract_physical(client: GameClient, wanted: int) -> int:
+    """Move whole points of the stored activity stamina onto stamina (105): TaskChange with the new
+    physical_num first, then the currency (capture decrypted_1 0028 / 0029: 128.2 -> 0.2, stamina +128)."""
+    acc, m = client.account, client.missions
+    n = m.extract_physical(wanted, acc.get_currency(STAMINA), _memory_max(acc))
+    if n:
+        m.save()
+        await client.send_packet(MSG_TASK_CHANGE, m.change_message())
+        await grant_rewards(client, [(STAMINA, n)], popup=False)
+    log.info(f"  PHYSICAL extract {wanted}: {n}, stored now {m.activation['physical']}")
+    return n
+
+
+async def handle_extract_physical(client: GameClient, pb_data: bytes):
+    """0x0E07 TaskActiveExtractPhysicalC2S{1=num}: take stored stamina out of the activity level;
+    S2C{1=error}. Nothing to take -> FAILED (assumption, no capture of the error)."""
+    n = await _extract_physical(client, wire.get(wire.parse(pb_data), 1, 0))
+    await client.send_packet(0x0E07, b"" if n else wire.build([(1, 0, 1)]))
+
+
+async def _assist_physical(client: GameClient) -> list[tuple[int, int]]:
+    """Assistant function 6 (CheckFunctionFinish: done when physical_num < 1): take out all of it."""
+    n = await _extract_physical(client, 1 << 30)
+    return [(STAMINA, n)] if n else []
+
+
+async def handle_share_assist_do(client: GameClient, pb_data: bytes):
+    """0x3704 ShareAssistDoC2S{}: run every switched-on assistant function in gamehelperconf Order;
+    S2C{1=err 2=repeated AssistantRewardUnit{1=func_type 3=repeated Item{2=id 3=count}}}, only functions
+    that did something (capture decrypted_1: 9 units, the open but empty 16/18 missing). Implemented:
+    the stored activity stamina (6) and the mission functions 16-19; the others (mini game, daily events,
+    quiz, treasure, exchange, resource stages, club) have no server logic yet and are skipped
+    (docs/garena-abgleich.md)."""
+    settings = assistant_settings(client.account)
+    order = sorted(settings, key=lambda f: (gameconfig.ASSISTANT.get(f, {}).get("Order", 999), f))
+    units = []
+    for func in order:
+        if not settings[func][0]:
+            continue
+        if func == 6:
+            shown = await _assist_physical(client)
+        elif func in ASSIST_TASKS:
+            shown = await _assist_claim_tasks(client, *ASSIST_TASKS[func])
+        else:
+            continue
+        if shown:
+            items = [(3, 2, wire.build([(2, 0, i), (3, 0, n)])) for i, n in shown]
+            units.append((2, 2, wire.build([(1, 0, func)] + items)))
+    log.info(f"  ASSIST do: {len(units)} function(s) with rewards")
+    await client.send_packet(MSG_ASSIST_DO, wire.build(units))
+
+
 async def handle_lottery_gift(client: GameClient, pb_data: bytes):
     """0x0F04 LotteryGetGiftC2S{1=id, 2=count}: claim cumulative-pull milestones (count -1 = all reached)."""
     req = wire.parse(pb_data)
@@ -1365,6 +1519,9 @@ MESSAGE_HANDLERS = {
     0x0D03: handle_sign_reward,
     0x0E03: handle_task_receive,
     0x0E05: handle_task_one_key,
+    0x0E07: handle_extract_physical,
+    0x3703: handle_share_assist_set,
+    0x3704: handle_share_assist_do,
     0x0E08: handle_achievement_reward,
     0x0E04: handle_activation_chest,
     0x0905: handle_card_level_up,
@@ -1422,9 +1579,19 @@ import memorybook  # noqa: E402  memory gallery: the kinds this player ever had
 MESSAGE_HANDLERS.update(memorybook.HANDLERS)
 import weekly  # noqa: E402  weekly activity "Bonus Training" (0x2F01 / 0x2F02) per player
 MESSAGE_HANDLERS.update(weekly.HANDLERS)
+import coach  # noqa: E402  coaches per player: level up (0x5503), dismantle (0x5505)
+MESSAGE_HANDLERS.update(coach.HANDLERS)
+import cardlock  # noqa: E402  lock / unlock a player card (0x0909)
+MESSAGE_HANDLERS.update(cardlock.HANDLERS)
+import hangup  # noqa: E402  Extreme Training idle reward (0x1701 / 0x1702 pushes / 0x1704 claim)
+MESSAGE_HANDLERS.update(hangup.HANDLERS)
 pvp.HOOKS.update(before_result=before_result)
 import monthcard  # noqa: E402  month / quarter card: the daily reward
 MESSAGE_HANDLERS.update(monthcard.HANDLERS)
+import freepack  # noqa: E402  free packs of the shop
+MESSAGE_HANDLERS.update(freepack.HANDLERS)
+import honor  # noqa: E402  Path to Honor: stage rewards
+MESSAGE_HANDLERS.update(honor.HANDLERS)
 pvp.HOOKS.update(replies=REPLIES, grant_rewards=grant_rewards, player_name=player_name, generic=handle_generic,
                  mission_event=mission_event)
 
@@ -1441,6 +1608,7 @@ async def main():
     if admin.multiplayer():
         log.info("Multiplayer server: admin rights only for the owner and granted admins")
     asyncio.get_running_loop().create_task(seasons.loop())  # daily / season-end reward mail
+    asyncio.get_running_loop().create_task(hangup.loop())  # idle reward periods pushed to everyone online
     async with server:
         await server.serve_forever()
 

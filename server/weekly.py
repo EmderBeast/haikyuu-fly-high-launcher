@@ -14,6 +14,8 @@ Evidenced (weeklyactivity.json row 200 and four trainings in decoded_tshark.json
   - train_count = draws this period (100 -> 110 -> 120 -> 130 -> 140); is_special = a success in this request;
   - missions of the activity's TaskType (14, 15; condition 20003 "Perform Bonus Training N Times") show
     train_count as progress (captured 110 / 120 / 130 right after the trainings);
+  - the round missions (condition 99902 "Complete All Round N Missions", TastConditionTow = the round's 7 task
+    ids) show how many of them are finished: in the same TaskChange that finished 14201, 15201 went to 1;
   - order: ticket item change, reward item/currency changes, TaskChange, then the 0x2F02 reply.
 Assumed: the period (begin/end) repeats every DurationTime weeks from the captured one (9.11.2026 07:00,
 2 weeks; the table has only activity 200); a new period starts at train_count 0, SpecialCount and the
@@ -127,8 +129,12 @@ def draw(d: dict, n: int, rng=random) -> tuple[list[tuple[int, int]], bool]:
     return [(i, totals[i]) for i in order], special
 
 
+ROUND_DONE = 99902  # TastConditionTow = task ids of the round, progress = how many of them are finished
+
+
 def mission_progress(missions, count: int, reset: bool = False):
-    """The activity's missions (TaskType 14 / 15, condition 20003) show the period's train count."""
+    """The activity's missions (TaskType 14 / 15, condition 20003) show the period's train count; the round
+    missions (99902) count the finished missions of their round."""
     import gameconfig
     from accounts import TASK_FINISH
     for tid in missions.acc.all_task_ids():
@@ -142,6 +148,20 @@ def mission_progress(missions, count: int, reset: bool = False):
             continue
         target = cfg.get("Value") or 1
         missions._set(tid, TASK_FINISH if count >= target else 0, min(count, target))
+    for tid in missions.acc.all_task_ids():
+        cfg = gameconfig.TASKS.get(tid, {})
+        if cfg.get("TaskType") not in TASK_TYPES or cfg.get("TaskSubTargetType") != ROUND_DONE:
+            continue
+        if reset:
+            missions._set(tid, 0, 0)
+            continue
+        if missions.acc.task_state(tid) != 0:
+            continue
+        done = sum(1 for t in cfg.get("TastConditionTow") or [] if missions.acc.task_state(t) != 0)
+        old = wire.get(wire.parse(missions.acc.task(tid)), 3, 0)
+        if done != old:
+            target = cfg.get("Value") or 1
+            missions._set(tid, TASK_FINISH if done >= target else 0, min(done, target))
 
 
 async def handle_train(client, pb: bytes):

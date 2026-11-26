@@ -163,6 +163,7 @@ class Account:
         self.exp = d.get("exp", 0)
         self.stages = {int(k): v for k, v in d.get("stages", {}).items()}  # stage -> [fight type, star mask]
         self.contest = d.get("contest")  # highest cleared Extreme Training floor (None = baseline)
+        self.hangup = d.get("hangup")  # Extreme Training idle reward state (hangup.py), None = not started
         self.tokyo_rewards = d.get("tokyo_rewards", [])  # [chapter, star threshold] chests claimed
         # potentials added or changed on top of the baseline (inst_id -> PlayerSpecialty bytes)
         self.specialties = {int(k): bytes.fromhex(v) for k, v in d.get("specialties", {}).items()}
@@ -171,6 +172,8 @@ class Account:
         self.recallings = {int(k): bytes.fromhex(v) for k, v in d.get("recallings", {}).items()}
         self.team = bytes.fromhex(d["team"]) if d.get("team") else None  # TeamInfoS2C with saved line-ups
         self.flags = d.get("flags")  # GAMER_FLAGS bit mask (auto skill 1, auto serve 2, speed 4); None = baseline
+        # assistant settings changed since the baseline (ShareAssistSet 0x3703): func_type -> [is_open, arg]
+        self.assistant = {int(k): v for k, v in (d.get("assistant") or {}).items()}
         self._regen_stamina()
         import admin  # Admin Mode: apply changes queued by the launcher (no-op without admin.json)
         admin.apply_pending(self)
@@ -194,12 +197,14 @@ class Account:
             "exp": self.exp,
             "stages": {str(k): v for k, v in self.stages.items()},
             "contest": self.contest,
+            "hangup": self.hangup,
             "tokyo_rewards": self.tokyo_rewards,
             "specialties": {str(k): v.hex() for k, v in self.specialties.items()},
             "admin_flags": self.admin_flags,
             "recallings": {str(k): v.hex() for k, v in self.recallings.items()},
             "team": self.team.hex() if self.team else None,
             "flags": self.flags,
+            "assistant": {str(k): v for k, v in self.assistant.items()},
         }, indent=1), encoding="utf-8")
 
     def add_player_exp(self, amount: int) -> list[int]:
@@ -556,6 +561,8 @@ class Account:
         data = wire.parse(wire.get(info, 1, b""))
         if self.contest is not None:
             data = [(n, t, v) for n, t, v in data if n != 1] + [(1, 0, self.contest)]
+        if self.hangup:  # this player's idle reward start, not the captured one
+            data = [(n, t, v) for n, t, v in data if n != 5] + [(5, 0, int(self.hangup["start"]))]
         return wire.build([(n, t, v) for n, t, v in sorted(data, key=lambda x: x[0])])
 
     def contest_floor(self) -> int:

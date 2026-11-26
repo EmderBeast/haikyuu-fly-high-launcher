@@ -107,6 +107,23 @@ async def main():
     await server.MESSAGE_HANDLERS[weekly.MSG_TRAIN](c, P.WeeklyActivityTrainC2S(is_train_one=False).SerializeToString())
     assert P.WeeklyActivityTrainS2C.FromString(c.last(weekly.MSG_TRAIN)).err != 0 and acc.item_count(201) == 5
 
+    # the captured round case: round 2 at 110 trainings, the training to 120 finishes 14201 and in the same
+    # TaskChange the round mission 15201 ("Complete All Round 2 Missions") goes to 1
+    import missions as missions_mod
+    m = c.missions
+    for t in range(14201, 14208):
+        acc.tasks[t] = wire.build([(1, 0, t), (2, 0, 0), (3, 0, 110)])
+    acc.tasks[15201] = wire.build([(1, 0, 15201), (2, 0, 0), (3, 0, 0)])
+    m.changed_tasks = []
+    weekly.mission_progress(m, 120)
+    changed = {t: (acc.task_state(t), wire.get(wire.parse(acc.task(t)), 3, 0)) for t in m.changed_tasks}
+    print("round case:", {t: changed[t] for t in (14201, 14202, 15201)})
+    assert changed[14201] == (missions_mod.TASK_FINISH, 120) and changed[14202] == (0, 120)
+    assert changed[15201] == (0, 1)
+    m.changed_tasks = []
+    weekly.mission_progress(m, 120)  # nothing new: no change for the round mission
+    assert 15201 not in m.changed_tasks
+
     # a new period starts again from zero
     d = weekly.state(9871, acc, now=end + 60)
     assert d["count"] == 0 and d["special"] == 10 and d["reset_tasks"]

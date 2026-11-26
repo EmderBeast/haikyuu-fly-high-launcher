@@ -100,6 +100,35 @@ async def main():
                  for k, s in st["schedules"].items())
     check("each schedule earned once, players paid 6", gained and all(p.physical == 54 for p in up.players))
 
+    # collecting everything (0x2317): the captured sums are 50 earnings of each schedule
+    c2 = FakeClient(990502)
+    await server.handle_login(c2, wire.build([(1, 0, 990502), (7, 2, b"token")]))
+    st2 = homestead.entry(c2)
+    now = int(time.time())
+    groups = {"100304": ([1109, 1105, 1103, 1110], 102), "100404": ([5302, 1305, 1311, 1303], 100),
+              "100104": ([5401, 5502, 5501, 1216], 227)}
+    st2["schedules"] = {k: {"players": pl, "first": now - 50 * 900, "last": now - 900, "item": item,
+                            "amount": 50 * homestead.earning(int(k), pl)[1], "running": False}
+                        for k, (pl, item) in groups.items()}
+    st2["players"] = {str(p): {"physical": 0, "reward": False} for pl, _ in groups.values() for p in pl}
+    before = {i: c2.account.get_currency(i) for i in (102, 100, 227)}
+    c2.sent.clear()
+    await server.MESSAGE_HANDLERS[homestead.MSG_COLLECT](c2, b"")
+    order = [m for m, _ in c2.sent]
+    check("collect: HomeUpdateS2C, change, popup, empty reply",
+          order[0] == homestead.MSG_UPDATE and order[-2:] == [0x0404, homestead.MSG_COLLECT] and c2.sent[-1][1] == b"",
+          str(order))
+    popup = {i.conf_id: i.number for i in P.NotifyRewardsS2C.FromString(c2.sent[-2][1]).items}
+    check("sums as captured: 102 x56000, 100 x168750, 227 x3350", popup == {102: 56000, 100: 168750, 227: 3350}, str(popup))
+    check("credited", all(c2.account.get_currency(i) - before[i] == n for i, n in popup.items()))
+    up = P.HomeUpdateS2C.FromString(c2.sent[0][1])
+    check("update: schedules only, without rewards and reward times",
+          not up.players and len(up.schedules) == 3 and all(
+              not s.rewards and not s.schedule_first_reward_time and not s.schedule_next_reward_time for s in up.schedules))
+    c2.sent.clear()
+    await server.MESSAGE_HANDLERS[homestead.MSG_COLLECT](c2, b"")
+    check("nothing left: only the reply", [m for m, _ in c2.sent] == [homestead.MSG_COLLECT])
+
     print(f"\n{sum(checks)}/{len(checks)} checks passed")
     raise SystemExit(0 if all(checks) else 1)
 
