@@ -52,6 +52,8 @@ def receive(frames):
         if h.formula_type == 1:
             server_id = h.hit_player
         elif h.formula_type == 2:
+            if not h.HasField("hit_ball_pos"):  # a missed receive (ace) carries no contact point
+                return h.hit_player, None, None
             return h.hit_player, h.hit_ball_pos.x, h.hit_ball_pos.z
     return server_id, None, None
 

@@ -83,7 +83,9 @@ def open_rewards(rewards: list[tuple[int, int]]) -> list[tuple[int, int]]:
         if not gift or gift.get("Autoopen") != 1:
             out.append((item, amount))
             continue
+        fixed = [e.split(":") for e in _as_list(gift.get("Fixedreward")) if isinstance(e, str)]
         for _ in range(amount):
+            out += [(int(e[-2]), int(e[-1])) for e in fixed]  # capture: box 105000047 (gift 1071) gave 108 x60
             entries = [e.split(":") for e in _as_list(gift.get("Randomreward")) if isinstance(e, str)]
             if gift.get("Rewardtype") == 2 and entries:  # one random entry 'weight:item:amount'
                 w, i, a = random.choices(entries, [int(e[0]) for e in entries])[0]

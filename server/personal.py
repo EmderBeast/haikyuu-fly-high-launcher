@@ -215,7 +215,75 @@ async def handle_other(client, pb: bytes):
     await client.send_packet(MSG_OTHER, other(gid).SerializeToString())
 
 
+# --- wallpaper -------------------------------------------------------------------------------------
+# 0x210F PersonalWallpaperSetC2S{item_id, set_type} / 0x2110 PersonalWallpaperEquipC2S{item_id}.
+# Capture (decoded_tshark.json): set 1000001 type IMM -> S2C{item_id 1000001, set_type 2}; equip 1000001 ->
+# S2C{item_id 1000001}, both echo the request. What the types mean is the client's own handling
+# (PersonalInformationMessageHandler::OnPeronalWallPaperSet): ADD = into the random list and no fixed one,
+# DEL = out of the random list, IMM = fixed wallpaper (0 = none) and the random list emptied; equip = the
+# shown one (OnEquipWallPaper). The server keeps the same WallpaperSetInfo{fixed, random, equip} per player
+# and sends it in PersonalInfoS2C.wallpaper_set (field 15) at login.
+# Assumed: no ownership check, nothing else changes (no error case captured).
+MSG_WALLPAPER_SET, MSG_WALLPAPER_EQUIP = 0x210F, 0x2110
+W_ADD, W_DEL, W_IMM = 0, 1, 2
+
+
+def wallpaper(gid: int, acc=None) -> "P.WallpaperSetInfo":
+    out = P.WallpaperSetInfo()
+    mine = pvp.state().get("profile", {}).get(str(gid), {}).get("wallpaper")
+    if mine is not None:
+        out.fixed, out.equip = mine.get("fixed", 0), mine.get("equip", 0)
+        out.random.extend(mine.get("random", []))
+    elif acc is not None:
+        try:
+            out.CopyFrom(P.PersonalInfoS2C.FromString(acc.b.pb("0x2101")).wallpaper_set)
+        except Exception:
+            pass
+    return out
+
+
+def _save_wallpaper(gid: int, w):
+    _choices(gid)["wallpaper"] = {"fixed": w.fixed, "random": list(w.random), "equip": w.equip}
+    pvp.save()
+
+
+def info_message(gid: int, acc, body: bytes) -> bytes:
+    """The baseline's PersonalInfoS2C with this player's wallpapers (field 15), everything else untouched."""
+    w = wallpaper(gid, acc).SerializeToString()
+    import wire
+    return wire.build([x for x in wire.parse(body) if x[0] != 15] + [(15, 2, w)])
+
+
+async def handle_wallpaper_set(client, pb: bytes):
+    req = P.PersonalWallpaperSetC2S.FromString(pb)
+    w = wallpaper(client.gid, client.account)
+    if req.set_type == W_ADD:
+        if req.item_id not in w.random:
+            w.random.append(req.item_id)
+        w.fixed = 0
+    elif req.set_type == W_DEL:
+        keep = [i for i in w.random if i != req.item_id]
+        del w.random[:]
+        w.random.extend(keep)
+    else:
+        del w.random[:]
+        w.fixed = req.item_id
+    _save_wallpaper(client.gid, w)
+    await client.send_packet(MSG_WALLPAPER_SET, P.PersonalWallpaperSetS2C(item_id=req.item_id, set_type=req.set_type)
+                             .SerializeToString())
+
+
+async def handle_wallpaper_equip(client, pb: bytes):
+    item = P.PersonalWallpaperEquipC2S.FromString(pb).item_id
+    w = wallpaper(client.gid, client.account)
+    w.equip = item
+    _save_wallpaper(client.gid, w)
+    await client.send_packet(MSG_WALLPAPER_EQUIP, P.PersonalWallpaperEquipS2C(item_id=item).SerializeToString())
+
+
 HANDLERS = {m: _handler(m) for m in SETTINGS}
+HANDLERS[MSG_WALLPAPER_SET] = handle_wallpaper_set
+HANDLERS[MSG_WALLPAPER_EQUIP] = handle_wallpaper_equip
 HANDLERS[MSG_OTHER] = handle_other
 HANDLERS[MSG_SETTING] = handle_setting
 

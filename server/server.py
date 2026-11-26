@@ -383,6 +383,19 @@ async def handle_login(client: GameClient, pb_data: bytes):
         if m["msg_id"].upper() == "0X1701":  # Extreme Training: this player's idle rewards, not the capture
             await client.send_packet(0x1701, hangup.info(client.account))
             continue
+        if m["msg_id"].upper() == "0X2101":  # profile: this player's own wallpapers (rest as the baseline)
+            await client.send_packet(0x2101, personal.info_message(int(gid), client.account,
+                                                                   client.account.b.pb("0x2101")))
+            continue
+        if m["msg_id"].upper() == "0X0F0A":  # memory recruit pools: this player's own wishes
+            await client.send_packet(0x0F0A, recallwish.info(int(gid), client.account), compress=True)
+            continue
+        if m["msg_id"].upper() == "0X1601":  # shops: this player's own goods counters
+            await client.send_packet(0x1601, shop.info(int(gid), client.account), compress=True)
+            continue
+        if m["msg_id"].upper() == "0X5601":  # High School Trials: this player's daily buy counter
+            await client.send_packet(0x5601, hstrials.info(int(gid), client.account), compress=bool(m["flags"] & 2))
+            continue
         if m["msg_id"].upper() == "0X2F01":  # weekly activity: this player's own counts, not the capture
             await client.send_packet(0x2F01, weekly.info(int(gid), client.account))
             continue
@@ -438,6 +451,31 @@ async def handle_heartbeat(client: GameClient, pb_data: bytes):
 
 
 RECRUIT_TICKET = 318
+MSG_LOTTERY_WISH = 0x0F0E
+
+
+async def handle_lottery_wish(client: GameClient, pb_data: bytes):
+    """0x0F0E LotteryWishListC2S{1=id 2=conf_id_list (packed)}: the players wished for on a banner.
+    Capture (decoded_tshark.json, banner 150, players 1105/1101/1103): 0x0F05 LotteryUpdateS2C with the
+    banner's whole LotteryUnit and wish_list = the request's list, then the empty 0x0F0E reply.
+    cardlotteryconfig.WishLimit (150: 3) is the most a list may hold. Assumed: a longer list, a banner without
+    WishLimit or an unknown banner is refused with error 1. Not built: what the wish changes in the draws."""
+    from accounts import _packed
+    req = wire.parse(pb_data)
+    lottery_id, ids = wire.get(req, 1, 0), []
+    for num, wt, v in req:
+        if num == 2:
+            ids += _packed(v) if wt == 2 else [v]
+    limit = (gameconfig.LOTTERIES.get(lottery_id) or {}).get("WishLimit") if gameconfig.AVAILABLE else None
+    if not limit or limit < 0 or len(ids) > limit:
+        log.info(f"  WISH lottery={lottery_id} {ids} refused (limit {limit})")
+        await client.send_packet(MSG_LOTTERY_WISH, wire.build([(1, 0, 1)]))
+        return
+    unit = client.account.set_wish_list(lottery_id, ids)
+    client.account.save()
+    log.info(f"  WISH lottery={lottery_id} {ids}")
+    await client.send_packet(MSG_LOTTERY_UPDATE, wire.build([(1, 2, unit)]))
+    await client.send_packet(MSG_LOTTERY_WISH, b"")
 
 
 async def handle_lottery_do(client: GameClient, pb_data: bytes):
@@ -581,8 +619,13 @@ async def claim_tasks(client: GameClient, task_ids: list[int]) -> list[int]:
         claimed.append(tid)
     if claimed:
         m.save()
-        await grant_rewards(client, rewards)
+        # Garena (0x0E03 / 0x0E0A captures): the TaskChange with the claimed state first, then the items /
+        # currencies and the pop-up, one entry per item (5 + 60 of item 108 shown as 65)
         await client.send_packet(MSG_TASK_CHANGE, m.change_message())
+        merged: dict[int, int] = {}
+        for item, amount in rewards:
+            merged[item] = merged.get(item, 0) + amount
+        await grant_rewards(client, list(merged.items()))
     log.info(f"  TASK claimed {len(claimed)} of {len(task_ids)}, rewards {rewards[:6]}, activation {m.activation}")
     return claimed
 
@@ -994,6 +1037,20 @@ def one_key_tasks(acc, pb_data: bytes) -> list[int]:
     return out
 
 
+async def handle_task_yc_receive(client: GameClient, pb_data: bytes):
+    """0x0E0A TaskYcReceiveRewardsC2S{1=task_id (packed)} -> S2C{1=error 2=task_id}: claim the named missions.
+    Capture (decoded_tshark.json, tasks 23001051 + 24001005): TaskChange (state 2), 0x0405, pop-up, then the
+    reply with the requested ids. Assumed: only completed missions are claimed, the reply lists those."""
+    from accounts import _packed
+    ids = []
+    for num, wt, v in wire.parse(pb_data):
+        if num == 1:
+            ids += _packed(v) if wt == 2 else [v]
+    claimed = await claim_tasks(client, ids)
+    body = wire.build([(2, 2, b"".join(wire.varint(t) for t in claimed))]) if claimed else b""
+    await client.send_packet(0x0E0A, body if claimed or not ids else wire.build([(1, 0, 1)]))
+
+
 async def handle_task_one_key(client: GameClient, pb_data: bytes):
     """0x0E05 TaskReceiveOneKeyC2S: claim every completed mission of the named kinds."""
     await claim_tasks(client, one_key_tasks(client.account, pb_data))
@@ -1118,13 +1175,52 @@ async def _assist_physical(client: GameClient) -> list[tuple[int, int]]:
     return [(STAMINA, n)] if n else []
 
 
+async def _assist_quiz(client: GameClient) -> list[tuple[int, int]]:
+    """Assistant function 3 (CheckFunctionFinish: done when the quiz counter is -1): pass today's quiz
+    without questions; examreward of the level, then ExamTicketsS2C -1 (capture decrypted_1 0017-0019:
+    131 40 / 201 2, 108 10, then 0x1A01 freetimes -1; unit 3 = 108 10, 131 40, 201 2)."""
+    import exam
+    if exam.freetimes(client) == exam.PASSED:
+        return []
+    exam._state(client).update(passed=True, ids=[], slots=[])
+    pvp.save()
+    rewards = exam.reward(client.account.level)
+    await grant_rewards(client, rewards, popup=False)
+    await client.send_packet(exam.MSG_TICKETS, exam.P.ExamTicketsS2C(freetimes=exam.PASSED).SerializeToString())
+    log.info(f"  ASSIST quiz passed: {rewards}")
+    return _merge_shown(rewards)
+
+
+async def _assist_club_daily(client: GameClient) -> list[tuple[int, int]]:
+    """Assistant function 13 (CheckFunctionFinish: done when AssociationNumber.DailyStatus == 2): the club's
+    daily welfare, as the club page's button (0x2E17) gives it."""
+    import clubs
+    rewards = clubs.take_daily(int(client.gid))
+    if not rewards:
+        return []
+    await client.send_packet(clubs.MSG_INFO, clubs.info(int(client.gid)))
+    await grant_rewards(client, rewards, popup=False)
+    return _merge_shown(rewards)
+
+
+async def _assist_club_wish(client: GameClient, player_id: int):
+    """Assistant function 15 (done when the club wish data has wishNum > 0): wish for the shards of the
+    player in the function's arg (the baseline's is 1103). No reward unit: the result view shows the
+    wished player itself (AssistantResultViewLogic::UpdateResultList, wishPlayerId)."""
+    import clubs
+    c = clubs.make_wish(int(client.gid), player_id)
+    log.info(f"  ASSIST club wish {player_id}: {'made' if c else 'refused'}")
+    if c:
+        clubs._vow_refresh(c)
+
+
 async def handle_share_assist_do(client: GameClient, pb_data: bytes):
     """0x3704 ShareAssistDoC2S{}: run every switched-on assistant function in gamehelperconf Order;
     S2C{1=err 2=repeated AssistantRewardUnit{1=func_type 3=repeated Item{2=id 3=count}}}, only functions
     that did something (capture decrypted_1: 9 units, the open but empty 16/18 missing). Implemented:
-    the stored activity stamina (6) and the mission functions 16-19; the others (mini game, daily events,
-    quiz, treasure, exchange, resource stages, club) have no server logic yet and are skipped
-    (docs/garena-abgleich.md)."""
+    the quiz (3), the stored activity stamina (6), club daily welfare (13) and wish (15), the mission
+    functions 16-19; the others (mini game, daily events, treasure, exchange, resource stages, club buffet) are
+    skipped (docs/garena-abgleich.md)."""
     settings = assistant_settings(client.account)
     order = sorted(settings, key=lambda f: (gameconfig.ASSISTANT.get(f, {}).get("Order", 999), f))
     units = []
@@ -1133,6 +1229,13 @@ async def handle_share_assist_do(client: GameClient, pb_data: bytes):
             continue
         if func == 6:
             shown = await _assist_physical(client)
+        elif func == 3:
+            shown = await _assist_quiz(client)
+        elif func == 13:
+            shown = await _assist_club_daily(client)
+        elif func == 15:
+            await _assist_club_wish(client, settings[func][1])
+            continue
         elif func in ASSIST_TASKS:
             shown = await _assist_claim_tasks(client, *ASSIST_TASKS[func])
         else:
@@ -1519,7 +1622,9 @@ MESSAGE_HANDLERS = {
     0x0D03: handle_sign_reward,
     0x0E03: handle_task_receive,
     0x0E05: handle_task_one_key,
+    MSG_LOTTERY_WISH: handle_lottery_wish,
     0x0E07: handle_extract_physical,
+    0x0E0A: handle_task_yc_receive,
     0x3703: handle_share_assist_set,
     0x3704: handle_share_assist_do,
     0x0E08: handle_achievement_reward,
@@ -1583,6 +1688,12 @@ import coach  # noqa: E402  coaches per player: level up (0x5503), dismantle (0x
 MESSAGE_HANDLERS.update(coach.HANDLERS)
 import cardlock  # noqa: E402  lock / unlock a player card (0x0909)
 MESSAGE_HANDLERS.update(cardlock.HANDLERS)
+import hstrials  # noqa: E402  High School Trials: buying the daily reward (0x5603)
+MESSAGE_HANDLERS.update(hstrials.HANDLERS)
+import shop  # noqa: E402  in-game shop purchases (0x1603) and the goods counters at login (0x1601)
+MESSAGE_HANDLERS.update(shop.HANDLERS)
+import recallwish  # noqa: E402  memory recruit wish (0x0F0C) and its pools at login (0x0F0A)
+MESSAGE_HANDLERS.update(recallwish.HANDLERS)
 import hangup  # noqa: E402  Extreme Training idle reward (0x1701 / 0x1702 pushes / 0x1704 claim)
 MESSAGE_HANDLERS.update(hangup.HANDLERS)
 pvp.HOOKS.update(before_result=before_result)
@@ -1592,6 +1703,8 @@ import freepack  # noqa: E402  free packs of the shop
 MESSAGE_HANDLERS.update(freepack.HANDLERS)
 import honor  # noqa: E402  Path to Honor: stage rewards
 MESSAGE_HANDLERS.update(honor.HANDLERS)
+import exam  # noqa: E402  Quiz: tickets, questions, reward
+MESSAGE_HANDLERS.update(exam.HANDLERS)
 pvp.HOOKS.update(replies=REPLIES, grant_rewards=grant_rewards, player_name=player_name, generic=handle_generic,
                  mission_event=mission_event)
 

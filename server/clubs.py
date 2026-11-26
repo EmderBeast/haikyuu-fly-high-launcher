@@ -577,17 +577,25 @@ async def handle_read(client, pb: bytes):
     await _reply(client, MSG_READ, "AssociationReadS2C", err=0 if c else 1)
 
 
-async def handle_daily(client, pb: bytes):
-    c = club_of(int(client.gid))
-    m = c["members"][str(client.gid)] if c else None
+def take_daily(gid: int) -> list[tuple[int, int]] | None:
+    """Daily welfare of the club level, once a day; None if not in a club or already taken."""
+    c = club_of(gid)
+    m = c["members"][str(gid)] if c else None
     if not m or m.get("daily") == pvp._today():
-        await _reply(client, MSG_DAILY, "AssociationDailyFreeS2C", err=1)
-        return
+        return None
     m["daily"] = pvp._today()
     pvp.save()
+    return _kv(_level(c).get("DailyReward"))
+
+
+async def handle_daily(client, pb: bytes):
+    rewards = take_daily(int(client.gid))
+    if rewards is None:
+        await _reply(client, MSG_DAILY, "AssociationDailyFreeS2C", err=1)
+        return
     await _reply(client, MSG_DAILY, "AssociationDailyFreeS2C")
     await client.send_packet(MSG_INFO, info(int(client.gid)))
-    await pvp.HOOKS["grant_rewards"](client, _kv(_level(c).get("DailyReward")), True)
+    await pvp.HOOKS["grant_rewards"](client, rewards, True)
 
 
 async def handle_level(client, pb: bytes):
@@ -748,20 +756,26 @@ def _vow_refresh(c: dict, also: tuple = ()):
         _push(int(g), MSG_VOW_RECORD, vow_record(int(g)))
 
 
-async def handle_wish(client, pb: bytes):
-    gid = int(client.gid)
-    pid = P.AssociationVowWishC2S.FromString(pb).player_id
+def make_wish(gid: int, pid: int) -> dict | None:
+    """Wish for shards of player pid (once a day, one open wish); returns the club or None if refused."""
     c = club_of(gid)
     m = _today_of(c["members"][str(gid)]) if c else None
     if not c or pid not in PIECES or m["wished"] >= WISHES_PER_DAY or str(gid) in c.get("wishes", {}):
-        await _reply(client, MSG_WISH, "AssociationVowWishS2C", err=1)
-        return
+        return None
     _expire_wishes(c)
     c["wishes"][str(gid)] = {"player": pid, "got": 0, "taken": 0, "time": int(time.time()), "day": pvp._today(),
                              "donors": []}
     m["wished"] += 1
     m["last_wish"] = pid
     pvp.save()
+    return c
+
+
+async def handle_wish(client, pb: bytes):
+    c = make_wish(int(client.gid), P.AssociationVowWishC2S.FromString(pb).player_id)
+    if c is None:
+        await _reply(client, MSG_WISH, "AssociationVowWishS2C", err=1)
+        return
     await _reply(client, MSG_WISH, "AssociationVowWishS2C")
     _vow_refresh(c)
 

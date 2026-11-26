@@ -263,6 +263,15 @@ class Account:
         self.lotteries[lottery_id] = wire.build(f)
         return self.lotteries[lottery_id]
 
+    def set_wish_list(self, lottery_id: int, conf_ids: list[int]) -> bytes:
+        """LotteryUnit.wish_list (12, packed) of a banner; returns the updated unit."""
+        unit = self.lotteries.get(lottery_id) or self.b.lotteries.get(lottery_id) or wire.build([(1, 0, lottery_id)])
+        f = [x for x in wire.parse(unit) if x[0] != 12]
+        if conf_ids:
+            f.append((12, 2, b"".join(wire.varint(c) for c in conf_ids)))
+        self.lotteries[lottery_id] = wire.build(sorted(f, key=lambda x: x[0]))
+        return self.lotteries[lottery_id]
+
     def draw_cards(self, lottery_id: int, count: int) -> list[int]:
         """Card conf_ids for `count` pulls: real banner rates/pools when the config is available."""
         if not (gameconfig.AVAILABLE and lottery_id in gameconfig.LOTTERIES):

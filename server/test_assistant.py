@@ -20,6 +20,7 @@ import wire  # noqa: E402
 checks = []
 # capture decrypted_1/0048_55_4: AssistantRewardUnit of function 19 and 17 (items as (id, count))
 GARENA_19 = [(108, 10), (137, 240)]
+GARENA_3 = [(108, 10), (131, 40), (201, 2)]
 GARENA_17 = [(107, 80), (137, 2340), (102, 15000), (100, 50000), (507001002, 2), (507001007, 5)]
 DAILY_DONE = [2000001, 2000002, 2000007, 2000010]  # the four dailies claimed in that capture (0043)
 
@@ -108,8 +109,13 @@ async def main():
     c.sent.clear()
     await server.handle_share_assist_do(c, b"")
     got = units(next(p for mid, p in c.sent if mid == server.MSG_ASSIST_DO))
-    check("functions in gamehelperconf Order (19 before 17), as in the capture", [f for f, _ in got] == [19, 17],
+    check("functions in gamehelperconf Order (3, 19, 17), as in the capture", [f for f, _ in got] == [3, 19, 17],
           f"{[f for f, _ in got]}")
+    check("function 3 (quiz) rewards = Garena's", dict(got).get(3) == GARENA_3, f"{dict(got).get(3)}")
+    tickets = [pl for mid, pl in c.sent if mid == 0x1A01]
+    check("quiz passed: 0x1A01 freetimes -1 sent", tickets and server.matches.P.ExamTicketsS2C.FromString(tickets[-1]).freetimes == -1)
+    import exam
+    check("quiz state: passed today", exam.freetimes(c) == exam.PASSED)
     check("function 19 rewards = Garena's", dict(got).get(19) == GARENA_19, f"{dict(got).get(19)}")
     check("function 17 rewards = Garena's (4 dailies + chests 1-4)", dict(got).get(17) == GARENA_17,
           f"{dict(got).get(17)}")
@@ -165,6 +171,29 @@ async def main():
     await server.handle_extract_physical(c, wire.build([(1, 0, 50)]))
     check("0x0E07: not above MemoryMax", acc.get_currency(server.STAMINA) == server._memory_max(acc)
           and m.activation["physical"] == 40)
+
+    # club functions: 13 daily welfare, 15 wish for the arg's player (both open in the baseline, 15 with 1103)
+    import clubs
+    P = server.matches.P
+    acc.set_currency(clubs.CREATE_COST[0], 1000)
+    await server.MESSAGE_HANDLERS[clubs.MSG_CREATE](c, P.AssociationCreateC2S(name="Assist", icon_id=1).SerializeToString())
+    await asyncio.sleep(0.05)
+    check("test club created", clubs.club_of(gid) is not None)
+    welfare = clubs._kv(clubs._level(clubs.club_of(gid)).get("DailyReward"))
+    c.sent.clear()
+    await server.handle_share_assist_do(c, b"")
+    await asyncio.sleep(0.05)
+    got = dict(units([pl for mid, pl in c.sent if mid == server.MSG_ASSIST_DO][-1]))
+    check("function 13: the club level's DailyReward", got.get(13) == server._merge_shown(welfare) and welfare,
+          f"{got.get(13)} / {welfare}")
+    check("function 15: no reward unit (the client shows the wished player)", 15 not in got)
+    me = clubs.club_of(gid)["members"][str(gid)]
+    check("daily welfare taken, wish for 1103 made", me.get("daily") and
+          clubs.club_of(gid)["wishes"].get(str(gid), {}).get("player") == 1103)
+    c.sent.clear()
+    await server.handle_share_assist_do(c, b"")
+    check("club functions only once a day",
+          13 not in dict(units([pl for mid, pl in c.sent if mid == server.MSG_ASSIST_DO][-1])))
 
     # settings survive a new login
     c2 = await login(gid)
