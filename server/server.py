@@ -285,6 +285,10 @@ class GameClient:
             if getattr(self, "gid", None) is not None and mail.ONLINE.get(int(self.gid)) is self:
                 del mail.ONLINE[int(self.gid)]  # no more pushes (mail, chat) to a closed connection
                 chat.on_logout(int(self.gid))  # "offline since" in the contact list
+            try:
+                freedom.on_disconnect(self)  # leaving a running real-time match = a loss
+            except Exception as e:
+                log.error(f"freedom.on_disconnect: {e}")
             self.writer.close()
 
     async def handle_message(self, msg_id: int, pb_data: bytes):
@@ -622,6 +626,89 @@ async def handle_card_resonance(client: GameClient, pb_data: bytes):
     log.info(f"  RESONANCE inst={inst} conf={conf}: unlocked {level} (skill sum {total}, reachable {reachable})")
 
 
+# --- memories (Recalling): equip / unequip / lock -----------------------------------------------
+# PlayerRecalling: 1 inst 2 conf 3 level 4 max level 5 stage 6 exp 7 locked 8 card inst 9 created;
+# PlayerCard field 12 (Recalling) = the equipped memory's inst (tags from Config.dll)
+CARD_RECALLING, REC_CARD, REC_LOCKED = 12, 8, 7
+
+
+def _with(fields, num, value):
+    """Varint field set, or removed for 0 (proto3 omits zero values)."""
+    return wire.set_varint(fields, num, value) if value else [f for f in fields if f[0] != num]
+
+
+async def _recalling_changes(client, recs: list[bytes], cards: list[bytes]):
+    acc = client.account
+    for r in recs:
+        acc.put_recalling(r)
+    for c in cards:
+        acc.put_card(c)
+    acc.save()
+    if recs:
+        await client.send_packet(0x3C02, b"".join(wire.build([(2, 2, r)]) for r in recs))
+    if cards:
+        await client.send_packet(MSG_CARD_CHANGE, b"".join(wire.build([(1, 2, card_info(c))]) for c in cards)
+                                 + wire.build([(2, 0, CARD_UPDATE)]))
+
+
+def _detach(acc, rec_inst: int, recs: dict, cards: dict):
+    """Take memory rec_inst off the card that has it (both sides)."""
+    rf = wire.parse(recs.get(rec_inst) or acc.all_recallings().get(rec_inst, b""))
+    owner = wire.get(rf, REC_CARD, 0)
+    if rf:
+        recs[rec_inst] = wire.build(_with(rf, REC_CARD, 0))
+    if owner:
+        raw = cards.get(owner) or acc.get_card(owner)
+        if raw and wire.get(wire.parse(raw), CARD_RECALLING, 0) == rec_inst:
+            cards[owner] = wire.build(_with(wire.parse(raw), CARD_RECALLING, 0))
+
+
+async def handle_recalling_equip(client: GameClient, pb_data: bytes):
+    """0x3C03 RecallingEquipC2S{1=card inst 2=memory inst}: put a memory on a card."""
+    req = wire.parse(pb_data)
+    card_inst, rec_inst = wire.get(req, 1, 0), wire.get(req, 2, 0)
+    acc = client.account
+    card = acc.get_card(card_inst)
+    if card is None or rec_inst not in acc.all_recallings():
+        log.info(f"  RECALLING equip card={card_inst} memory={rec_inst}: unknown")
+        return await client.send_packet(0x3C03, wire.build([(1, 0, 1)]))
+    recs, cards = {}, {}
+    _detach(acc, rec_inst, recs, cards)  # from its old card
+    old = wire.get(wire.parse(card), CARD_RECALLING, 0)
+    if old and old != rec_inst:  # the card's old memory comes off
+        _detach(acc, old, recs, cards)
+    cf = wire.parse(cards.get(card_inst, card))
+    cards[card_inst] = wire.build(wire.set_varint(cf, CARD_RECALLING, rec_inst))
+    recs[rec_inst] = wire.build(wire.set_varint(wire.parse(recs[rec_inst]), REC_CARD, card_inst))
+    await _recalling_changes(client, list(recs.values()), list(cards.values()))
+    await client.send_packet(0x3C03, b"")
+    log.info(f"  RECALLING equip memory={rec_inst} -> card={card_inst}")
+
+
+async def handle_recalling_unequip(client: GameClient, pb_data: bytes):
+    """0x3C07 RecallingUnEquipC2S{1=memory inst}: take a memory off its card."""
+    rec_inst = wire.get(wire.parse(pb_data), 1, 0)
+    acc = client.account
+    if rec_inst not in acc.all_recallings():
+        return await client.send_packet(0x3C07, wire.build([(1, 0, 1)]))
+    recs, cards = {}, {}
+    _detach(acc, rec_inst, recs, cards)
+    await _recalling_changes(client, list(recs.values()), list(cards.values()))
+    await client.send_packet(0x3C07, b"")
+    log.info(f"  RECALLING unequip memory={rec_inst}")
+
+
+async def handle_recalling_lock(client: GameClient, pb_data: bytes):
+    """0x3C06 RecallingLockC2S{1=memory inst 2=lock}."""
+    req = wire.parse(pb_data)
+    rec_inst, lock = wire.get(req, 1, 0), wire.get(req, 2, 0)
+    raw = client.account.all_recallings().get(rec_inst)
+    if raw is None:
+        return await client.send_packet(0x3C06, wire.build([(1, 0, 1)]))
+    await _recalling_changes(client, [wire.build(_with(wire.parse(raw), REC_LOCKED, 1 if lock else 0))], [])
+    await client.send_packet(0x3C06, b"")
+
+
 async def handle_card_train(client: GameClient, pb_data: bytes):
     """0x0908 PlayerCardTrainC2S{1=inst_id}: next training step (train table: items + gold)."""
     inst = wire.get(wire.parse(pb_data), 1, 0)
@@ -763,13 +850,31 @@ async def handle_task_receive(client: GameClient, pb_data: bytes):
     await client.send_packet(0x0E03, wire.build([(2, 0, tid)] if ok else [(1, 0, 1), (2, 0, tid)]))
 
 
-async def handle_task_one_key(client: GameClient, pb_data: bytes):
-    """0x0E05 TaskReceiveOneKeyC2S{1=receives (packed task ids)}: claim several; empty = all completed."""
-    ids = []
+def one_key_tasks(acc, pb_data: bytes) -> list[int]:
+    """Completed missions a TaskReceiveOneKeyC2S asks for. The client names mission kinds, not
+    missions: receives = repeated TaskReceiveReward{1=task_type 2=task_team_id}, team id 0 = every
+    team of the type (TaskSystem.TaskMessageHandler::GetAllRewardsRequest fills it from two int
+    arrays, the team ids default to 0). No capture of this message; an empty request claims
+    everything completed."""
+    wanted = []
     for num, wt, v in wire.parse(pb_data):
-        if num == 1:
-            ids += _packed(v) if wt == 2 else [v]
-    await claim_tasks(client, ids or client.account.finished_tasks())
+        if num == 1 and wt == 2:
+            f = wire.parse(v)
+            wanted.append((wire.get(f, 1, 0), wire.get(f, 2, 0)))
+    done = acc.finished_tasks()
+    if not wanted:
+        return done
+    out = []
+    for tid in done:
+        cfg = gameconfig.TASKS.get(tid, {}) if gameconfig.AVAILABLE else {}
+        if any(cfg.get("TaskType") == t and (not team or cfg.get("TaskTeamId") == team) for t, team in wanted):
+            out.append(tid)
+    return out
+
+
+async def handle_task_one_key(client: GameClient, pb_data: bytes):
+    """0x0E05 TaskReceiveOneKeyC2S: claim every completed mission of the named kinds."""
+    await claim_tasks(client, one_key_tasks(client.account, pb_data))
     await client.send_packet(0x0E05, b"")
 
 
@@ -806,10 +911,14 @@ async def handle_pvp_create(client: GameClient, pb_data: bytes):
     args = wire.parse(wire.get(wire.parse(pb_data), 1, b""))
     pvp_type = wire.get(args, 1, 0)
     pvp_args = _packed(wire.get(args, 2, b""))
+    room_args = matches.P.PVPRoomArgs(pvp_type=pvp_type, pvp_args=pvp_args)
     stage = pvp_args[1] if len(pvp_args) > 1 else 0
     cost = gameconfig.stage_cost(stage)
     if cost is None and pvp_type == PVP_TYPE_PRACTICE:
         cost = (STAMINA, PRACTICE_STAMINA_COST)
+    double = matches.double_cost(room_args)
+    if cost and double:  # practice at double cost: twice the stamina (and the stage rewards twice, see the result)
+        cost = (cost[0], cost[1] * 2)
     client.last_pvp = (pvp_type, stage)
     if cost and cost[0] == STAMINA:
         acc = client.account
@@ -828,6 +937,7 @@ async def handle_pvp_create(client: GameClient, pb_data: bytes):
     if room:
         client.room = room[1]
         m = room[1]
+        m.double = double
         outcome = f"live, home point chance {m.live.win_chance:.2f}" if m.live else ('win' if m.won else 'loss')
         log.info(f"  ROOM stage={stage} preset={m.info.preset_match_id} power {m.info.home.power} vs "
                  f"{m.info.away.power} -> {outcome} stars={m.stars:03b}")
@@ -859,6 +969,10 @@ async def handle_preset_result(client: GameClient, match):
     if won:
         first = not acc.stage_stars().get(stage)  # cleared before (baseline or this account) = no first reward
         rewards = matches.roll_stage_rewards(stage, first)
+        if getattr(match, "double", False):
+            # practice at double cost: the stage's repeat rewards a second time. The doubled cost is the
+            # client's request flag; that the rewards double with it is assumed, no capture of such a match.
+            rewards = rewards + matches.roll_stage_rewards(stage, False)
         updates = acc.clear_stage(room.room_args.pvp_type, stage, stars)[1]
         if room.room_args.pvp_type == matches.P.FIGHT_CONTEST:  # Extreme Training: next floor opens
             updates += acc.clear_contest(stage - matches.CONTEST_STAGE_BASE)
@@ -913,6 +1027,23 @@ async def handle_match_data(client: GameClient, pb_data: bytes):
         log.info("  LIVE match already over, resending the last rally")
         await client.send_packet(0x0303, live.reply(live.last), compress=True)
         return
+    if hasattr(live, "wait_turn"):
+        # real-time match: wait for the other player (shared tempo) without blocking this connection
+        if getattr(live, "_waiting", False):
+            return  # a repeated request while waiting: the rally follows once
+        async def later():
+            live._waiting = True
+            try:
+                await live.wait_turn()
+                await _send_next_rally(client, live)
+            finally:
+                live._waiting = False
+        asyncio.get_running_loop().create_task(later())
+        return
+    await _send_next_rally(client, live)
+
+
+async def _send_next_rally(client: GameClient, live):
     frames = live.next_rally()
     log.info(f"  LIVE rally {live.rally_no}: {len(frames)} frames, score {live.score[0]}-{live.score[1]}"
              f"{' (match over)' if live.over else ''}")
@@ -1103,6 +1234,9 @@ MESSAGE_HANDLERS = {
     0x0905: handle_card_level_up,
     0x0908: handle_card_train,
     0x090B: handle_card_resonance,
+    0x3C03: handle_recalling_equip,
+    0x3C07: handle_recalling_unequip,
+    0x3C06: handle_recalling_lock,
     0x0906: handle_card_star,
     0x0907: handle_card_skill,
     0x0302: handle_pvp_create,

@@ -68,6 +68,7 @@ MSG_GIFT_CODE = 0x2403
 MSG_SPECIALTY_ON = 0x1804
 MSG_SPECIALTY_OFF = 0x1805
 MAX_STAR = 6
+MEM_MAX_LEVEL, MEM_MAX_STAGE = 80, 5  # recallingconstant 3 (max level per star) and 1 (max stage)
 TWIN_BASE = 50000  # card ids from here on are copies of real characters (not obtainable)
 SPECIALTY_INST_BASE = 1 << 61  # far away from captured and starter instance ids
 
@@ -175,6 +176,12 @@ def _apply(acc, action: dict) -> list[str]:
         for conf in new:
             acc.add_card(conf)
         done.append(f"{len(new)} Charaktere freigeschaltet")
+        # memories (Recalling): one of each kind the account does not have yet
+        have = {wire.get(wire.parse(r), 2, 0) for r in acc.all_recallings().values()}
+        mem = [m for m in sorted(gameconfig._cached("recalling")) if m not in have]
+        for conf in mem:
+            acc.add_recalling(conf)
+        done.append(f"{len(mem)} Memories dazu")
     if action.get("remove_twins"):
         cards = {**acc.b.cards, **{wire.get(wire.parse(c), 1): c for c in acc.cards}}
         conf = {i: wire.get(wire.parse(c), 3, 0) for i, c in cards.items() if i not in acc.removed_cards}
@@ -229,7 +236,21 @@ def _apply(acc, action: dict) -> list[str]:
             f = wire.set_varint(f, 6, MAX_STAR)
             f = wire.set_varint(f, 4, gameconfig.level_cap(MAX_STAR))
             maxed.append(wire.build(f))
+        # full skill resonance (highest tier) on every maxed card
+        for i, raw in enumerate(maxed):
+            f = wire.parse(raw)
+            tiers = gameconfig.resonance_tiers(wire.get(f, 3, 0))
+            if tiers:
+                maxed[i] = wire.build(wire.set_varint(f, gameconfig.RESONANCE_FIELD, tiers[-1]))
         acc.cards = maxed  # one pass instead of put_card per card (thousands of cards)
+        # memories: level 80, tier V (stage 5)
+        for inst, r in acc.all_recallings().items():
+            f = wire.parse(r)
+            for num, val in ((3, MEM_MAX_LEVEL), (4, MEM_MAX_LEVEL), (5, MEM_MAX_STAGE)):
+                f = wire.set_varint(f, num, val)
+            f = [x for x in f if x[0] != 6]  # no leftover EXP
+            acc.recallings[inst] = wire.build(f)
+        done.append(f"{len(acc.all_recallings())} Memories auf Level {MEM_MAX_LEVEL} / Tier V, volle Resonance")
         n = len(maxed)
         done.append(f"{n} Karten auf {MAX_STAR} Sterne / Level {gameconfig.level_cap(MAX_STAR)}")
     if "items" in action:

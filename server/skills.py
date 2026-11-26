@@ -36,6 +36,15 @@ T_BOTH_TOUCH, T_OWN_TOUCH, T_OTHER_SPIKE = 18, 19, 20
 ENERGY_MAX = 120.0
 BOND_NEEDS_MEMBERS = True
 BUFF_CHANGE_EVENT = True
+BLOCK_MISS_NO_TOUCH = True
+BUFF_TAG_EVENT = True  # GetBuffTag / LoseBuffTag / HaveBuffTag read the buff table's Tag column
+TAG_KEYS = {"GetBuffTag", "LoseBuffTag", "HaveBuffTag"}  # their Value names the tag (none = tag 0)
+
+
+def _tag(row: dict):
+    """Tag of a buff row (0 morale skill, 3 stamina recovery, 7 Attack Tempo, ...) or None."""
+    v = row.get("Tag")
+    return v if isinstance(v, int) and v != NONE else None
 FRESH_AT_END = True
 SNAPSHOT = True  # ArgsType 10 values are fixed when the buff is given
 TEAM_BUFF_EVENT = True
@@ -117,9 +126,9 @@ def card_skills(card, resonance: bool = True) -> list[tuple[int, int]]:
         level = _num(row.get("Skilllevel"), 1)
         out += [(sid, level) for sid in _list(row.get("Skillid"))]
     reso = card.skill_resonance_unlock_level if resonance else -1
-    for tier in range(1, 6):
-        row = RESONANCE.get(card.conf_id * 1000 + 500 + tier)
-        if row and _num(row.get("TotalLevel"), 99) <= reso:
+    import gameconfig  # tier rows via resonanceskillmodel: their ids are not conf_id-based for every card
+    for row in gameconfig.resonance_rows(card.conf_id):
+        if _num(row.get("TotalLevel"), 99) <= reso:
             out += [(sid, 1) for sid in _flat(row.get("AddSkill"))]
     return [(sid, lv) for sid, lv in out if sid in SKILLS]
 
@@ -152,6 +161,7 @@ class Ctx:
     driving: bool = False  # checking a manually cast skill (ultimate / morale)
     gate: str = ""  # "spike", "block" or "catch": which ultimate trigger this touch is
     hand: int = 0  # hand serve result 1 bad / 2 normal / 3 good
+    tag: int = -1  # buff tag of a "gettag" / "losetag" event
 
 
 @dataclass
@@ -251,6 +261,7 @@ class Battle:
         self._tbuff: int | None = None  # team buff whose count just changed (see _team_buff_changed)
         self._fresh: set | None = None  # buffs given while the rally-end skills run
         self._pbuff: set = set()  # buffs whose change is being handled (see _buff_changed)
+        self._tags: set = set()  # (event, tag) being handled (see _tag_event)
         self._entered: int | None = None  # ultimate that just went on cooldown (SkillEnterCD)
         self.points = [0, 0]  # rallies won by each team in this match
         self.history: list[tuple] = []  # (team, link, formula, result, player, crit) this rally
@@ -332,6 +343,7 @@ class Battle:
             pids = [entity[1]] if entity[0] == "p" else self.court(entity[1])
             for pid in pids:
                 self.spend(pid, -self._args(row)[0] / 10000 * stacks)
+            self._tag_event(entity, row, True)
             return
         if _num(row.get("MountType"), 1) == 2 and entity[0] == "p":
             entity = ("t", self.team_of(entity[1]))
@@ -367,6 +379,7 @@ class Battle:
         self._buff_changed(entity, buff_id)
         if entity[0] == "t":
             self._team_buff_changed(entity[1], buff_id)
+        self._tag_event(entity, row, True)
         btype = _num(row.get("Type"))
         if btype == 13:  # duration keeper (captures: 111851121 keeps the marker 55011131 for 99 rallies)
             tg = _flat(row.get("ModifyTarget"))
@@ -379,6 +392,25 @@ class Battle:
             self.morale[team] = min(MORALE_MAX, max(0.0, self.morale[team] + self._args(row)[0] / 10000 * stacks))
         elif btype == 5:  # cooldown change
             self._cd_change(entity, row)
+
+    def _tag_event(self, entity: tuple, row: dict, gained: bool):
+        """A buff with a Tag was given (every time) or is gone: the holder's GetBuffTag / LoseBuffTag
+        skills of that tag are checked (54013111 "each time he recovers Stamina" = tag 3; resonance
+        55055211 = tag 0, the team's morale skill)."""
+        tag = _tag(row)
+        if tag is None or not BUFF_TAG_EVENT or not self.cards:
+            return
+        event = "gettag" if gained else "losetag"
+        if (event, tag) in self._tags:
+            return
+        self._tags.add((event, tag))
+        try:
+            pids = [entity[1]] if entity[0] == "p" else [p for p in self.cards if self.team_of(p) == entity[1]]
+            ctx = Ctx(event)
+            ctx.tag = tag
+            self.fire(ctx, owners=[p for p in pids if p in self.cards])
+        finally:
+            self._tags.discard((event, tag))
 
     def _buff_changed(self, entity: tuple, buff_id: int):
         """Skills with a BuffNumberChange trigger for that buff run for its holder (a team buff: for
@@ -430,10 +462,13 @@ class Battle:
             self.changes.append(BuffChange(entity, buff_id, b.stacks, b.left or 0))
         if entity[0] == "t":
             self._team_buff_changed(entity[1], buff_id)
+        if b.stacks <= 0:
+            self._tag_event(entity, b.row, False)
 
     def tick(self, unit: int, team: int | None = None, pids=None, spare=None):
         """One unit of time passes: buffs and cooldowns counted in it run down. spare = (entity, buff)
         pairs that were given just now and keep their full time."""
+        gone = []
         for entity, have in self.buffs.items():
             if pids is not None and (entity[0] != "p" or entity[1] not in pids):
                 continue
@@ -458,6 +493,10 @@ class Battle:
                 if b.left <= 0:
                     del have[bid]
                     self.changes.append(BuffChange(entity, bid, 0, 0))
+                    if _tag(b.row) is not None:
+                        gone.append((entity, b.row))
+        for entity, row in gone:
+            self._tag_event(entity, row, False)
         for (pid, sid), c in list(self.cd.items()):
             if c[0] != unit:
                 continue
@@ -827,8 +866,12 @@ class Battle:
             return self.stacks(("p", owner), arg) or self.stacks(("t", team), arg)
         if key == "TeamBuffNumberChange":  # see _team_buff_changed
             return 0xFFFF if ctx.event == "tbuff" and arg == self._tbuff else 0
-        if key == "HaveBuffTag":  # comes with a BuffNumber condition that names the buff
-            return 0xFFFF
+        if key in ("GetBuffTag", "LoseBuffTag"):  # see _tag_event; arg = the tag (from Value)
+            return 0xFFFF if ctx.event == ("gettag" if key == "GetBuffTag" else "losetag") and ctx.tag == arg else 0
+        if key == "HaveBuffTag":  # the owner (or his team) has a buff of that tag
+            if not BUFF_TAG_EVENT:
+                return 0xFFFF
+            return 0xFFFF if any(_tag(b.row) == arg for b in self._active(owner)) else 0
         if key == "OwnTounchBallNumber":
             # (sic) a touch of our team, attempts included (captures of 57023111 "when your players
             # touch the ball": serves, spikes and block jumps without a touch count too)
@@ -893,6 +936,11 @@ class Battle:
     def _passes(self, skill: dict, owner: int, ctx: Ctx) -> bool:
         for t in skill.get("Trigger") or []:
             try:
+                if t["Key"] in TAG_KEYS:  # Value is the tag, not a number to compare with
+                    v = self._value(t["Key"], max(_num(t.get("Value"), 0), 0), owner, ctx)
+                    if not self._cmp(v, t.get("Cmp", "IF"), 0):
+                        return False
+                    continue
                 v = self._value(t["Key"], _num(t.get("Args")), owner, ctx)
             except KeyError:
                 return False
@@ -1068,6 +1116,10 @@ class Battle:
             return "tbuff"
         if "BuffNumberChange" in keys:
             return "pbuff"
+        if "GetBuffTag" in keys:
+            return "gettag"
+        if "LoseBuffTag" in keys:
+            return "losetag"
         if keys & {"RoundEnd", "Score"}:
             return "end"
         if "BallOverNet" in keys:
@@ -1298,9 +1350,12 @@ class Battle:
         self.history.append((team, ctx.link, ctx.formula, result, ctx.actor, crit))
         self.morale[team] = min(MORALE_MAX, self.morale[team] + 6)
         self.fire(ctx)
-        if self.morale_active[team]:
-            self.morale_active[team] -= 1
-        self.tick(T_TOUCH, team=team)
+        # a block jump that does not reach the ball (result 1) is not one of the team's touches:
+        # captures of morale buff 300 ("8 touches") never count it (306 of 306), every other touch counts
+        if not (ctx.formula == 6 and result == 1 and BLOCK_MISS_NO_TOUCH):
+            if self.morale_active[team]:
+                self.morale_active[team] -= 1
+            self.tick(T_TOUCH, team=team)
         self.tick(T_BOTH_TOUCH)
         self.tick(T_OWN_TOUCH, team=team)
         unit = FORMULA_UNIT.get(ctx.formula)

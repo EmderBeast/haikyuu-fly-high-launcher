@@ -10,21 +10,32 @@ flags swapped, world positions turned by 180 degrees around the net (x, z negate
 gets its own order counter and reads the rally list at its own pace.
 
 Stage 1 has no player inputs: ultimates are released by the AI for both teams (auto_skill), hand
-serve / ultimate / morale requests are answered with the unchanged rally, substitutions are
-ignored. Stage 2 (inputs for both teams) needs engine changes, see docs/realtime-pvp.md.
+serve / ultimate / morale requests are answered with the unchanged rally. Stage 2 (inputs for both
+teams) needs engine changes, see docs/realtime-pvp.md. Done of stage 2 without the engine:
+substitutions (0x0309) of both players: player 1's through LiveMatch.formation_change, player 2's
+as the away ids 13..25 (the game sends them so) and checked the same way; both go into the shared LiveMatch's
+pending_subs and take effect from the next rally the room builds, for both viewers. Leaving a running
+match counts as a loss for the one who left (freedom.on_disconnect); the other plays on.
+Shared tempo: rally n goes out when both clients have asked for it (a barrier, wait_turn): the first
+to ask waits (at most TEMPO_WAIT seconds; for the first rally also until the other has joined the
+room), the second one's request releases both, so both watch the same rally at the same time; no waiting once the other has left or its match
+is over. server.handle_match_data waits in a task, so the connection keeps answering heartbeats.
 
 Matchmaking: freedom.handle_match calls pair(); a searching player waits up to WAIT seconds for a
 second searcher (same pattern), otherwise freedom falls back to a saved opponent as before.
 """
 import asyncio
+import logging
 import random
 import time
 
 import matches
 
 P = matches.P
+log = logging.getLogger(__name__)
 
 WAIT = 12.0  # seconds a searcher waits for a second player
+TEMPO_WAIT = 25.0  # seconds a client waits for the other one (the game shows a rally for 8-16 s)
 TEAM_IDS = 13
 _waiting: dict[int, tuple] = {}  # pattern -> (client, future)
 ROOMS: dict[str, "Room"] = {}
@@ -182,6 +193,8 @@ class Room:
         self.rallies: list[list[bytes]] = []
         self.after: list[tuple[list, bool]] = []  # (score, over) after each rally
         self.created = time.time()
+        self.views: dict[int, "SideView"] = {}  # side -> the client's view (shared tempo)
+        self.moved = asyncio.Event()  # set whenever a view is sent a rally
 
     def rally(self, n: int) -> tuple[list[bytes], list, bool]:
         while len(self.rallies) <= n and not (self.after and self.after[-1][1]):
@@ -213,6 +226,8 @@ class SideView:
         self.auto_skill = True
         self.pending_subs: list = []
         self.subs_left = {0: 0, 1: 0}
+        self.gone = False  # the client left the match (disconnected)
+        self.want = -1  # the rally this client asked for last (shared tempo)
 
     @property
     def won(self) -> bool:
@@ -221,9 +236,28 @@ class SideView:
     def _view(self, frames: list[bytes]) -> list[bytes]:
         return frames if self.side == 0 else [mirror_frame(f) for f in frames]
 
+    async def wait_turn(self):
+        """Shared tempo: rally n is sent when the other client asks for it too (or was sent it)."""
+        end = time.time() + TEMPO_WAIT
+        self.want = self.n
+        self.room.moved.set()  # a waiting partner sees this request
+        while True:
+            other = self.room.views.get(1 - self.side)
+            if other is not None and (other.gone or other.over or other.want >= self.n or other.n > self.n):
+                return
+            left = end - time.time()
+            if left <= 0:
+                return
+            self.room.moved.clear()
+            try:
+                await asyncio.wait_for(self.room.moved.wait(), left)
+            except asyncio.TimeoutError:
+                return
+
     def next_rally(self) -> list[bytes]:
         frames, score, over = self.room.rally(self.n)
         self.n += 1
+        self.room.moved.set()
         self.rally_no = self.n
         self.score = list(score) if self.side == 0 else [score[1], score[0]]
         self.over = over
@@ -241,8 +275,34 @@ class SideView:
         return self.last
 
     def formation_change(self, body: bytes) -> bytes:
-        rep = P.PVPFormationChangeS2C(session=self.info.session, order=self.order)
+        """0x0309 of this client: the shared match's substitutions for this client's team."""
+        live = self.room.live
+        if self.side == 0:
+            rep = P.PVPFormationChangeS2C.FromString(live.formation_change(body))
+        else:
+            rep = P.PVPFormationChangeS2C()
+            req = P.PVPFormationChangeC2S.FromString(body)
+            team = 1  # GUEST
+            court = set(live.stance[team]) | {on for t, on, off in live.pending_subs if t == team}
+            log.info(f"  RT guest substitution request on {list(req.subs.on_stage)} off {list(req.subs.off_stage)}, "
+                     f"court {sorted(court)}, valid {sorted(live.valid)}, libero {live.libero[team]}")
+            for on, off in zip(req.subs.on_stage, req.subs.off_stage):
+                # the game sends the away ids 13..25 here (seen: on 20 / off 13); 0..12 is mapped too
+                g_on, g_off = (on if on >= TEAM_IDS else on + TEAM_IDS), (off if off >= TEAM_IDS else off + TEAM_IDS)
+                ok = (live.subs_left[team] > 0 and g_on < 2 * TEAM_IDS and g_off < 2 * TEAM_IDS and g_on in live.valid
+                      and g_on not in court and g_on != live.libero[team] and g_off in court)
+                if not ok:
+                    continue
+                live.pending_subs = [s for s in live.pending_subs if s[1] != g_off]
+                live.pending_subs.append((team, g_on, g_off))
+                court = (court - {g_off}) | {g_on}
+                live.subs_left[team] -= 1
+                rep.subs.on_stage.append(on)
+                rep.subs.off_stage.append(off)
+        rep.session, rep.order = self.info.session, self.order
         self.order += 1
+        self.subs_left = {0: live.subs_left[self.side], 1: live.subs_left[1 - self.side]}
+        self.pending_subs = list(live.pending_subs)  # for the log line in server.py
         return rep.SerializeToString()
 
 
@@ -299,6 +359,8 @@ def join(key: str, gid: int) -> tuple[bytes, SideView] | None:
     if room is None or gid not in room.gids:
         return None
     view = SideView(room, room.side(gid))
+    room.views[view.side] = view
+    room.moved.set()  # a client waiting for its partner to join goes on
     create = matches._captured("0x0302", P.PVPCreateS2C)
     create.info.CopyFrom(view.info)
     return create.SerializeToString(), view

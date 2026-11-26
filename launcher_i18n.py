@@ -244,6 +244,10 @@ PHRASES = [
     ("Skill-Resonance", "Skill resonance"),
     ("1. Stufe", "Tier 1"), ("2. Stufe", "Tier 2"), ("3. Stufe", "Tier 3"), ("4. Stufe", "Tier 4"),
     ("5. Stufe", "Tier 5"),
+    ("Alle Charaktere und Memories freischalten (je eins von jedem, das du noch nicht hast)",
+     "Unlock all characters and memories (one of each you don't have yet)"),
+    ("Alles auf max: Karten 6 Sterne / Level 80, volle Skill-Resonance, Memories Level 80 / Tier V",
+     "Everything max: cards 6 stars / level 80, full skill resonance, memories level 80 / tier V"),
     # single words (whole words only)
     ("Spiel", "Game"),
     ("läuft", "running"),

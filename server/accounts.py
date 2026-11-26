@@ -25,6 +25,7 @@ DATA = Path(__file__).parent / "data"
 ACCOUNTS = Path(__file__).parent / "accounts"
 
 MSG_CARD_CHANGE = 0x0902
+MSG_RECALLING_UPDATE = 0x3C02  # RecallingUpdateS2C{1 creates, 2 updates, 3 removes}
 MSG_ITEM_CHANGE = 0x0802
 MSG_FLAGS = 0x0403  # NotifyFlagsS2C{1=flags}: GAMER_FLAGS bit mask
 MSG_CURRENCY_CHANGE = 0x0405  # NotifyCurrencyChangeS2C: repeated ItemCurrency{1=conf_id, 2=number}
@@ -79,7 +80,12 @@ class Baseline:
         for _, _, info in wire.parse(self.pb("0x0901")):
             card = wire.get(wire.parse(info), 1)
             self.cards[wire.get(wire.parse(card), 1)] = card
-        self.max_inst = max([0] + list(self.cards) + [i["inst_id"] for i in self.items.values()])
+        self.recallings = {}  # inst_id -> PlayerRecalling bytes (memories, RecallingInfoS2C field 1)
+        for num, _, raw in wire.parse(self.pb("0x3C01")):
+            if num == 1:
+                self.recallings[wire.get(wire.parse(raw), 1)] = raw
+        self.max_inst = max([0] + list(self.cards) + [i["inst_id"] for i in self.items.values()]
+                            + list(self.recallings))
         self.currency = {}
         for _, _, raw in wire.parse(self.pb("0x0407")):  # NotifyCurrencyInfoS2C
             f = wire.parse(raw)
@@ -161,6 +167,8 @@ class Account:
         # potentials added or changed on top of the baseline (inst_id -> PlayerSpecialty bytes)
         self.specialties = {int(k): bytes.fromhex(v) for k, v in d.get("specialties", {}).items()}
         self.admin_flags = d.get("admin_flags", {})  # Admin Mode switches, e.g. infinite_stamina
+        # memories (PlayerRecalling) added or changed on top of the baseline: inst_id -> bytes
+        self.recallings = {int(k): bytes.fromhex(v) for k, v in d.get("recallings", {}).items()}
         self.team = bytes.fromhex(d["team"]) if d.get("team") else None  # TeamInfoS2C with saved line-ups
         self.flags = d.get("flags")  # GAMER_FLAGS bit mask (auto skill 1, auto serve 2, speed 4); None = baseline
         self._regen_stamina()
@@ -189,6 +197,7 @@ class Account:
             "tokyo_rewards": self.tokyo_rewards,
             "specialties": {str(k): v.hex() for k, v in self.specialties.items()},
             "admin_flags": self.admin_flags,
+            "recallings": {str(k): v.hex() for k, v in self.recallings.items()},
             "team": self.team.hex() if self.team else None,
             "flags": self.flags,
         }, indent=1), encoding="utf-8")
@@ -363,6 +372,20 @@ class Account:
             self.removed_cards.add(inst_id)
         return card
 
+    def all_recallings(self) -> dict[int, bytes]:
+        """inst_id -> PlayerRecalling bytes of every memory the account has."""
+        return {**self.b.recallings, **self.recallings}
+
+    def put_recalling(self, raw: bytes):
+        self.recallings[wire.get(wire.parse(raw), 1)] = raw
+
+    def add_recalling(self, conf_id: int, level: int = 1, max_level: int = 20, stage: int = 1) -> bytes:
+        inst = self._new_inst()
+        raw = wire.build([(1, 0, inst), (2, 0, conf_id), (3, 0, level), (4, 0, max_level), (5, 0, stage),
+                          (9, 0, int(time.time()))])
+        self.recallings[inst] = raw
+        return raw
+
     def get_card(self, inst_id: int) -> bytes | None:
         if inst_id in self.removed_cards:
             return None
@@ -498,6 +521,11 @@ class Account:
                         + wire.build([(3, 0, 2)])))
         if self.specialties:
             out.append((MSG_SPECIALTY_UPDATE, b"".join(wire.build([(1, 2, s)]) for s in self.specialties.values())))
+        if self.recallings:  # RecallingUpdateS2C: 1 = creates, 2 = updates
+            new = [r for k, r in self.recallings.items() if k not in self.b.recallings]
+            changed = [r for k, r in self.recallings.items() if k in self.b.recallings]
+            out.append((MSG_RECALLING_UPDATE, b"".join(wire.build([(1, 2, r)]) for r in new)
+                        + b"".join(wire.build([(2, 2, r)]) for r in changed)))
         if self.flags is not None:  # NotifyFlagsS2C{1=flags}: auto play / auto serve / speed switches
             out.append((MSG_FLAGS, wire.build([(1, 0, self.flags)])))
         if self.contest is not None:

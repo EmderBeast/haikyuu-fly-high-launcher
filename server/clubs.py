@@ -31,6 +31,10 @@ friend without a club; recruit (0x2E0F, MemberViewLogic.OnReleaseBtnEvent, leade
 message in the world chat, associationconstant 21 (3) a day per club (AssociationOrganization.recruit_count). Both carry one ChatArg
 CHAT_MSG_ASSOC_INVITE / _RECRUIT with vals [club id, name, members, level]: the client draws a club link
 (FriendsContactLogic.OnChatScrollViewUpdateCell) that opens the club's details (ReqAssociationDetail).
+An invitation is kept for INVITE_VALID ("invites": {friend: {club: end}}): with it the friend joins a
+reviewed club without approval. Refusals carry the client's error codes (not a friend 1112, in a club
+2108, club full 2107, rejoin wait 2118, invites off / blocked 2105). A club change goes to the player's
+online friends (FRIEND_UPDATE_UP), so their invitation lists stay right.
 Icon shop (0x2E22 AssociationIconBuyC2S{icon_id, day}, AssociationActiveHeadViewLogic): the
 associationicon rows of Type 2 can be rented by the leader / vice leaders from club level `Unlock` on,
 for `Price` club funds (associationconstant 40 = item 129) a day, at most `Limit` days a purchase; a
@@ -173,12 +177,41 @@ def _add_member(c: dict, gid: int, pos=NORMAL):
     _st()["member_of"][str(gid)] = c["id"]
     for other in _st()["clubs"].values():  # requests to other clubs are void now
         other.get("applies", {}).pop(str(gid), None)
+    _st().get("invites", {}).pop(str(gid), None)  # invitations are used up
+    _tell_friends(gid)
 
 
 def _remove_member(c: dict, gid: int):
     c["members"].pop(str(gid), None)
     _st()["member_of"].pop(str(gid), None)
     _st()["left"][str(gid)] = int(time.time())
+    _tell_friends(gid)
+
+
+def _tell_friends(gid: int):
+    """The player's club changed: online friends get the new FriendBase (association_id), so the club
+    invitation view (AssociationInvitationViewUtils.GetFriendList) lists them correctly."""
+    import friends
+    for g, since in friends.me(gid)["friends"].items():
+        upd = P.FriendDataUpdateS2C(up_type=P.FRIEND_UPDATE_UP)
+        upd.friend_list.append(friends._data(gid, since))
+        _push(int(g), friends.MSG_UPDATE, upd.SerializeToString())
+
+
+def _cooldown(gid: int) -> bool:
+    """Left / was kicked from a club less than REJOIN_WAIT ago."""
+    return time.time() - _st()["left"].get(str(gid), 0) < REJOIN_WAIT
+
+
+INVITE_VALID = 3 * 86400  # an invitation lets the friend join a reviewed club directly for this long
+
+
+def _invited(gid: int, cid: int) -> bool:
+    """`gid` holds a running invitation to club `cid` (sent by a member, handle_invite)."""
+    inv = _st().get("invites", {}).get(str(gid), {})
+    for k in [k for k, end in inv.items() if end <= time.time()]:
+        inv.pop(k)
+    return str(cid) in inv
 
 
 def credit(gid: int, conf: int, number: int) -> bool:
@@ -294,28 +327,44 @@ async def handle_create(client, pb: bytes):
 
 
 async def handle_apply(client, pb: bytes):
+    """Join an open club at once (or a reviewed one with a running invitation), else a request.
+    Errors with the client's own codes (OnReceiveApplyResponce: 2116 counts as "request sent", 2107
+    has its own prompt, others the errorcode text)."""
     gid = int(client.gid)
     ids = P.AssociationApplyC2S.FromString(pb).association_ids
-    if club_of(gid) or time.time() - _st()["left"].get(str(gid), 0) < REJOIN_WAIT:
-        await _reply(client, MSG_APPLY, "AssociationApplyS2C", err=1)
+    if club_of(gid):
+        await _reply(client, MSG_APPLY, "AssociationApplyS2C", err=P.ASSOCIATION_ALREADY_HAVE)
         return
-    joined = False
+    if _cooldown(gid):
+        await _reply(client, MSG_APPLY, "AssociationApplyS2C", err=P.ASSOCIATION_EXIT_TIMEING)
+        return
+    err, sent = P.ASSOCIATION_NOT_EXIST, False
     for cid in ids:
         c = _st()["clubs"].get(str(cid))
-        if not c or _full(c) or _player_level(gid) < c.get("cond", 0):
+        if not c:
             continue
-        if c.get("review", P.ASSOCIATION_ALLOW) == P.ASSOCIATION_ALLOW:
+        if _full(c):
+            err = P.ASSOCIATION_NUMBER_ISFULL
+            continue
+        if _player_level(gid) < c.get("cond", 0):
+            err = P.ASSOCIATION_LV_NOT_ENGOUH
+            continue
+        if c.get("review", P.ASSOCIATION_ALLOW) == P.ASSOCIATION_ALLOW or _invited(gid, c["id"]):
             _add_member(c, gid)
-            joined = True
             pvp.save()
             await _reply(client, MSG_APPLY, "AssociationApplyS2C", is_add=True)
             await client.send_packet(MSG_INFO, info(gid, joined=True))
             _refresh(c)
             return
-        c.setdefault("applies", {})[str(gid)] = int(time.time())
+        applies = c.setdefault("applies", {})
+        if str(gid) in applies:
+            err = P.ASSOCIATION_APPLY_REPEAT
+            continue
+        applies[str(gid)] = int(time.time())
+        sent = True
         _refresh(c)
     pvp.save()
-    await _reply(client, MSG_APPLY, "AssociationApplyS2C", is_add=joined)
+    await _reply(client, MSG_APPLY, "AssociationApplyS2C", err=0 if sent else err)
 
 
 async def handle_join(client, pb: bytes):
@@ -576,10 +625,24 @@ async def handle_invite(client, pb: bytes):
     import chat
     import friends
     import personal
-    ok = (c is not None and str(to) in friends.me(gid)["friends"] and club_of(to) is None
-          and not _full(c) and personal.allows(to, P.CLUB_INVITE)  # the friend switched club invites off
-          and chat.post_private(chat.message(gid, args=_link(c, P.CHAT_MSG_ASSOC_INVITE)), to))
-    await _reply(client, MSG_INVITE, "AssociationInviteS2C", err=0 if ok else 1)
+    if c is None:
+        err = P.ASSOCIATION_NOT_FOUND
+    elif str(to) not in friends.me(gid)["friends"]:
+        err = P.FRIEND_NOT_EXIST
+    elif club_of(to) is not None:  # the client's list shows friends in other clubs too
+        err = P.ASSOCIATION_ALREADY_HAVE
+    elif _full(c):
+        err = P.ASSOCIATION_NUMBER_ISFULL
+    elif _cooldown(to):  # could not join anyway
+        err = P.ASSOCIATION_EXIT_TIMEING
+    elif (not personal.allows(to, P.CLUB_INVITE)  # the friend switched club invites off
+          or not chat.post_private(chat.message(gid, args=_link(c, P.CHAT_MSG_ASSOC_INVITE)), to)):  # blocked
+        err = P.ASSOCIATION_SEND_ERROR
+    else:
+        err = 0
+        _st().setdefault("invites", {}).setdefault(str(to), {})[str(c["id"])] = int(time.time()) + INVITE_VALID
+        pvp.save()
+    await _reply(client, MSG_INVITE, "AssociationInviteS2C", err=err)
 
 
 async def handle_recruit(client, pb: bytes):

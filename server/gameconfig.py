@@ -273,10 +273,37 @@ def resonance_tiers(conf_id: int) -> list[int]:
     """TotalLevel thresholds of the card's resonance tiers, ascending (empty: no resonance)."""
     if not AVAILABLE:
         return []
+    return sorted({int(r["TotalLevel"]) for r in resonance_rows(conf_id) if r.get("TotalLevel")})
+
+
+def resonance_rows(conf_id: int) -> list[dict]:
+    """resonanceskilldetail rows of the card's tiers (ids differ per card: 110101 or 5202501, so they
+    are taken from resonanceskillmodel[Resonanceplate].ResonanceEffect)."""
+    if not AVAILABLE:
+        return []
     plate = PLAYERS.get(conf_id, {}).get("Resonanceplate")
-    model = _cached("resonanceskillmodel").get(plate) or {}
     detail = _cached("resonanceskilldetail")
-    return sorted({int(detail[e]["TotalLevel"]) for e in model.get("ResonanceEffect", []) if e in detail})
+    return [detail[e] for e in (_cached("resonanceskillmodel").get(plate) or {}).get("ResonanceEffect", [])
+            if e in detail]
+
+
+def resonance_bonus(conf_id: int, unlocked: int) -> tuple[dict, int]:
+    """({stat type 0-6: percent x100}, extra power) of the unlocked tiers (TotalLevel <= unlocked).
+    AddAttritube pairs: 8 = attribute 200+stat, 16 = value per 10000; ResonancePower 16 = power."""
+    pct, power = {}, 0
+    for row in resonance_rows(conf_id):
+        if int(row.get("TotalLevel") or 99) > unlocked:
+            continue
+        flat = []
+        for x in row.get("AddAttritube") or []:
+            flat += x if isinstance(x, list) else [x]
+        for i in range(0, len(flat) - 3, 4):
+            if flat[i] == 8 and flat[i + 2] == 16 and 200 <= flat[i + 1] <= 206:
+                pct[flat[i + 1] - 200] = pct.get(flat[i + 1] - 200, 0) + flat[i + 3]
+        rp = row.get("ResonancePower") or []
+        if len(rp) >= 4 and rp[2] == 16:
+            power += int(rp[3])
+    return pct, power
 
 
 def skill_level_sum(skill_ids) -> int:

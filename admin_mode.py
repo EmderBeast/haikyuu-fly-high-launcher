@@ -282,8 +282,8 @@ class AdminWindow:
         self.max_cards = tk.BooleanVar()
         self.items_on = tk.BooleanVar()
         self.items = tk.IntVar(value=999)
-        for var, text in ((self.all_cards, "Alle Charaktere freischalten (je eine Karte von jedem, den du noch nicht hast)"),
-                          (self.max_cards, "Alle Karten auf 6 Sterne und Level 80")):
+        for var, text in ((self.all_cards, "Alle Charaktere und Memories freischalten (je eins von jedem, das du noch nicht hast)"),
+                          (self.max_cards, "Alles auf max: Karten 6 Sterne / Level 80, volle Skill-Resonance, Memories Level 80 / Tier V")):
             tk.Checkbutton(f, text=text, variable=var, bg=PANEL, fg=FG, selectcolor=BG,
                            activebackground=PANEL, wraplength=680, justify="left").pack(anchor="w", padx=12, pady=(14, 2))
         r = tk.Frame(f, bg=PANEL)

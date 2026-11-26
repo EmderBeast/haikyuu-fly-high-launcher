@@ -80,11 +80,35 @@ CONTEST_STAGE_BASE = 100000  # Extreme Training sends its floor (601), the stage
 
 def stage_of(args: P.PVPRoomArgs) -> int:
     """Stage row of a match request. Practice / Training Camp / Specialty Trial / club boss send the
-    stage id itself, Extreme Training (FIGHT_CONTEST) its floor number."""
-    raw = args.pvp_args[1] if len(args.pvp_args) > 1 else 0
+    stage id itself, Extreme Training (FIGHT_CONTEST) its floor number.
+
+    The client builds pvp_args in TeamView.FastFormationViewLogic::StartMatch: [line-up, stage], for
+    practice [line-up, stage, double cost] (Garena captures: practice [1, 210116, 0], Extreme Training
+    [2, 601]). Its third form [line-up, fight flag, stage] (stage state < 0, any type but practice) is
+    known from the client code only, no capture."""
+    a = args.pvp_args
+    raw = a[1] if len(a) > 1 else 0
+    if len(a) == 3 and args.pvp_type != P.FIGHT_SOURCE:
+        raw = a[2]
     if args.pvp_type == P.FIGHT_CONTEST and raw and raw < CONTEST_STAGE_BASE:
         return CONTEST_STAGE_BASE + raw
     return raw
+
+
+LINEUP_IN_REQUEST = (P.FIGHT_TOKYO, P.FIGHT_SOURCE, P.FIGHT_CONTEST, P.FIGHT_SPECIFIC_TRIAL)
+
+
+def request_lineup(args: P.PVPRoomArgs) -> int | None:
+    """Line-up the player picked in the formation view for this match (pvp_args[0], see stage_of).
+    None for modes whose first argument means something else."""
+    if args.pvp_type in LINEUP_IN_REQUEST and len(args.pvp_args) > 1:
+        return args.pvp_args[0]
+    return None
+
+
+def double_cost(args: P.PVPRoomArgs) -> bool:
+    """Practice match played at double cost (third request argument, client: PVEStageData.useDoubleCost)."""
+    return args.pvp_type == P.FIGHT_SOURCE and len(args.pvp_args) > 2 and bool(args.pvp_args[2])
 
 
 def stage_row(stage_id: int) -> dict:
@@ -132,27 +156,60 @@ def card_power(attrs: list) -> int:
     return sum(a.val for a in attrs if a.type in (s[0] for s in STATS)) // SCALE
 
 
-def card_entry(card: P.PlayerCard, stage: dict | None = None) -> P.PlayerCardInfo:
+def _extras(card: P.PlayerCard, recalling: bytes | None) -> list:
+    """skill_extras like the Garena server sends them for a card with a memory: the unlocked resonance
+    skills (level 0) and the memory's skills (recallingskill.SkillGroup) at the memory's stage."""
+    rec = P.PlayerRecalling()
+    rec.ParseFromString(recalling)
+    out = []
+    for row in gameconfig.resonance_rows(card.conf_id):
+        if _num(row.get("TotalLevel"), 99) <= card.skill_resonance_unlock_level:
+            add = row.get("AddSkill") or []
+            out += [P.SkillTarget(skill_id=s, target=1) for s in (add if isinstance(add, list) else [add])]
+    sid = (gameconfig._cached("recalling").get(rec.conf_id) or {}).get("SkillId")
+    group = next((r.get("SkillGroup") or [] for r in gameconfig._cached("recallingskill").values()
+                  if r.get("SkillId") == sid and r.get("Level") == max(1, rec.stage)), [])
+    group = group if isinstance(group, list) else [group]
+    out += [P.SkillTarget(skill_id=s, target=1, level=max(1, rec.stage)) for s in group]
+    return out
+
+
+def card_entry(card: P.PlayerCard, stage: dict | None = None, recalling: bytes | None = None) -> P.PlayerCardInfo:
     attrs = card_attrs(card.conf_id, card.level, card.star, card.train, stage)
-    return P.PlayerCardInfo(info=card, attr=attrs, power=card_power(attrs))
+    extra = 0
+    if card.skill_resonance_unlock_level:  # skill resonance: +x % basic stats, extra power
+        pct, extra = gameconfig.resonance_bonus(card.conf_id, card.skill_resonance_unlock_level)
+        for a in attrs:
+            if a.type in pct:
+                a.val = a.val * (10000 + pct[a.type]) // 10000
+    entry = P.PlayerCardInfo(info=card, attr=attrs, power=card_power(attrs) + extra)
+    if recalling:  # equipped memory: its entity and skills (plus resonance skills, as the client expects)
+        entry.recalling_entity.ParseFromString(recalling)
+        entry.skill_extras.extend(_extras(card, recalling))
+    return entry
 
 
 # --- teams ----------------------------------------------------------------
-def _formation(acc, fight_type: int):
-    """The line-up (TeamFormation) the account uses for this fight type."""
+def _formation(acc, fight_type: int, lineup: int | None = None):
+    """The line-up (TeamFormation) the account uses for this fight type: the one named in the match
+    request if the account has it, else the one saved for the fight type."""
     team = P.TeamInfoS2C()
     team.ParseFromString(acc.team_info())
-    chosen = next((c.line_up_chosen for c in team.fight_line_up_chosens if c.fight_type == fight_type), None)
     forms = list(team.formations)
+    asked = next((f for f in forms if f.lineup == lineup), None) if lineup is not None else None
+    if asked is not None:
+        return asked
+    chosen = next((c.line_up_chosen for c in team.fight_line_up_chosens if c.fight_type == fight_type), None)
     return next((f for f in forms if f.lineup == chosen), forms[0] if forms else None)
 
 
-def _lineup(acc, fight_type: int) -> list[int]:
-    form = _formation(acc, fight_type)
+def _lineup(acc, fight_type: int, lineup: int | None = None) -> list[int]:
+    form = _formation(acc, fight_type, lineup)
     return list(form.inst_ids) if form else []
 
 
-def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int) -> P.PVPTeamInfo:
+def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int,
+              lineup: int | None = None) -> P.PVPTeamInfo:
     team = P.PVPTeamInfo()
     team.CopyFrom(template)  # tactics, morale, icons: kept from the captured room
     team.gamer_id = gid
@@ -162,13 +219,13 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
     team.formation.ClearField("coach_card")
     del team.formation.fetter_id_levels[:]
     captured = {p.info.inst_id: p for p in template.formation.players}
-    form = _formation(acc, fight_type)
+    form = _formation(acc, fight_type, lineup)
     if form:  # "Preset Sub Position": who the libero replaces (none = he stays on the bench)
         team.formation.libero_replace_type = form.libero_replace_type
         team.formation.auto_replace = form.auto_replace
         if form.HasField("genre"):  # Lineup Specialty of this line-up (decides the Specialty Counter)
             team.formation.genre.CopyFrom(form.genre)
-    for inst in _lineup(acc, fight_type)[:TEAM_SIZE]:
+    for inst in _lineup(acc, fight_type, lineup)[:TEAM_SIZE]:
         raw = acc.get_card(inst)
         if not raw:
             continue
@@ -181,7 +238,8 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
             entry.CopyFrom(real)
             team.formation.players.append(entry)
         else:
-            team.formation.players.append(card_entry(card))
+            rec = acc.all_recallings().get(card.recalling) if card.recalling else None
+            team.formation.players.append(card_entry(card, recalling=rec))
     team.power = sum(p.power for p in team.formation.players[:7])
     if any(p.info.inst_id in captured for p in team.formation.players):
         # the captured room's team-wide extras (coach, bonds) belong to these cards
@@ -194,7 +252,8 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
 
 
 def _same_card(a: P.PlayerCard, b: P.PlayerCard) -> bool:
-    return (a.conf_id, a.level, a.star, a.train, list(a.skills)) == (b.conf_id, b.level, b.star, b.train, list(b.skills))
+    return ((a.conf_id, a.level, a.star, a.train, list(a.skills), a.skill_resonance_unlock_level, a.recalling)
+            == (b.conf_id, b.level, b.star, b.train, list(b.skills), b.skill_resonance_unlock_level, b.recalling))
 
 
 def away_team(template: P.PVPTeamInfo, stage_id: int, now: int) -> P.PVPTeamInfo:
@@ -282,7 +341,7 @@ def build_room(args_pb: bytes, acc, gid: int, name: str) -> tuple[bytes, Match] 
     create = _captured("0x0302", P.PVPCreateS2C)
     info = create.info
     info.room_args.CopyFrom(args)
-    info.home.CopyFrom(home_team(info.home, acc, gid, name, args.pvp_type))
+    info.home.CopyFrom(home_team(info.home, acc, gid, name, args.pvp_type, request_lineup(args)))
     info.away.CopyFrom(away_team(info.away, stage_id, now))
     info.bo_type = _num(row.get("BoType"), info.bo_type)
     info.bo_score = _num(row.get("BoScore"), info.bo_score)

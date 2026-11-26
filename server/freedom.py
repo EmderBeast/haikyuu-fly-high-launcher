@@ -466,6 +466,30 @@ async def handle_result(client, match):
     return h, a, change
 
 
+def on_disconnect(client):
+    """A player who leaves a running real-time match loses it (points and record as a lost
+    challenge); the other player's match goes on to the end and is counted as usual."""
+    match = getattr(client, "room", None)
+    game = getattr(match, "freedom", None)
+    live = getattr(match, "live", None)
+    if game is None or live is None or live.over or not game.entry.get("rt"):
+        return
+    live.gone = True  # the other player no longer waits for this one (shared tempo)
+    if getattr(live, "room", None) is not None:
+        live.room.moved.set()
+    d = entry(game.gid)
+    if not d.get("match"):
+        return
+    e = game.entry
+    if game.pattern == SCORE:
+        old = d["score"]
+        d["score"] = max(START_SCORE, d["score"] + score_change(old, opponent_score(e), False))
+        _record(d, P.FIGHTFREEDOM_CHALLENGE_LOSE, _card(e["gid"], e), d["score"], d["score"] - old, (0, 1),
+                game.begin)
+    d["match"] = None
+    pvp.save()
+
+
 async def handle_lineup_save(client, pb: bytes):
     acc, gid = client.account, client.gid
     req = P.FightFreedomPlayerLineupSaveC2S.FromString(pb)

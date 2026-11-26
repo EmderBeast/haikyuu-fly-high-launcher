@@ -281,7 +281,7 @@ async def main():
     import friends
     d = await login(9824)
     await call(a, C.MSG_INVITE, P.AssociationInviteC2S(friend_id=9824))
-    assert err(a, C.MSG_INVITE, "AssociationInviteS2C") != 0  # not friends
+    assert err(a, C.MSG_INVITE, "AssociationInviteS2C") == P.FRIEND_NOT_EXIST  # not friends
     friends._befriend(9821, 9824)
     await call(a, C.MSG_INVITE, P.AssociationInviteC2S(friend_id=9824))
     assert err(a, C.MSG_INVITE, "AssociationInviteS2C") == 0
@@ -292,7 +292,54 @@ async def main():
     assert P.ChatUpdateS2C.FromString(a.last(chat.MSG_UPDATE)).chat_list[0].friend_gid == 9824  # echo
     friends._befriend(9821, 9822)
     await call(a, C.MSG_INVITE, P.AssociationInviteC2S(friend_id=9822))
-    assert err(a, C.MSG_INVITE, "AssociationInviteS2C") != 0  # b is in a club already
+    assert err(a, C.MSG_INVITE, "AssociationInviteS2C") == P.ASSOCIATION_ALREADY_HAVE  # b is in a club already
+    await call(a, C.MSG_INVITE, P.AssociationInviteC2S(friend_id=9999))
+    assert err(a, C.MSG_INVITE, "AssociationInviteS2C") == P.FRIEND_NOT_EXIST
+    # the friend switched club invitations off (game setting bit CLUB_INVITE)
+    import personal
+    e = await login(9825)
+    friends._befriend(9821, 9825)
+    await call(e, personal.MSG_SETTING, P.SettingModifyC2S(setting_data=P.SettingData(bits_data=124 & ~(1 << P.CLUB_INVITE))))
+    await call(a, C.MSG_INVITE, P.AssociationInviteC2S(friend_id=9825))
+    assert err(a, C.MSG_INVITE, "AssociationInviteS2C") == P.ASSOCIATION_SEND_ERROR
+    # club full: invitation and request refused with 2107 (the client's "club is full" prompt)
+    full, C._full = C._full, lambda cl: True
+    await call(a, C.MSG_INVITE, P.AssociationInviteC2S(friend_id=9824))
+    assert err(a, C.MSG_INVITE, "AssociationInviteS2C") == P.ASSOCIATION_NUMBER_ISFULL
+    await call(e, C.MSG_APPLY, P.AssociationApplyC2S(association_ids=[club.id]))
+    assert err(e, C.MSG_APPLY, "AssociationApplyS2C") == P.ASSOCIATION_NUMBER_ISFULL
+    C._full = full
+    # reviewed club (since above): without invitation a request (then 2116 = already asked) ...
+    assert C.club_of(9821)["review"] == P.ASSOCIATION_ALL_REVIEW
+    await call(e, C.MSG_APPLY, P.AssociationApplyC2S(association_ids=[club.id]))
+    r = P.AssociationApplyS2C.FromString(e.last(C.MSG_APPLY))
+    assert r.err == 0 and not r.is_add
+    await call(e, C.MSG_APPLY, P.AssociationApplyC2S(association_ids=[club.id]))
+    assert err(e, C.MSG_APPLY, "AssociationApplyS2C") == P.ASSOCIATION_APPLY_REPEAT
+    await call(e, C.MSG_APPLY, P.AssociationApplyC2S(association_ids=[424242]))
+    assert err(e, C.MSG_APPLY, "AssociationApplyS2C") == P.ASSOCIATION_NOT_EXIST
+    # ... with the invitation d joins at once; a (d's friend) gets d's new club in the friend list
+    a.sent.clear()
+    await call(d, C.MSG_APPLY, P.AssociationApplyC2S(association_ids=[club.id]))
+    assert P.AssociationApplyS2C.FromString(d.last(C.MSG_APPLY)).is_add and d.info().association.id == club.id
+    upd = P.FriendDataUpdateS2C.FromString(a.last(friends.MSG_UPDATE))
+    assert upd.up_type == P.FRIEND_UPDATE_UP and upd.friend_list[0].base.association_id == club.id
+    assert "9824" not in C._st().get("invites", {})  # used up
+    await call(a, C.MSG_APPLY, P.AssociationApplyC2S(association_ids=[club.id]))
+    assert err(a, C.MSG_APPLY, "AssociationApplyS2C") == P.ASSOCIATION_ALREADY_HAVE
+    # d leaves: 24 h wait, no new invitation and no rejoin (2118)
+    await call(d, C.MSG_EXIT, P.AssociationExitC2S(target_id=9824))
+    await call(a, C.MSG_INVITE, P.AssociationInviteC2S(friend_id=9824))
+    assert err(a, C.MSG_INVITE, "AssociationInviteS2C") == P.ASSOCIATION_EXIT_TIMEING
+    await call(d, C.MSG_APPLY, P.AssociationApplyC2S(association_ids=[club.id]))
+    assert err(d, C.MSG_APPLY, "AssociationApplyS2C") == P.ASSOCIATION_EXIT_TIMEING
+    # an expired invitation does not skip the approval
+    C._st()["left"].pop("9824")
+    C._st().setdefault("invites", {})["9824"] = {str(club.id): int(time.time()) - 1}
+    await call(d, C.MSG_APPLY, P.AssociationApplyC2S(association_ids=[club.id]))
+    r = P.AssociationApplyS2C.FromString(d.last(C.MSG_APPLY))
+    assert r.err == 0 and not r.is_add and not d.info().HasField("association")
+    print("invite codes OK: 2108 1112 2105 2107 2116 2110 2118, invited join, friend update")
     await call(c, C.MSG_RECRUIT, P.AssociationRecruitC2S(target_id=club.id))
     assert err(c, C.MSG_RECRUIT, "AssociationRecruitS2C") != 0  # c is no officer
     for i in range(C.RECRUITS_PER_DAY + 1):
