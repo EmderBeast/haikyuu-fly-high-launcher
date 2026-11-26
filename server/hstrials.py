@@ -18,8 +18,21 @@ gift, coachlist, coachlevel; the account's CoachInfoS2C.setting):
     [rarity] +1 per kept coach of that rarity (8401504 [4]: 964 -> 966), then the empty 0x5603 reply.
 Assumed: at most highschoolconstantconf 2 (10) buys a day, the price list's last entry for every further buy;
 the buy counter resets at 06:00 (constant 1) of the game day; too little to pay or over the limit -> error 1.
-Not built: the free daily reward (0x5602), the stages themselves, auto_resolve_confids, the setting 0x5506.
-State: pvp.json "hstrials" {gid: {"buys": n, "reset": unix}}.
+Free daily reward (0x5602) and stage rewards (0x5604), from the client's code and the tables (no capture; before,
+both were only confirmed and nothing was given):
+  - HighSchoolTrialsBase.daily_reward_state: false = the free reward can be taken (SchoolStageData::UpdateRedPoint
+    shows the red point then), true = taken. The reward is the same highschooldailyconf row the buy pays
+    (daily_reward_id), the buy being "the daily reward again";
+  - stage rewards: highschoolrewardconf rows with cumulative_reward_id < AwardConditions <= stages passed, where
+    stages passed = sum of high_school_stage_id % 1000 over the schools (SchoolStageData::GetTotalStage). The
+    request has no fields. Capture: six schools at stage 130 = 780, cumulative_reward_id 780 (all taken),
+    daily_reward_state true;
+  - both replies carry only err; the state reaches the client as HighSchoolTrialsInfoS2C.base, as captured for
+    the buy.
+  Assumed: order base, rewards, reply as for the buy; the free reward comes back with the buy counter at the
+  daily reset; one 0x5604 takes every reward reached; nothing to take -> error 1.
+Not built: the stages themselves (progress only from the baseline), auto_resolve_confids.
+State: pvp.json "hstrials" {gid: {"buys": n, "reset": unix, "daily": bool, "cum": id}}.
 """
 import random
 import time
@@ -27,9 +40,10 @@ import time
 import pvp
 import wire
 
-MSG_INFO, MSG_BUY = 0x5601, 0x5603
+MSG_INFO, MSG_DAILY, MSG_BUY, MSG_TOTAL = 0x5601, 0x5602, 0x5603, 0x5604
 CONST = {r["ID"]: r for r in pvp._cfg("highschoolconstantconf")}
 DAILY = {r["ID"]: r for r in pvp._cfg("highschooldailyconf")}
+STAGE_REWARDS = {r["ID"]: r for r in pvp._cfg("highschoolrewardconf")}
 MAX_BUYS = CONST.get(2, {}).get("Value1") or 10
 PRICES = [tuple(int(x) for x in p.split("_")) for p in str(CONST.get(3, {}).get("Value2") or "").split(",") if "_" in p]
 ITEMS = {r["ID"]: r for r in pvp._cfg("item")}
@@ -55,7 +69,7 @@ def _state(gid: int, acc, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     st = pvp.state().setdefault("hstrials", {}).setdefault(str(gid), {"buys": None, "reset": 0})
     if st["reset"] and now >= st["reset"]:
-        st["buys"], st["reset"] = 0, 0
+        st["buys"], st["reset"], st["daily"] = 0, 0, False
     if not st["reset"]:
         nxt = _base(acc).daily_reset_next_unix or 0
         while nxt and nxt <= now:
@@ -66,11 +80,31 @@ def _state(gid: int, acc, now: float | None = None) -> dict:
     return st
 
 
+def total_stages(acc) -> int:
+    """Stages passed over all schools: sum of stage id % 1000 (SchoolStageData::GetTotalStage)."""
+    try:
+        return sum(p.high_school_stage_id % 1000 for p in _P().HighSchoolTrialsInfoS2C.FromString(acc.b.pb("0x5601")).proresses)
+    except Exception:
+        return 0
+
+
+def stage_rewards(row: dict) -> list[tuple[int, int]]:
+    """highschoolrewardconf.Reward: [[8, item, 16, number], 8, item, 16, number, ...]."""
+    flat = []
+    for x in row.get("Reward") or []:
+        flat += x if isinstance(x, list) else [x]
+    return [(flat[i + 1], flat[i + 3]) for i in range(0, len(flat) - 3, 4) if flat[i] == 8 and flat[i + 2] == 16]
+
+
 def base(gid: int, acc, now: float | None = None):
     st = _state(gid, acc, now)
     b = _P().HighSchoolTrialsBase()
     b.CopyFrom(_base(acc))
     b.daily_reward_buy_num, b.daily_reset_next_unix = st["buys"], st["reset"]
+    if st.get("daily") is not None:
+        b.daily_reward_state = st["daily"]
+    if st.get("cum") is not None:
+        b.cumulative_reward_id = st["cum"]
     return b
 
 
@@ -106,34 +140,16 @@ def open_box(item: int, rng=random) -> list[int] | None:
     return [int(i)] * int(a)
 
 
-async def handle_buy(client, pb: bytes):
+async def give(client, rolled: list[tuple[int, int]]):
+    """Credit rewards of the trials: coach boxes open into coaches (dismantled or kept by the player's
+    setting), the rest is merged; sends the changes, the pop-up and the coach achievements."""
     P = _P()
     import coach
     gid, acc = int(client.gid), client.account
-    num = P.HighSchoolTrialsDailyRewardsBuyC2S.FromString(pb).num or 1
-    st = _state(gid, acc)
-    prices = [PRICES[min(st["buys"] + k, len(PRICES) - 1)] for k in range(num)] if PRICES else []
-    cost: dict[int, int] = {}
-    for cid, n in prices:
-        cost[cid] = cost.get(cid, 0) + n
-    if not prices or st["buys"] + num > MAX_BUYS or any(acc.get_currency(c) < n for c, n in cost.items()):
-        await client.send_packet(MSG_BUY, P.HighSchoolTrialsDailyRewardsBuyS2C(err=1).SerializeToString())
-        return
-    for cid, n in cost.items():
-        await client.send_packet(0x0405, wire.build([(1, 2, acc.set_currency(cid, acc.get_currency(cid) - n))]))
-    acc.save()
-    import missions
-    for cid, n in cost.items():
-        await pvp.HOOKS["mission_event"](client, missions.SPEND_CURRENCY, n, (cid,))
-    st["buys"] += num
-    pvp.save()
-    await client.send_packet(MSG_INFO, P.HighSchoolTrialsInfoS2C(base=base(gid, acc)).SerializeToString())
-
-    row_id = _base(acc).daily_reward_id
     setting = coach_setting(gid, acc)
     plain, shown, decomp, new_coaches = [], [], [], []
-    for _ in range(num):
-        for item, n in roll(row_id):
+    if True:
+        for item, n in rolled:
             if open_box(item, random.Random(0)) is None:
                 plain.append((item, n))
                 continue
@@ -172,7 +188,68 @@ async def handle_buy(client, pb: bytes):
     for _, _, rare in new_coaches:
         coach_obtained(client, rare)
     await coach._flush_missions(client)
+
+
+async def handle_buy(client, pb: bytes):
+    P = _P()
+    import coach
+    gid, acc = int(client.gid), client.account
+    num = P.HighSchoolTrialsDailyRewardsBuyC2S.FromString(pb).num or 1
+    st = _state(gid, acc)
+    prices = [PRICES[min(st["buys"] + k, len(PRICES) - 1)] for k in range(num)] if PRICES else []
+    cost: dict[int, int] = {}
+    for cid, n in prices:
+        cost[cid] = cost.get(cid, 0) + n
+    if not prices or st["buys"] + num > MAX_BUYS or any(acc.get_currency(c) < n for c, n in cost.items()):
+        await client.send_packet(MSG_BUY, P.HighSchoolTrialsDailyRewardsBuyS2C(err=1).SerializeToString())
+        return
+    for cid, n in cost.items():
+        await client.send_packet(0x0405, wire.build([(1, 2, acc.set_currency(cid, acc.get_currency(cid) - n))]))
+    acc.save()
+    import missions
+    for cid, n in cost.items():
+        await pvp.HOOKS["mission_event"](client, missions.SPEND_CURRENCY, n, (cid,))
+    st["buys"] += num
+    pvp.save()
+    await client.send_packet(MSG_INFO, P.HighSchoolTrialsInfoS2C(base=base(gid, acc)).SerializeToString())
+
+    rolled = [e for _ in range(num) for e in roll(_base(acc).daily_reward_id)]
+    await give(client, rolled)
     await client.send_packet(MSG_BUY, b"")
+
+
+async def handle_daily(client, pb: bytes):
+    """0x5602: the free daily reward, once per game day."""
+    P = _P()
+    gid, acc = int(client.gid), client.account
+    _state(gid, acc)
+    b = base(gid, acc)
+    if b.daily_reward_state or b.daily_reward_id not in DAILY:
+        await client.send_packet(MSG_DAILY, P.HighSchoolTrialsDailyRewardsS2C(err=1).SerializeToString())
+        return
+    _state(gid, acc)["daily"] = True
+    pvp.save()
+    await client.send_packet(MSG_INFO, P.HighSchoolTrialsInfoS2C(base=base(gid, acc)).SerializeToString())
+    await give(client, roll(b.daily_reward_id))
+    await client.send_packet(MSG_DAILY, b"")
+
+
+async def handle_total(client, pb: bytes):
+    """0x5604: every stage reward reached and not taken yet (the request has no fields)."""
+    P = _P()
+    gid, acc = int(client.gid), client.account
+    _state(gid, acc)
+    b, total = base(gid, acc), total_stages(acc)
+    rows = sorted((r for r in STAGE_REWARDS.values() if b.cumulative_reward_id < (r.get("AwardConditions") or 0) <= total),
+                  key=lambda r: r["AwardConditions"])
+    if not rows:
+        await client.send_packet(MSG_TOTAL, P.HighSchoolTrialsTotalRewardsS2C(err=1).SerializeToString())
+        return
+    _state(gid, acc)["cum"] = rows[-1]["AwardConditions"]
+    pvp.save()
+    await client.send_packet(MSG_INFO, P.HighSchoolTrialsInfoS2C(base=base(gid, acc)).SerializeToString())
+    await give(client, [e for r in rows for e in stage_rewards(r)])
+    await client.send_packet(MSG_TOTAL, b"")
 
 
 def coach_setting(gid: int, acc):
@@ -201,4 +278,4 @@ def coach_obtained(client, rare: int):
         m._set(tid, TASK_FINISH if progress >= target else 0, min(progress, target))
 
 
-HANDLERS = {MSG_BUY: handle_buy}
+HANDLERS = {MSG_DAILY: handle_daily, MSG_BUY: handle_buy, MSG_TOTAL: handle_total}

@@ -1,5 +1,5 @@
 """
-Game config tables (gamedata/cfg/*.json, made by tools_config_dump.py).
+Game config tables (gamedata/cfg/*.json, made by tools_config_dump.py; the folder follows edition.py).
 
 Optional: if the dump is missing, AVAILABLE is False and callers fall back to
 simpler behaviour.
@@ -8,7 +8,9 @@ import json
 import random
 from pathlib import Path
 
-CFG = Path(__file__).parent.parent / "gamedata" / "cfg"
+import edition
+
+CFG = edition.CFG  # gamedata/cfg, or gamedata-jp/cfg when the server runs the JP edition
 AVAILABLE = (CFG / "cardlotteryconfig.json").exists()
 
 # Lowest star seen per rarity in a real account's card pack = star of a fresh card

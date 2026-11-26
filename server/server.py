@@ -1716,6 +1716,9 @@ async def on_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
 
 async def main():
     server = await asyncio.start_server(on_client, "0.0.0.0", PORT)
+    import edition
+    log.info(f"Edition {edition.NAME}, tables {edition.CFG}"
+             + (f" (wanted {edition.WANTED}, but its tables are missing: running global)" if edition.FELL_BACK else ""))
     addrs = ", ".join(str(s.getsockname()) for s in server.sockets)
     log.info(f"Haikyuu Fly High Private Server running on {addrs}")
     if admin.multiplayer():

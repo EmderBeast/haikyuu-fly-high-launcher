@@ -147,7 +147,12 @@ class Account:
         else:
             d = {"next_inst": base.max_inst + 1, "cards": [], "items": {}}
         self.next_inst = d["next_inst"]
-        self.cards = [bytes.fromhex(c) for c in d["cards"]]
+        # cards of characters the running edition's tables do not know (JP-only cards while the server
+        # runs "global", see edition.py) are parked: kept in the file, invisible until the tables know them
+        held = [bytes.fromhex(c) for c in d["cards"]] + [bytes.fromhex(c) for c in d.get("parked", [])]
+        known = lambda c: not gameconfig.AVAILABLE or wire.get(wire.parse(c), 3) in gameconfig.PLAYERS  # noqa: E731
+        self.cards = [c for c in held if known(c)]
+        self.parked = [c for c in held if not known(c)]
         self.items = {int(k): v for k, v in d["items"].items()}
         self.currency = {int(k): v for k, v in d.get("currency", {}).items()}
         self.lotteries = {int(k): bytes.fromhex(v) for k, v in d.get("lotteries", {}).items()}
@@ -183,6 +188,7 @@ class Account:
         self.path.write_text(json.dumps({
             "next_inst": self.next_inst,
             "cards": [c.hex() for c in self.cards],
+            "parked": [c.hex() for c in self.parked],
             "items": {str(k): v for k, v in self.items.items()},
             "currency": {str(k): v for k, v in self.currency.items()},
             "lotteries": {str(k): v.hex() for k, v in self.lotteries.items()},

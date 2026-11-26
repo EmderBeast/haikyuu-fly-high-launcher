@@ -17,15 +17,25 @@ coachlevel, coachconstant, coachlist):
 Assumed: the job is drawn with coachconstant 3 (all 50), the buff from the coach's CoachBuffId list weighted by
 coachbuff Weight (five samples only); a consume_count above one level's cost raises several levels and keeps the
 rest as exp; 91204 counts one per coach; locked coaches cannot be dismantled.
-Not built: lock (0x5504), settings (0x5506); matches still use the captured room's coach card.
-State: pvp.json "coaches" {gid: {"cards": {inst: CoachCard hex}, "deleted": [inst]}}.
+Lock (0x5504) and settings (0x5506), from the client's code (no capture; before, both were only confirmed and
+the lock or setting was gone again after the next login):
+  - CoachLockC2S{inst_id, lock}; on the reply the client only refreshes its views and picks the "locked" /
+    "unlocked" prompt from CoachLockS2C.coach_card.locked (CoachMessageHandler::OnReceivedCoachLock). The
+    card itself changes only through CoachUpdateS2C.coach_cards (OnReceivedCoachUpdate -> CoachData::UpdateInfo)
+  - CoachSettingC2S{setting{skip_lv_up_anim, auto_resolve_rare, auto_resolve_confids, onekey_lv_up}}; the
+    reply carries only err, the client takes the setting from CoachUpdateS2C.setting (or CoachInfoS2C.setting
+    at login)
+  Assumed: order update then reply, as captured for the level-up; an unknown coach is answered with an error.
+Not built: what the settings do on the server (auto-dismantling of new coaches); matches still use the
+captured room's coach card.
+State: pvp.json "coaches" {gid: {"cards": {inst: CoachCard hex}, "deleted": [inst], "setting": hex}}.
 """
 import random
 
 import pvp
 import wire
 
-MSG_INFO, MSG_UPDATE, MSG_UP, MSG_DECOMP = 0x5501, 0x5502, 0x5503, 0x5505
+MSG_INFO, MSG_UPDATE, MSG_UP, MSG_LOCK, MSG_DECOMP, MSG_SETTING = 0x5501, 0x5502, 0x5503, 0x5504, 0x5505, 0x5506
 CONST = {r["ID"]: r for r in pvp._cfg("coachconstant")}
 CURRENCY = CONST.get(1, {}).get("Data1", 336)
 BUFF_LEVELS = [int(x) for x in str(CONST.get(2, {}).get("Data2") or "3,6,9,12,15").split(",") if x.strip()]
@@ -74,6 +84,9 @@ def info(gid: int, acc) -> bytes:
         pass
     del out.coach_cards[:]
     out.coach_cards.extend(sorted(cards(gid, acc).values(), key=lambda c: c.inst_id))
+    mine = _store(gid).get("setting")
+    if mine is not None:
+        out.setting.CopyFrom(P.CoachCardSetting.FromString(bytes.fromhex(mine)))
     return out.SerializeToString()
 
 
@@ -189,4 +202,29 @@ async def handle_decomp(client, pb: bytes):
     await client.send_packet(MSG_DECOMP, P.CoachDecompS2C().SerializeToString())
 
 
-HANDLERS = {MSG_UP: handle_up, MSG_DECOMP: handle_decomp}
+async def handle_lock(client, pb: bytes):
+    P = _P()
+    gid = int(client.gid)
+    req = P.CoachLockC2S.FromString(pb)
+    card = cards(gid, client.account).get(req.inst_id)
+    if card is None:
+        await client.send_packet(MSG_LOCK, P.CoachLockS2C(err=1).SerializeToString())
+        return
+    card.locked = req.lock
+    _save(gid, card)
+    await client.send_packet(MSG_UPDATE, P.CoachUpdateS2C(coach_cards=[card]).SerializeToString())
+    await client.send_packet(MSG_LOCK, P.CoachLockS2C(coach_card=card).SerializeToString())
+
+
+async def handle_setting(client, pb: bytes):
+    P = _P()
+    setting = P.CoachSettingC2S.FromString(pb).setting
+    _store(int(client.gid))["setting"] = setting.SerializeToString().hex()
+    pvp.save()
+    out = P.CoachUpdateS2C()
+    out.setting.CopyFrom(setting)  # set even when every field is at its default
+    await client.send_packet(MSG_UPDATE, out.SerializeToString())
+    await client.send_packet(MSG_SETTING, P.CoachSettingS2C().SerializeToString())
+
+
+HANDLERS = {MSG_UP: handle_up, MSG_LOCK: handle_lock, MSG_DECOMP: handle_decomp, MSG_SETTING: handle_setting}

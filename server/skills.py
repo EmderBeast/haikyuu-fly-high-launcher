@@ -45,6 +45,7 @@ NO_TARGET_NO_BUFF = True
 OWN_MARK_SKIP = False
 SKILL_TAG_ZERO = True  # a tag condition without a number means tag 0 (Power Attack), not "any tag"
 BUFF_TAG_EVENT = True  # GetBuffTag / LoseBuffTag / HaveBuffTag read the buff table's Tag column
+LOSE_DEBUFF_EVENT = True  # ILoseDeBuff: checked for the holder for every stack of a debuff he loses
 TAG_KEYS = {"GetBuffTag", "LoseBuffTag", "HaveBuffTag"}  # their Value names the tag (none = tag 0)
 
 
@@ -290,6 +291,7 @@ class Battle:
         self._fresh: set | None = None  # buffs given while the rally-end skills run
         self._pbuff: set = set()  # buffs whose change is being handled (see _buff_changed)
         self._tags: set = set()  # (event, tag) being handled (see _tag_event)
+        self._losing = False  # ILoseDeBuff skills are being checked (see _debuff_lost)
         self._entered: int | None = None  # ultimate that just went on cooldown (SkillEnterCD)
         self.points = [0, 0]  # rallies won by each team in this match
         self.history: list[tuple] = []  # (team, link, formula, result, player, crit) this rally
@@ -441,6 +443,21 @@ class Battle:
         finally:
             self._tags.discard((event, tag))
 
+    def _debuff_lost(self, entity: tuple, row: dict, stacks: int):
+        """A player lost stacks of a debuff (BuffType2 1; removed or run out): his ILoseDeBuff skills
+        are checked once per stack (skill text 5604 "each time he loses 1 stack of a debuff, he gains
+        1 stack"; 5053612 limits itself by its own cooldown). No capture shows such a skill: the
+        count per stack is read from the text."""
+        if (not LOSE_DEBUFF_EVENT or stacks <= 0 or entity[0] != "p" or entity[1] not in self.cards
+                or _num(row.get("BuffType2")) != 1 or self._losing):
+            return
+        self._losing = True
+        try:
+            for _ in range(stacks):
+                self.fire(Ctx("losedebuff"), owners=[entity[1]])
+        finally:
+            self._losing = False
+
     def _buff_changed(self, entity: tuple, buff_id: int):
         """Skills with a BuffNumberChange trigger for that buff run for its holder (a team buff: for
         everyone on the team)."""
@@ -483,6 +500,7 @@ class Battle:
             b = have.get(buff_id)
         if not b:
             return
+        lost = min(b.stacks, stacks)
         b.stacks -= stacks
         if b.stacks <= 0:
             del have[buff_id]
@@ -493,11 +511,12 @@ class Battle:
             self._team_buff_changed(entity[1], buff_id)
         if b.stacks <= 0:
             self._tag_event(entity, b.row, False)
+        self._debuff_lost(entity, b.row, lost)
 
     def tick(self, unit: int, team: int | None = None, pids=None, spare=None):
         """One unit of time passes: buffs and cooldowns counted in it run down. spare = (entity, buff)
         pairs that were given just now and keep their full time."""
-        gone = []
+        gone, debuffs = [], []
         for entity, have in self.buffs.items():
             if pids is not None and (entity[0] != "p" or entity[1] not in pids):
                 continue
@@ -513,6 +532,7 @@ class Battle:
                     b.lefts = [x - 1 for x in b.lefts if x > 1]
                     if b.lefts:
                         if len(b.lefts) != b.stacks:
+                            debuffs.append((entity, b.row, b.stacks - len(b.lefts)))
                             b.stacks = len(b.lefts)
                             self.changes.append(BuffChange(entity, bid, b.stacks, max(b.lefts)))
                         b.left = max(b.lefts)
@@ -522,10 +542,13 @@ class Battle:
                 if b.left <= 0:
                     del have[bid]
                     self.changes.append(BuffChange(entity, bid, 0, 0))
+                    debuffs.append((entity, b.row, b.stacks))
                     if _tag(b.row) is not None:
                         gone.append((entity, b.row))
         for entity, row in gone:
             self._tag_event(entity, row, False)
+        for entity, row, n in debuffs:
+            self._debuff_lost(entity, row, n)
         for (pid, sid), c in list(self.cd.items()):
             if c[0] != unit:
                 continue
@@ -906,6 +929,8 @@ class Battle:
             return 0xFFFF if ctx.event == "tbuff" and arg == self._tbuff else 0
         if key in ("GetBuffTag", "LoseBuffTag"):  # see _tag_event; arg = the tag (from Value)
             return 0xFFFF if ctx.event == ("gettag" if key == "GetBuffTag" else "losetag") and ctx.tag == arg else 0
+        if key == "ILoseDeBuff":  # see _debuff_lost
+            return ctx.event == "losedebuff"
         if key == "HaveBuffTag":  # the owner (or his team) has a buff of that tag
             if not BUFF_TAG_EVENT:
                 return 0xFFFF
@@ -1178,6 +1203,8 @@ class Battle:
             return "gettag"
         if "LoseBuffTag" in keys:
             return "losetag"
+        if "ILoseDeBuff" in keys:
+            return "losedebuff"
         if keys & {"RoundEnd", "Score"}:
             return "end"
         if "BallOverNet" in keys:

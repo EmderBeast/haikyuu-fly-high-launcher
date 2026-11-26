@@ -34,7 +34,8 @@ except ImportError:  # proto_gen is generated (gitignored): build it once
     import haikyuu_pb2 as P  # noqa: E402
 
 _REPLIES = json.loads((Path(__file__).parent / "data" / "replies.json").read_text(encoding="utf-8"))
-_CFG = Path(__file__).parent.parent / "gamedata" / "cfg"
+import edition  # noqa: E402
+_CFG = edition.CFG
 
 
 def _table(name):

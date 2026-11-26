@@ -261,12 +261,293 @@ async def handle_comfort_reward(client, pb: bytes):
         level=DAILY_REWARD, comfort_daily_reward_unix=due).SerializeToString())
 
 
+# --- garden: sowing -----------------------------------------------------------------------------------
+# 0x231A HomeGardenLandWeedC2S{1=status 2=inst_id (list) 3=weed_id}; status 0 = sow (HomesteadSowViewLogic::
+# OnEndDrag with the chosen seed), 1 = uproot, 3 = harvest all (weed_id 0). Reply HomeGardenLandWeedS2C{1=err
+# 2=status 3=repeated HomeFurniture}. Garena captures:
+#   - decrypted_3 0127/0128: 12 lands sown with 4002005, no cost message; first the HomeUpdateS2C with the
+#     watering machines (start_time = sowing, update_time = ripe) and the lands, then the reply with the lands
+#   - GardenLand{1=weed 2=decrease 3=start 6=water_inst_id 7=water_start 8=update_time 9=gain_times}: the land
+#     can be harvested at gain_times; for 4002005 (RipeningTime [2, 5, 7] h, GainNum [7, 7]) they are +16 800 and
+#     +33 600 s = 1 and 2 times 7 h / 1.5 with a machine of Funtion 5000 (+50 %); update_time = the last one.
+#     The account of the baseline (sown 21.11.) shows the same times.
+#   - which machine waters a land: GardenSizeMath::CalculateCoverRect (client): the machine's CoverAreaSize
+#     (12 x 12) from its anchor, shifted by effect_area (0 centred, 1 +x +z, 2 +x -z, 3 -x +z, 4 -x -z by
+#     cover - machine size). With a machine footprint of 4 x 4 and "the land touches the area" this gives the
+#     machine of all 24 lands of both accounts.
+# Assumptions: the footprint 4 x 4 (not in the tables); a land with two machines takes the first; a land
+# without a machine grows at normal speed; one harvest per GainNum entry, each RipeningTime[-1] later; only
+# gardenfurniture Type 1 machines speed up growth; sowing a land that is not empty is refused.
+MSG_LAND_WEED = 0x231A
+SOW, UPROOT, HARVEST = 0, 1, 3
+LAND_CONF = 4001001
+WEEDS = {r["ID"]: r for r in pvp._cfg("gardenweed")}
+MACHINES = {r["ID"]: r for r in pvp._cfg("gardenfurniture")}
+MACHINE_SIZE = 4
+FAILED = 1
+
+
+def _garden(d: dict) -> dict:
+    return d.setdefault("garden", {"lands": {}, "machines": {}})
+
+
+def furnitures(client) -> dict:
+    """Every garden land and machine of this home: the baseline's, with this player's changes."""
+    info = P.HomeInfoS2C()
+    try:
+        info.ParseFromString(client.account.b.pb("0x2301"))
+    except Exception:
+        pass
+    g = _garden(entry(client))
+    out = {}
+    for sc in info.furnitures_scene:
+        for f in sc.furnitures:
+            if f.conf_id == LAND_CONF or f.conf_id in MACHINES:
+                c = P.HomeFurniture()
+                c.CopyFrom(f)
+                if str(f.inst_id) in g["lands"]:
+                    c.land.Clear()
+                    c.land.ParseFromString(bytes.fromhex(g["lands"][str(f.inst_id)]))
+                if str(f.inst_id) in g["machines"]:
+                    c.machine.Clear()
+                    c.machine.ParseFromString(bytes.fromhex(g["machines"][str(f.inst_id)]))
+                out[f.inst_id] = c
+    return out
+
+
+def cover_rect(m) -> tuple:
+    size = MACHINES.get(m.conf_id, {}).get("CoverAreaSize") or [12, 12]
+    cw, ch = size[0], size[-1]
+    dx, dz = {0: ((cw - MACHINE_SIZE) >> 1, (ch - MACHINE_SIZE) >> 1), 1: (0, 0), 2: (0, ch - MACHINE_SIZE),
+              3: (cw - MACHINE_SIZE, 0), 4: (cw - MACHINE_SIZE, ch - MACHINE_SIZE)}.get(m.machine.effect_area, (0, 0))
+    return m.coord.x - dx, m.coord.z - dz, cw, ch
+
+
+def watering(land, machines):
+    """The first speed machine (gardenfurniture Type 1) whose area the land touches."""
+    for m in machines:
+        if MACHINES.get(m.conf_id, {}).get("Type") != 1:
+            continue
+        x, z, w, h = cover_rect(m)
+        if (land.coord.x < x + w and land.coord.x + MACHINE_SIZE > x
+                and land.coord.z < z + h and land.coord.z + MACHINE_SIZE > z):
+            return m
+    return None
+
+
+def gain_times(weed: dict, start: int, machine) -> list:
+    ripe = (weed.get("RipeningTime") or [0])[-1] * 3600
+    if machine is not None:
+        ripe = ripe * 10000 // (10000 + (MACHINES.get(machine.conf_id, {}).get("Funtion") or 0))
+    rounds = weed.get("GainNum")
+    n = len(rounds) if isinstance(rounds, list) else 1
+    return [start + ripe * (i + 1) for i in range(n)]
+
+
+async def handle_land_weed(client, pb: bytes, now: float | None = None):
+    req = P.HomeGardenLandWeedC2S.FromString(pb)
+    now = int(time.time() if now is None else now)
+    if req.status == HARVEST:
+        await harvest(client, req, now)
+        return
+    if req.status == UPROOT:
+        await uproot(client, req)
+        return
+    if req.status != SOW:
+        await pvp.HOOKS["generic"](client, pb, MSG_LAND_WEED)
+        return
+    homes = furnitures(client)
+    lands = [homes.get(i) for i in req.inst_id]
+    weed = WEEDS.get(req.weed_id)
+    if not weed or not lands or any(f is None or f.conf_id != LAND_CONF or f.land.weed_id for f in lands):
+        log.info(f"  GARDEN sow {req.weed_id} on {list(req.inst_id)}: refused")
+        await client.send_packet(MSG_LAND_WEED, P.HomeGardenLandWeedS2C(err=FAILED, status=SOW).SerializeToString())
+        return
+    g = _garden(entry(client))
+    machines = [f for f in homes.values() if f.conf_id in MACHINES]
+    used = {}
+    for f in lands:
+        m = watering(f, machines)
+        times = gain_times(weed, now, m)
+        decrease = f.land.decrease
+        f.land.Clear()
+        f.land.weed_id, f.land.decrease, f.land.start_time = req.weed_id, decrease, now
+        if m is not None:
+            f.land.water_inst_id, f.land.water_start_time = m.inst_id, now
+            used[m.inst_id] = max(used.get(m.inst_id, 0), times[-1])
+        f.land.update_time = times[-1]
+        f.land.gain_times.extend(times)
+        g["lands"][str(f.inst_id)] = f.land.SerializeToString().hex()
+    upd = P.HomeUpdateS2C()
+    for inst, until in used.items():
+        m = homes[inst]
+        m.machine.start_time, m.machine.update_time = now, until
+        g["machines"][str(inst)] = m.machine.SerializeToString().hex()
+        upd.furnitures.add().CopyFrom(m)
+    for f in lands:
+        upd.furnitures.add().CopyFrom(f)
+    pvp.save()
+    await client.send_packet(MSG_UPDATE, upd.SerializeToString())
+    out = P.HomeGardenLandWeedS2C(status=SOW)
+    for f in lands:
+        out.furniture.add().CopyFrom(f)
+    await client.send_packet(MSG_LAND_WEED, out.SerializeToString())
+    log.info(f"  GARDEN sow {req.weed_id} on {len(lands)} land(s), ripe at {lands[0].land.update_time}")
+
+
+# --- garden: harvesting -------------------------------------------------------------------------------
+# 0x231A with status 3 (HomesteadMainViewLogic::OnAllHarvestBtnEvent: GardenUtility.GetHarvestableInstIds,
+# weed_id 0). Garena capture decrypted_1 0076-0079 (12 lands of 4002004, GainNum 8, GainItemID 920000104):
+#   - FurniturePackItemChangeS2C{2=gain_items: the crop with its new total (1248 + 96 = 1344)}
+#   - NotifyRewardsS2C with the crop x96 (12 x GainNum), then HomeUpdateS2C with the lands, now empty
+#     (land only keeps `decrease`), then the reply {status 3, the lands}
+# Crops live in the furniture pack (FurniturePackItemInfoS2C.gain_items at login, the baseline's).
+# Assumptions: a land gives GainNum[i] for every harvest time it has reached and not yet given
+# (gain_round counts them); it is emptied after the last one, otherwise it keeps growing; lands with
+# nothing ripe are left out; nothing ripe at all -> FAILED.
+MSG_PACK_CHANGE = 0x2202
+
+
+def _crops(client) -> dict:
+    """conf -> Item of the crops: the baseline's gain_items with this player's totals."""
+    pack = P.FurniturePackItemInfoS2C()
+    try:
+        pack.ParseFromString(client.account.b.pb("0x2201"))
+    except Exception:
+        pass
+    out = {i.conf_id: i for i in pack.gain_items}
+    for conf, e in _garden(entry(client)).setdefault("crops", {}).items():
+        item = out.setdefault(int(conf), P.Item(inst_id=e["inst"], conf_id=int(conf), create_time=e["time"]))
+        item.number = e["number"]
+    return out
+
+
+def add_crop(client, conf: int, number: int, now: int) -> "P.Item":
+    have = _crops(client).get(conf)
+    store = _garden(entry(client)).setdefault("crops", {})
+    if have is None:
+        e = store[str(conf)] = {"inst": client.account._new_inst(), "number": 0, "time": now}
+        client.account.save()
+    else:
+        e = store.setdefault(str(conf), {"inst": have.inst_id, "number": have.number, "time": have.create_time})
+    e["number"] += number
+    return P.Item(inst_id=e["inst"], conf_id=conf, number=e["number"], create_time=e["time"])
+
+
+def _gain_num(weed: dict, i: int) -> int:
+    g = weed.get("GainNum")
+    if isinstance(g, list):
+        return g[i] if i < len(g) else 0
+    return g or 0
+
+
+async def harvest(client, req, now: int):
+    homes = furnitures(client)
+    g = _garden(entry(client))
+    lands, won = [], {}
+    for inst in req.inst_id:
+        f = homes.get(inst)
+        if f is None or f.conf_id != LAND_CONF or not f.land.weed_id:
+            continue
+        weed = WEEDS.get(f.land.weed_id, {})
+        due = [i for i, t in enumerate(f.land.gain_times) if t <= now and i >= f.land.gain_round]
+        if not due:
+            continue
+        crop = weed.get("GainItemID")
+        won[crop] = won.get(crop, 0) + sum(_gain_num(weed, i) for i in due)
+        if due[-1] + 1 >= len(f.land.gain_times):
+            decrease = f.land.decrease
+            f.land.Clear()
+            f.land.decrease = decrease
+        else:
+            f.land.gain_round = due[-1] + 1
+        g["lands"][str(inst)] = f.land.SerializeToString().hex()
+        lands.append(f)
+    if not lands:
+        log.info(f"  GARDEN harvest {list(req.inst_id)}: nothing ripe")
+        await client.send_packet(MSG_LAND_WEED, P.HomeGardenLandWeedS2C(err=FAILED, status=HARVEST).SerializeToString())
+        return
+    change = P.FurniturePackItemChangeS2C()
+    popup = P.NotifyRewardsS2C()
+    for crop, n in won.items():
+        change.gain_items.add().CopyFrom(add_crop(client, crop, n, now))
+        popup.items.add(conf_id=crop, number=n)
+    pvp.save()
+    await client.send_packet(MSG_PACK_CHANGE, change.SerializeToString())
+    await client.send_packet(0x0404, popup.SerializeToString())
+    upd = P.HomeUpdateS2C()
+    out = P.HomeGardenLandWeedS2C(status=HARVEST)
+    for f in lands:
+        upd.furnitures.add().CopyFrom(f)
+        out.furniture.add().CopyFrom(f)
+    await client.send_packet(MSG_UPDATE, upd.SerializeToString())
+    await client.send_packet(MSG_LAND_WEED, out.SerializeToString())
+    log.info(f"  GARDEN harvest {len(lands)} land(s): {won}")
+
+
+async def uproot(client, req):
+    """Status 1 (HomesteadGardDetailViewLogic::OnUprootEvent: a confirmation, no cost shown): the land is
+    emptied, nothing is harvested. No capture: the messages follow sowing (HomeUpdate, then the reply);
+    a land without a plant -> FAILED."""
+    homes = furnitures(client)
+    g = _garden(entry(client))
+    lands = [homes.get(i) for i in req.inst_id]
+    if not lands or any(f is None or f.conf_id != LAND_CONF or not f.land.weed_id for f in lands):
+        await client.send_packet(MSG_LAND_WEED, P.HomeGardenLandWeedS2C(err=FAILED, status=UPROOT).SerializeToString())
+        return
+    upd, out = P.HomeUpdateS2C(), P.HomeGardenLandWeedS2C(status=UPROOT)
+    for f in lands:
+        decrease = f.land.decrease
+        f.land.Clear()
+        f.land.decrease = decrease
+        g["lands"][str(f.inst_id)] = f.land.SerializeToString().hex()
+        upd.furnitures.add().CopyFrom(f)
+        out.furniture.add().CopyFrom(f)
+    pvp.save()
+    await client.send_packet(MSG_UPDATE, upd.SerializeToString())
+    await client.send_packet(MSG_LAND_WEED, out.SerializeToString())
+    log.info(f"  GARDEN uproot {len(lands)} land(s)")
+
+
+def crops_update(client):
+    """FurniturePackItemChangeS2C with this player's crop totals, for the login."""
+    store = _garden(entry(client)).get("crops") or {}
+    if not store:
+        return None
+    crops = _crops(client)
+    out = P.FurniturePackItemChangeS2C()
+    for conf in store:
+        out.gain_items.add().CopyFrom(crops[int(conf)])
+    return out
+
+
+def garden_update(client):
+    """The lands and machines this player changed, for the login (the baseline HomeInfoS2C has the capture's)."""
+    g = _garden(entry(client))
+    if not g["lands"] and not g["machines"]:
+        return None
+    homes = furnitures(client)
+    upd = P.HomeUpdateS2C()
+    for inst in list(g["machines"]) + list(g["lands"]):
+        if int(inst) in homes:
+            upd.furnitures.add().CopyFrom(homes[int(inst)])
+    return upd
+
+
 def on_login(client) -> list[tuple[int, bytes]]:
     """Brings the schedules up to date and tells the client (the baseline HomeInfoS2C is the capture's)."""
     d = entry(client)
     advance(d)
     pvp.save()
-    return [(MSG_UPDATE, update(d).SerializeToString())] if d["schedules"] else []
+    out = [(MSG_UPDATE, update(d).SerializeToString())] if d["schedules"] else []
+    garden = garden_update(client)
+    if garden is not None:
+        out.append((MSG_UPDATE, garden.SerializeToString()))
+    crops = crops_update(client)
+    if crops is not None:
+        out.append((MSG_PACK_CHANGE, crops.SerializeToString()))
+    return out
 
 
-HANDLERS = {MSG_REFRESH: handle_refresh, MSG_COMFORT: handle_comfort_reward, MSG_COLLECT: handle_collect}
+HANDLERS = {MSG_REFRESH: handle_refresh, MSG_COMFORT: handle_comfort_reward, MSG_COLLECT: handle_collect,
+            MSG_LAND_WEED: handle_land_weed}
