@@ -1593,7 +1593,7 @@ def refresh_snapshots(client: GameClient):
 
 async def handle_team_save(client: GameClient, pb_data: bytes):
     """0x0B02 TeamFormationSaveC2S{1=formation 2=module}: keeps the line-up (players, libero preset,
-    auto switch); matches are built from it."""
+    auto switch); matches are built from it. Answer: 0x0B03 with the line-up, then 0x0B02."""
     fields = wire.parse(pb_data)
     formation = wire.get(fields, 1, b"")
     if formation:
@@ -1602,6 +1602,11 @@ async def handle_team_save(client: GameClient, pb_data: bytes):
         log.info(f"  TEAM line-up {f.lineup} saved: {len(f.inst_ids)} players, libero preset "
                  f"{f.libero_replace_type}, auto switch {f.auto_replace}")
         refresh_snapshots(client)
+        # Garena sends the saved line-up back as 0x0B03 TeamUpdateS2C{1=formations} right before the
+        # reply (captures: every 0x0B02 of the normal line-ups has one). The client takes its own
+        # copy of the team from it: without it the change is gone when the team screen is left or a
+        # match was played. Garena's copy also carries the line-up's genre; ours is the one sent.
+        await client.send_packet(0x0B03, wire.build([(1, 2, formation)]))
     await client.send_packet(0x0B02, wire.build([(2, 0, wire.get(fields, 2, 0))]))
 
 

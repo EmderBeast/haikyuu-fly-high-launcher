@@ -88,6 +88,17 @@ async def main():
     assert info.base.daily_reward_buy_num == 2 and len(info.proresses) > 0
     st = pvp.state()["hstrials"]["9961"]
     assert hstrials.base(9961, acc, now=st["reset"] + 1).daily_reward_buy_num == 0
+
+    # the player's own coach setting (0x5506) decides what is dismantled: none -> all 8 coaches kept
+    await server.MESSAGE_HANDLERS[coach.MSG_SETTING](c, P.CoachSettingC2S(setting=P.CoachCardSetting(
+        auto_resolve_rare=0)).SerializeToString())
+    acc.set_currency(108, 10045)
+    pvp.state()["hstrials"]["9961"]["buys"] = 0
+    before = len(coach.cards(9961, acc))
+    c.sent.clear()
+    await server.MESSAGE_HANDLERS[hstrials.MSG_BUY](c, P.HighSchoolTrialsDailyRewardsBuyC2S(num=1).SerializeToString())
+    note = P.NotifyRewardsS2C.FromString(next(p for m, p in c.sent if m == 0x0404))
+    assert not note.items_decomp and len(coach.cards(9961, acc)) == before + 8
     print("OK", TMP)
 
 

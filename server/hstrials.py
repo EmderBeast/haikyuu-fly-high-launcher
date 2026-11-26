@@ -253,8 +253,13 @@ async def handle_total(client, pb: bytes):
 
 
 def coach_setting(gid: int, acc):
+    """The player's CoachCardSetting: their own from 0x5506 (coach.py), else the baseline's."""
     P = _P()
+    import coach
     try:
+        mine = coach._store(gid).get("setting")
+        if mine is not None:
+            return P.CoachCardSetting.FromString(bytes.fromhex(mine))
         return P.CoachInfoS2C.FromString(acc.b.pb("0x5501")).setting
     except Exception:
         return P.CoachCardSetting()

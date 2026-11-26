@@ -324,6 +324,7 @@ class Launcher:
         self.admin_btn = tk.Button(mode_frame, text="Admin Mode", bg="#7d5a00",
                                    activebackground="#a07400", command=self.open_admin, **btn)
         self.admin_window = None
+        self.admin_shown = False
 
         # emulator choice
         emu_row = tk.Frame(self.root, bg=BG)
@@ -545,12 +546,16 @@ class Launcher:
         """Show the Admin Mode button once an account unlocked it in game."""
         if self.closing:
             return
+        # own flag, not winfo_ismapped(): a minimised window counts as unmapped, which re-packed the button
+        # and logged "freigeschaltet" every 2 s
         if self.admin_available and admin_unlocked(self.base):  # local server only
-            if not self.admin_btn.winfo_ismapped():
+            if not self.admin_shown:
                 self.admin_btn.pack(pady=(0, 10))
+                self.admin_shown = True
                 self.log("Admin Mode freigeschaltet.")
-        elif self.admin_btn.winfo_ismapped():
+        elif self.admin_shown:
             self.admin_btn.pack_forget()
+            self.admin_shown = False
         self.root.after(2000, self.poll_admin)
 
     def open_admin(self):

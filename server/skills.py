@@ -50,6 +50,9 @@ SKILL_TAG_ZERO = True  # a tag condition without a number means tag 0 (Power Att
 BUFF_TAG_EVENT = True  # GetBuffTag / LoseBuffTag / HaveBuffTag read the buff table's Tag column
 BUFF_COUNT_EVENT = True  # IGetBuff / BuffNumberDecrease: checked for the holder when that buff comes / shrinks
 TYPE_REMOVAL = True  # RemoveRandomTypeBuff / RemoveAllTypeBuff take debuffs (buff table BuffType2) away
+COME_ON_NOW = True  # ComeOnPlayer = stands on the court right now (False: or was on it earlier in the set)
+POSITION_ARGS = True  # ToPosition 1-4 and PlayerPosition 7 / 8 / none read by their number (rows, leaving, bench)
+BENCH_CD_FREEZE = False  # experiment: cooldowns of players who are not on the court stand still
 STAMINA_FORMS = True  # stamina buffs with a duration or with ArgsType 3 / 9 / 10 change stamina too (once)
 STAMINA_COUNTERS = True  # AddBuffByTeamEnergyCost / AddBuffByPropertyCostByLevel count stamina spent / regained
 LOSE_DEBUFF_EVENT = True  # ILoseDeBuff: checked for the holder for every stack of a debuff he loses
@@ -293,6 +296,7 @@ class Battle:
         self.behind_libero: set[int] = set()  # replaced by their team's libero right now
         self.morale_active = [0, 0]  # touches left of a released morale skill
         self.front: dict[int, set] = {}  # team -> front-row player ids this rally
+        self.was_front: dict[int, set] = {}  # ... in the rally before
         self.last_winner: int | None = None
         # rotation slot (0..5) of the players on court: starters by line-up order, whoever comes in
         # takes the slot of the one who left. Diagonal partners are the slots three apart.
@@ -627,6 +631,8 @@ class Battle:
                 continue
             if self.cd.get((pid, sid)) is not c:  # ended meanwhile by a skill that ran in this loop
                 continue
+            if BENCH_CD_FREEZE and self.on_court and pid not in self.on_court:
+                continue
             c[1] -= 1
             if c[1] <= 0:
                 del self.cd[(pid, sid)]
@@ -842,16 +848,46 @@ class Battle:
         if key == "BallOverNet":
             return ctx.event == "over"
         if key == "ComeOnPlayer":
-            # "player who came on": on the court now, or was on it earlier in the set and was subbed
-            # out (not while sitting behind the libero). Matches the CC simulator rules found from
-            # captures/videos (Aone AS R2/R4 and Kuroo School Flag R4 keep working after a sub-out).
+            # "while he is on the court": stands on it right now. Tests in the game and captures: after
+            # a sub-out 5102's heal 51023151 stopped (02.11.), 5802's [Scoring Ace] parts stopped
+            # (capture lev2211), 5104 got no new stacks (capture 19.11.), and the NIF parts of 5203 /
+            # 5401 ("while he is not on the court") ran again. What looked like "keeps working after
+            # a sub-out" (5103 R2, 6001 R4) are buffs that last a set. One report says otherwise
+            # (5103 R4, 23.11., not tested): the old reading stays behind COME_ON_NOW = False.
+            if COME_ON_NOW:
+                return owner in self.on_court
             return owner in self.on_court or (owner in self.ever_on_court and owner not in self.behind_libero)
         if key == "ReplaceByL":
             return owner in self.behind_libero
-        if key == "PlayerPosition":  # 7 = on court, 8 = on the bench (fits the captured RoundStart casts)
-            return owner in self.on_court if arg == 7 else (owner not in self.on_court if arg == 8 else False)
-        if key == "ToPosition":  # fires when the player comes onto the court (match start or sub-in)
-            return ctx.event == "start" and owner in self.on_court and owner not in self.was_on_court
+        if key == "PlayerPosition":
+            if not POSITION_ARGS:  # old reading: 7 = on court, 8 = on the bench
+                return owner in self.on_court if arg == 7 else (owner not in self.on_court if arg == 8 else False)
+            # skill texts: 7 = in the front row (1109's dump), 8 = in the back row (5302 "players in the
+            # same row", 1335), no number = on the bench (5901 "while he is on the bench"); 3 (two
+            # system rows) is taken as off the court like ToPosition 3
+            if arg in (7, 8):
+                front = self.front.get(team)
+                if not front:  # rows unknown: on the court counts as front row
+                    return owner in self.on_court and arg == 7
+                return owner in self.on_court and (owner in front) == (arg == 7)
+            return owner not in self.on_court
+        if key == "ToPosition":
+            # checked at the rally start. Skill texts: 4 = comes onto the court (1104 "when he enters
+            # the court"), 3 = leaves it (1109, 5802: his buff is taken away), 1 / 2 = comes into the
+            # front / back row (1707 "while he is in the front row ... in the back row")
+            if ctx.event != "start":
+                return False
+            on, was = owner in self.on_court, owner in self.was_on_court
+            if not POSITION_ARGS or arg not in (1, 2, 3):
+                return on and not was
+            if arg == 3:
+                return was and not on and owner not in self.behind_libero
+            front, before = self.front.get(team), self.was_front.get(team)
+            if not on or not front:
+                return False
+            now_front = owner in front
+            was_there = was and before is not None and (owner in before) == now_front
+            return now_front == (arg == 1) and not was_there
         if key == "GetSkillCD":
             c = self.cd.get((owner, arg))
             return c[1] if c else 0
@@ -1511,6 +1547,7 @@ class Battle:
                     stance=None, subs=()):
         """stance: team -> the six players in rotation order (the engine knows it); subs: (on, off)
         pairs of this rally's substitutions (replays of captures). Both only keep the slots right."""
+        self.was_front = self.front
         self.front = {t: set(v) for t, v in (front or {}).items()}
         self.was_on_court = self.on_court
         self.on_court = set(on_court)
@@ -1677,10 +1714,14 @@ class Battle:
                 {k: list(v) for k, v in self.cd.items()}, dict(self.energy), list(self.morale),
                 set(self.on_court), set(self.was_on_court), list(self.morale_active),
                 set(self.ever_on_court), set(self.behind_libero), self.last_winner, dict(self.slot),
-                list(self.points))
+                list(self.points),
+                ({t: set(v) for t, v in self.front.items()}, {t: set(v) for t, v in self.was_front.items()},
+                 dict(self.spent), dict(self.healed), dict(self._paid)))
 
     def restore(self, snap):
-        buffs, cd, energy, morale, on, was, active, ever, behind, self.last_winner, slot, points = snap
+        buffs, cd, energy, morale, on, was, active, ever, behind, self.last_winner, slot, points, more = snap
+        self.front, self.was_front = ({t: set(v) for t, v in x.items()} for x in more[:2])
+        self.spent, self.healed, self._paid = dict(more[2]), dict(more[3]), dict(more[4])
         self.slot, self.points = dict(slot), list(points)
         self.ever_on_court, self.behind_libero = set(ever), set(behind)
         self.buffs = {e: {k: Buff(b.id, b.row, b.stacks, b.left, b.caster, b.level, list(b.lefts) if b.lefts else None, b.snap, b.wide) for k, b in have.items()}
