@@ -200,6 +200,7 @@ class Step:
     morale_ready: bool = False  # the user team's morale skill became available with this touch
     morale_cast: bool = False  # the user released the morale skill right before this touch
     morale_team: int | None = None  # team whose morale skill was released right before this touch
+    morale_cd: tuple | None = None  # (team, touches left) when this touch used up one of a released morale skill's
 
 
 @dataclass
@@ -220,6 +221,11 @@ DEFAULT_SKILL = {SERVE: 10020, DIG_SERVE: 10100, SAVE: 10800, SET: 10200, SPIKE:
 
 GATE = {SPIKE: "spike", BLOCK: "block", DIG_SPIKE: "catch"}
 HAND_SERVE = {1: 0.85, 2: 1.0, 3: 1.2}  # power factor by hand serve result (bad / normal / good)
+# Hand serve side (EHandServeArea 76 left / 77 mid / 78 right) = where the serve comes down on the other
+# half: in the 10 captured hand serves (garena2, garena3) the receive was at x -2.95..-3.21 for left,
+# -0.69 / 1.0 for mid and 2.15..3.01 for right, whoever stood there took it.
+# (centre, half width) of the receive point's x per side.
+HAND_AREA_X = {76: (-3.1, 0.2), 77: (0.0, 1.0), 78: (2.6, 0.45)}
 AI_CAST_CHANCE = 0.5
 
 
@@ -293,7 +299,10 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
                 st.original, st.result = result, new
             if ctx.skill_id != DEFAULT_SKILL[formula]:
                 st.skill_id = ctx.skill_id
+            cd_before = battle.morale_active[team]
             battle.after_touch(ctx, st.result, pw.crit)
+            if battle.morale_active[team] < cd_before:
+                st.morale_cd = (team, battle.morale_active[team])
             st.casts, st.buffs = map(list, battle.flush())
             st.morale_cast = morale_cast
             st.morale_team = user if morale_cast else (team if ai_morale else None)
@@ -368,6 +377,20 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
             return rng.choice(court.front(team))
         return rng.choice(ids)
 
+    def serve_receiver(team):
+        """Who takes the serve: with a hand serve side the receiver standing closest to that side
+        (back row before front row), else as pick()."""
+        aim = HAND_AREA_X.get(inputs.get("area")) if serve_team == user else None
+        pos = getattr(court, "pos", None) or {}
+        if aim is None:
+            return pick(team, DIG_SERVE)
+        x = aim[0]
+        setter = court.setter(team)
+        pool = [p for p in court.stance[team] if p != setter and p in pos]
+        if not pool:
+            return pick(team, DIG_SERVE)
+        return min(pool, key=lambda p: (abs(pos[p][0] - x), -abs(pos[p][1])))
+
     server = court.stance[serve_team][0]
     # the serve is weighed against the receiving team's best receive
     recv = max((power(stats, p, DIG_SERVE, rng, battle=battle).ball for p in court.stance[1 - serve_team]),
@@ -401,7 +424,7 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
             pid = want[0] if want and want[0] not in air else pick(team, DIG_SPIKE, exclude=air)
             st = add(DIG_SPIKE, pid, 2, opp, last, forced)
         elif formula == DIG_SERVE:
-            st = add(DIG_SERVE, pick(team, DIG_SERVE), 2, attack.power, NONE)
+            st = add(DIG_SERVE, serve_receiver(team), 2, attack.power, NONE)
         elif formula == SET:
             st = add(SET, pick(team, SET, exclude=(prev.player,)), 3, None, prev.result)
             window(st)

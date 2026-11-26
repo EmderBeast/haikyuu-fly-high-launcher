@@ -13,7 +13,8 @@ Client flow (hotfix Arena.* / IL dump):
   0x1404 Record           fight log; 0x1406 PlayerLineup: an opponent's team (rank list detail)
   0x1403 Gift             season chests by highest score (arenaladder Reward)
   0x1301/0x1302           rank list / own rank: RANK_ARENA, the player rankings of PLAYER_RANKS (power,
-                          Triple Clash, Freedom Championship, Extreme Training floor) and the club rankings;
+                          Triple Clash, Freedom Championship, Extreme Training floor, Specialty Trial
+                          Hell score) and the club rankings;
                           any other type gets an empty list (the captured reply showed strangers)
   0x0302 PVPCreate        pvp_args = [line-up index, challenge list index] -> live match
   0x0306 PVPQuickBattle   when the own team is >= 15 % stronger (row 23): result right away
@@ -646,6 +647,7 @@ PLAYER_RANKS = {
     P.RANK_PEAK: _peak_score,
     P.RANK_FIGHTFREEDOM: _freedom_score,
     P.RANK_CONTEST: lambda g: state()["snapshots"][str(g)].get("contest", 0),
+    P.RANK_FIGHT_SPECIFIC_TRIAL: lambda g: __import__("trial").score(g),
 }
 
 
@@ -713,6 +715,10 @@ async def handle_quick(client, pb: bytes):
     if req.args.pvp_type == P.FIGHT_PEAK:  # Triple Clash: one game of a best-of-three series
         import peak
         await peak.handle_quick(client, pb)
+        return
+    if req.args.pvp_type == P.FIGHT_SPECIFIC_TRIAL:  # Specialty Trial: a stage cleared in an earlier week
+        import trial
+        await trial.handle_quick(client, req)
         return
     if req.args.pvp_type == P.FIGHT_ASSOC_BOSS:  # club boss quick finish: the week's best again
         import clubs

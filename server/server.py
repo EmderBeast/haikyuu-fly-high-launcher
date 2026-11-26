@@ -272,6 +272,8 @@ class GameClient:
                         pb_data = body
 
                     log.info(f"  <- {self.addr} 0x{msg_id:04X} ({len(body)} bytes)")
+                    if getattr(self, "replaced", False):  # the same account logged in again elsewhere
+                        break
                     await self.handle_message(msg_id, pb_data)
 
         except asyncio.IncompleteReadError:
@@ -304,6 +306,24 @@ class GameClient:
 
 # --- Message Handlers ---
 
+async def close_old_connection(gid: int, client):
+    """One connection per account: a second login (game restarted, another device) closes the first
+    connection before the account is loaded again, so the old one can no longer save an older state
+    over the new one or receive pushes meant for the new one."""
+    old = mail.ONLINE.get(int(gid))
+    if old is None or old is client:
+        return
+    log.info(f"  LOGIN gid={gid}: closing the older connection {getattr(old, 'addr', '?')}")
+    old.replaced = True
+    w = getattr(old, "writer", None)
+    if w is not None:
+        try:
+            w.close()
+            await asyncio.wait_for(w.wait_closed(), 2.0)
+        except Exception:
+            pass
+
+
 async def handle_login(client: GameClient, pb_data: bytes):
     """Handle 0x0101 LoginBySessionC2S → respond with LoginBySessionS2C."""
     fields = decode_protobuf(pb_data)
@@ -322,6 +342,7 @@ async def handle_login(client: GameClient, pb_data: bytes):
                     f"/rebind or 'python bindings.py approve {gid}')")
         await client.send_packet(0x0101, encode_protobuf({1: ("varint", 1038)}))  # LOGIN_AUTH_FAILED
         return
+    await close_old_connection(gid, client)
     client.gid = gid
     client.logged_in = True
 
@@ -356,6 +377,9 @@ async def handle_login(client: GameClient, pb_data: bytes):
         if m["msg_id"].upper() == "0X0B01" and client.account.team:  # line-ups saved since the baseline
             await client.send_packet(0x0B01, client.account.team)
             continue
+        if m["msg_id"].upper() == "0X2901":  # Specialty Trial: this player's own state, not the capture
+            await client.send_packet(0x2901, trial.info(int(gid), client.account))
+            continue
         await client.send_raw(int(m["msg_id"], 16), m["flags"], bytes.fromhex(m["body_hex"]))
     kind = "captured" if client.account.b is CAPTURED else "starter"
     log.info(f"  SYNC sent {len(client.account.b.sync)} {kind} baseline messages, "
@@ -373,7 +397,8 @@ async def handle_login(client: GameClient, pb_data: bytes):
     try:  # shared-server PvP: snapshot this player's team, arena info from this server's ladder
         for mid, pb in (pvp.on_login(client) + peak.on_login(client) + teamcomp.on_login(client)
                         + freedom.on_login(client) + mail.on_login(client) + personal.on_login(client)
-                        + chat.on_login(client) + friends.on_login(client) + clubs.on_login(client)):
+                        + chat.on_login(client) + friends.on_login(client) + clubs.on_login(client)
+                        + homestead.on_login(client) + memorybook.on_login(client)):
             await client.send_packet(mid, pb)
     except Exception as e:  # never block the login
         log.error(f"  PVP login update failed: {e!r}")
@@ -843,6 +868,22 @@ async def handle_activation_chest(client: GameClient, pb_data: bytes):
     await client.send_packet(0x0E04, b"")
 
 
+async def handle_achievement_reward(client: GameClient, pb_data: bytes):
+    """0x0E08 TaskReceiveAchievementRewardsC2S{1=achievement_id}: a point reward of the achievement
+    gallery -> S2C{1=error}; the new state follows as TaskChangeS2C.achievement_rewards_state."""
+    reward_id = wire.get(wire.parse(pb_data), 1, 0)
+    m = client.missions
+    rewards = m.claim_achievement(reward_id)
+    log.info(f"  ACHIEVEMENT reward {reward_id} rewards={rewards}")
+    if rewards is None:
+        await client.send_packet(0x0E08, wire.build([(1, 0, 1)]))
+        return
+    m.save()
+    await grant_rewards(client, rewards)
+    await client.send_packet(MSG_TASK_CHANGE, m.change_message())
+    await client.send_packet(0x0E08, b"")
+
+
 async def handle_task_receive(client: GameClient, pb_data: bytes):
     """0x0E03 TaskReceiveRewardsC2S{1=task_id} -> S2C{1=error 2=task_id}."""
     tid = wire.get(wire.parse(pb_data), 1, 0)
@@ -976,6 +1017,8 @@ async def handle_preset_result(client: GameClient, match):
         updates = acc.clear_stage(room.room_args.pvp_type, stage, stars)[1]
         if room.room_args.pvp_type == matches.P.FIGHT_CONTEST:  # Extreme Training: next floor opens
             updates += acc.clear_contest(stage - matches.CONTEST_STAGE_BASE)
+    if room.room_args.pvp_type == matches.P.FIGHT_SPECIFIC_TRIAL:  # Specialty Trial: progress / Hell score
+        updates += trial.on_result(int(client.gid), acc, stage, won, match)
     await client.send_packet(0x0304, matches.build_result(room, won, stars, rewards))
     await grant_rewards(client, rewards, popup=False,
                         lineup=[p.info.inst_id for p in room.home.formation.players[:7] if p.info.inst_id])
@@ -1230,6 +1273,7 @@ MESSAGE_HANDLERS = {
     0x0D03: handle_sign_reward,
     0x0E03: handle_task_receive,
     0x0E05: handle_task_one_key,
+    0x0E08: handle_achievement_reward,
     0x0E04: handle_activation_chest,
     0x0905: handle_card_level_up,
     0x0908: handle_card_train,
@@ -1263,6 +1307,8 @@ MESSAGE_HANDLERS.update(peak.HANDLERS)
 import teamcomp  # noqa: E402  Match Streak (TeamCompetition): 2-3 stages in a row, stars for the lead
 MESSAGE_HANDLERS.update(teamcomp.HANDLERS)
 import freedom  # noqa: E402  Freedom Championship: matchmaking against the other players' line-ups
+import trial  # noqa: E402  Specialty Trial: progress, Hell score, rewards per player
+MESSAGE_HANDLERS.update(trial.HANDLERS)
 MESSAGE_HANDLERS.update(freedom.HANDLERS)
 import mail  # noqa: E402  mailbox (season / daily rank rewards)
 import seasons  # noqa: E402  season ends and daily arena rewards, sent as mail
@@ -1275,7 +1321,13 @@ import friends  # noqa: E402  friends list, requests, block list, friendship tok
 MESSAGE_HANDLERS.update(friends.HANDLERS)
 import clubs  # noqa: E402  clubs (Association): create, join, roles, notices, club chat
 MESSAGE_HANDLERS.update(clubs.HANDLERS)
-pvp.HOOKS.update(grant_rewards=grant_rewards, player_name=player_name, generic=handle_generic,
+import pack  # noqa: E402  using items from the bag (gift boxes)
+MESSAGE_HANDLERS.update(pack.HANDLERS)
+import homestead  # noqa: E402  home schedules (earnings every 15 minutes)
+MESSAGE_HANDLERS.update(homestead.HANDLERS)
+import memorybook  # noqa: E402  memory gallery: the kinds this player ever had
+MESSAGE_HANDLERS.update(memorybook.HANDLERS)
+pvp.HOOKS.update(replies=REPLIES, grant_rewards=grant_rewards, player_name=player_name, generic=handle_generic,
                  mission_event=mission_event)
 
 

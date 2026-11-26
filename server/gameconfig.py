@@ -47,6 +47,7 @@ if AVAILABLE:
     SIGN_TOTAL = _table("totalsignin")
     TASKS = _table("taskdepotconfig")
     ACTIVITY_CHESTS = _table("dailyactivityreward")
+    ACHIEVEMENT_REWARDS = _table("achievementpointreward")  # ID -> TaskTeamId, Point, Reward
     STAR_LIMITS = _table("upgradestar")  # ID = star -> Levellimit
     TRAIN = _table("train")  # ID = card_id * 10 + step
     SKILL_LIST = _table("skilllist")  # ID = card*1000 + slot*100 + level

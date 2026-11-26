@@ -299,6 +299,7 @@ class LiveMatch:
         if msg_id == 0x0307:
             m = P.PVPHandleServeC2S.FromString(body)
             self.inputs["hand"] = m.result or 2
+            self.inputs["area"] = m.s_index  # side the serve goes to (engine.HAND_AREA_X)
         elif msg_id == 0x030A:
             m = P.PVPUltimateSkillC2S.FromString(body)
             frame = m.base.frame_index
@@ -345,7 +346,9 @@ class LiveMatch:
             for st in played.steps:  # attack / defence power of every touch, for the score display
                 tot = self.power_tot.setdefault(st.player, [0.0, 0.0])
                 tot[0 if st.formula in engine.ATTACK else 1] += st.power.ball
-            touches = rallygen.touches_from(court, self.serve, played.steps, rng=random.Random(self.seed + 1))
+            aim = engine.HAND_AREA_X.get(self.inputs.get("area")) if self.serve == HOST else None
+            touches = rallygen.touches_from(court, self.serve, played.steps, rng=random.Random(self.seed + 1),
+                                            serve_aim=aim)
             built, length = rallygen.build(court, self.serve, touches, self.global_frame, start,
                                            played.start, played.end)
             self.windows = [(t.window[0], t.window_frame) for t in touches if t.window]

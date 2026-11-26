@@ -136,6 +136,20 @@ async def main():
     assert P.PersonalOtherS2C.FromString(a.last(personal.MSG_OTHER)).sentence == "Fly high!"
     await call(a, personal.MSG_OTHER, P.PersonalOtherC2S(gid=4242))
     assert P.PersonalOtherS2C.FromString(a.last(personal.MSG_OTHER)).err != 0
+    # one connection per account: logging in again closes the older connection
+    class Writer:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+        async def wait_closed(self):
+            pass
+    first = server.mail.ONLINE[9811]
+    first.writer = Writer()
+    again = await login(9811)
+    assert first.writer.closed and first.replaced and server.mail.ONLINE[9811] is again
+    print("second login closed the first connection")
     print("OK", TMP)
 
 

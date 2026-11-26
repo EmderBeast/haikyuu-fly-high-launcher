@@ -105,6 +105,7 @@ class Touch:
     morale_ready: bool = False
     morale_cast: bool = False
     morale_team: int | None = None
+    morale_cd: tuple | None = None  # (team, touches left of its released morale skill) after this touch
     stand: tuple | None = None  # (x, z) the toucher stands on when his animation starts
 
 
@@ -205,10 +206,11 @@ def stand_for(contact: tuple, anim: str, formula: int, team: int) -> tuple[float
     return contact[0] - dx * face, contact[2] - dz * face
 
 
-def touches_from(court: Court, serve_team: int, steps: list, rng=random) -> list[Touch]:
+def touches_from(court: Court, serve_team: int, steps: list, rng=random, serve_aim=None) -> list[Touch]:
     """Place the engine's touch chain (engine.simulate) on the court: contact points, animations and the
     spot each toucher runs to. Contact points follow Garena's captured rallies (spikes at the wings about
-    2.4 m from the net, sets 2 m, blocks at the net, receives 4.5-6.5 m deep)."""
+    2.4 m from the net, sets 2 m, blocks at the net, receives 4.5-6.5 m deep).
+    serve_aim = (centre x, half width) of a hand serve's side (engine.HAND_AREA_X): the serve is received there."""
     out = []
     last_attack_x = 0.0
     for st in steps:
@@ -238,6 +240,8 @@ def touches_from(court: Court, serve_team: int, steps: list, rng=random) -> list
             kind = {1: "notouch", 2: "touch", 3: "stuff", 0: "stuff"}[st.result]
         else:  # receive / dig / save at link 2 / free ball
             x, z = rng.uniform(-3.0, 3.0), t * rng.uniform(4.4, 6.5)
+            if f == DIG_SERVE and serve_aim:  # hand serve side: same random draw, squeezed into that side
+                x = serve_aim[0] + x / 3.0 * serve_aim[1]
         if not st.touch_ball and f != BLOCK:
             kind = "fail"
         anim = _anim_for(f, kind, rng)
@@ -259,7 +263,8 @@ def touches_from(court: Court, serve_team: int, steps: list, rng=random) -> list
                    over=st.over, skill_id=getattr(st, "skill_id", 0), original=getattr(st, "original", -1),
                    casts=getattr(st, "casts", []), buffs=getattr(st, "buffs", []),
                    window=getattr(st, "window", None), morale_ready=getattr(st, "morale_ready", False),
-                   morale_cast=getattr(st, "morale_cast", False), morale_team=getattr(st, "morale_team", None))
+                   morale_cast=getattr(st, "morale_cast", False), morale_team=getattr(st, "morale_team", None),
+                   morale_cd=getattr(st, "morale_cd", None))
         tc.stand = stand
         out.append(tc)
     return out
@@ -298,6 +303,18 @@ def _extras(fr, t: Touch, ann: int):
         td.morale_skill.state = P.Released if hasattr(P, "Released") else 2
         td.morale_skill.skill_id, td.morale_skill.cd, td.morale_skill.cd_total_time = 300, 8, 8
         fr(ann).skill_data.casted_team_skills.add(skill_id=300, player_id=t.morale_team * 13, is_team=True)
+        if t.morale_team == 0:  # the user's button goes away one frame later (garena2 rally 4: f81 / f82)
+            fr(ann + 1).skill_data.deactived_team_skills.add(skill_id=300)
+    if t.morale_cd:
+        # CDing: after every touch of the team that counts for the released skill (all but a block jump
+        # that misses the ball) Garena reports the touches left, at the hit frame, down to 0:
+        # 8 -> 7 at the releasing touch, ... (garena2 rallies 3-7, garena3 rallies 2-7). Garena repeats
+        # the same entry once per team member (13 home / 7 away, twice that at 0); one is sent here.
+        team, left = t.morale_cd
+        td = fr(t.frame).team_data.add()
+        td.team_id = team
+        td.morale_skill.state = P.CDing if hasattr(P, "CDing") else 3
+        td.morale_skill.cd, td.morale_skill.cd_total_time = left, 8
     if t.morale_ready:
         frame = t.frame
         td = fr(frame).team_data.add()

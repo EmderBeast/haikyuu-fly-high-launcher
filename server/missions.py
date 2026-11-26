@@ -18,6 +18,10 @@ from accounts import TASK_FINISH
 DAILY, WEEKLY = 1, 6
 RESET_HOUR = 6  # "Resets Daily at 6:00 AM"
 DAILY_POINTS, WEEKLY_POINTS = 107, 114
+# Achievement gallery: the points of each achievement group are a currency of their own
+# (AchievementGallery.AchievementGalleryViewUtils::GetCurrencyType: tab 8001..8004 -> 118, 119, 120, 121;
+# the group's achievements pay exactly that currency in taskdepotconfig).
+ACHIEVEMENT_CURRENCY = {8001: 118, 8002: 119, 8003: 120, 8004: 121}
 CHEST_RECEIVED = 1
 
 # condition codes
@@ -52,10 +56,44 @@ class Missions:
         self.activation = d.get("activation") or dict(acc.b.activation)
         self.chests = {int(k): v for k, v in (d.get("chests") or acc.b.chests).items()}
         self.changed_tasks = []
+        # achievement point rewards claimed by this account on top of the baseline's (TaskInfoS2C field 4)
+        self.achievements = [int(i) for i in d.get("achievements") or []]
+        self.new_achievements = []
 
     def save(self):
         self.acc.missions = {"period": self.period, "activation": self.activation,
-                             "chests": {str(k): v for k, v in self.chests.items()}}
+                             "chests": {str(k): v for k, v in self.chests.items()},
+                             "achievements": self.achievements}
+
+    # --- achievement gallery -------------------------------------------------
+    def achievements_received(self) -> set[int]:
+        """Point rewards already taken: the baseline's achievement_rewards_state plus this account's."""
+        got, data, pos = set(self.achievements), b"", 0
+        for num, wt, v in wire.parse(self.acc.b.pb("0x0E01")):
+            if num == 4:
+                if wt == 2:
+                    data += v
+                else:
+                    got.add(v)
+        while pos < len(data):
+            v, pos = wire.read_varint(data, pos)
+            got.add(v)
+        return got
+
+    def claim_achievement(self, reward_id: int) -> list | None:
+        """Point reward of the achievement gallery (achievementpointreward): claimable once when the
+        group's points have reached its Point. The client checks the same before it asks
+        (AchievementGalleryViewLogic::OnPointRewardEvent); the points are compared, not spent - the
+        thresholds of a group only grow. Returns the rewards, None if it cannot be claimed."""
+        row = gameconfig.ACHIEVEMENT_REWARDS.get(reward_id) if gameconfig.AVAILABLE else None
+        currency = ACHIEVEMENT_CURRENCY.get((row or {}).get("TaskTeamId"))
+        if not row or not currency or reward_id in self.achievements_received():
+            return None
+        if self.acc.get_currency(currency) < (row.get("Point") or 0):
+            return None
+        self.achievements.append(reward_id)
+        self.new_achievements.append(reward_id)
+        return gameconfig.open_rewards(gameconfig.parse_rewards(row.get("Reward")))
 
     # --- tasks -------------------------------------------------------------
     def _tasks_of(self, task_type):
@@ -136,6 +174,13 @@ class Missions:
             act = wire.set_varint(act, num, a[key])
         out.append((2, 2, wire.build(act)))
         out += [(3, 2, wire.build([(1, 0, cid), (2, 0, st)])) for cid, st in sorted(self.chests.items())]
+        # achievement_rewards_state (4, packed): the client adds these ids to the ones it knows
+        # (AchievementGalleryMessageHandler::OnTaskChange), so only new ones are sent - at login all of
+        # this account's, the baseline's are in the replayed TaskInfoS2C
+        new = self.achievements if all_tasks else self.new_achievements
+        if new:
+            out.append((4, 2, b"".join(wire.varint(i) for i in new)))
+        self.new_achievements = []
         return wire.build(out)
 
 
