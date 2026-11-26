@@ -435,7 +435,8 @@ async def handle_result(client, match):
         h, a = (bo, a) if match.won else (h, max(bo, h + 1))
     won = h > a
     e = game.entry
-    res = P.PVPResultS2C.FromString(matches.build_result(match.info, won, 0b111 if won else 0, []))
+    res = P.PVPResultS2C.FromString(matches.build_result(match.info, won, 0b111 if won else 0, [],
+                                                                matches.played_of(match)))
     br = res.battle_result
     for side, score in ((br.result.home, h), (br.result.away, a)):
         if not side.bo_statistics:
@@ -461,6 +462,7 @@ async def handle_result(client, match):
             side.fight_freedom_score.old_score, side.fight_freedom_score.new_score = o, n
     d["match"] = None
     pvp.save()
+    await pvp.HOOKS["before_result"](client, res.SerializeToString(), match.info)
     await client.send_packet(0x0304, res.SerializeToString())
     await client.send_packet(MSG_UPDATE, update(gid, client.account))
     return h, a, change

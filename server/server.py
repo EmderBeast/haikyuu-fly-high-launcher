@@ -377,6 +377,9 @@ async def handle_login(client: GameClient, pb_data: bytes):
         if m["msg_id"].upper() == "0X0B01" and client.account.team:  # line-ups saved since the baseline
             await client.send_packet(0x0B01, client.account.team)
             continue
+        if m["msg_id"].upper() == "0X2F01":  # weekly activity: this player's own counts, not the capture
+            await client.send_packet(0x2F01, weekly.info(int(gid), client.account))
+            continue
         if m["msg_id"].upper() == "0X2901":  # Specialty Trial: this player's own state, not the capture
             await client.send_packet(0x2901, trial.info(int(gid), client.account))
             continue
@@ -398,7 +401,8 @@ async def handle_login(client: GameClient, pb_data: bytes):
         for mid, pb in (pvp.on_login(client) + peak.on_login(client) + teamcomp.on_login(client)
                         + freedom.on_login(client) + mail.on_login(client) + personal.on_login(client)
                         + chat.on_login(client) + friends.on_login(client) + clubs.on_login(client)
-                        + homestead.on_login(client) + memorybook.on_login(client)):
+                        + homestead.on_login(client) + memorybook.on_login(client)
+                        + monthcard.on_login(client)):
             await client.send_packet(mid, pb)
     except Exception as e:  # never block the login
         log.error(f"  PVP login update failed: {e!r}")
@@ -803,6 +807,73 @@ async def handle_card_star(client: GameClient, pb_data: bytes):
     await mission_event(client, missions.PROMOTE_CARD, 1)
 
 
+async def handle_card_cultivate(client: GameClient, pb_data: bytes):
+    """0x090C PlayerCardCultivateC2S "Quick Star Up" (PlayerQuickStarUpViewLogic): {1=inst 2=target level
+    3=target star 4=consume_inst_ids 5=cost_money 6=cost_player_exp 7..10=star2..star5 (cards of the
+    intermediate nodes)}; S2C{1=error}, empty on success.
+
+    Evidenced (capture decrypted_runs4, two requests): EXP cost = level_up_cost from the old to the target
+    level (card 1303 lv 1 -> 44: 300120 = the capture's EXP change); materials = upgradestar Amount for each
+    star step (star 2 -> 4: 2 + 3 = 5 removed cards); messages: gold, EXP, removed cards (opt REMOVE), the card
+    (opt UPDATE), then the empty answer. Assumed: gold = upgradestar Gold of each step (the gold before the
+    capture is unknown), cards of intermediate nodes are consumed like the rest, a request the account cannot
+    pay or whose cards are missing is refused (FAILED) without changes.
+    """
+    req = wire.parse(pb_data)
+    inst, level_to, star_to = wire.get(req, 1, 0), wire.get(req, 2, 0), wire.get(req, 3, 0)
+    consume = []
+    for num, wt, v in req:
+        if num == 4 or 7 <= num <= 10:
+            for i in (_packed(v) if wt == 2 else [v]):
+                if i != inst and i not in consume:
+                    consume.append(i)
+    acc = client.account
+    card = acc.get_card(inst)
+    if card is None:
+        return await _cultivate_fail(client, inst, "unknown card")
+    f = wire.parse(card)
+    conf, level, star = wire.get(f, 3), wire.get(f, 4, 1), wire.get(f, 6, 0)
+    star_to, level_to = max(star_to, star), max(level_to, level)
+    steps = range(star + 1, star_to + 1)
+    rows = [gameconfig.STAR_LIMITS.get(s) for s in steps] if gameconfig.AVAILABLE else [None]
+    if None in rows or star_to > 6 or level_to > gameconfig.level_cap(star_to):
+        return await _cultivate_fail(client, inst, f"target lv {level_to} star {star_to} not allowed")
+    gold = sum(r.get("Gold") or 0 for r in rows)
+    need = sum(r.get("Amount") or 0 for r in rows)
+    exp = gameconfig.level_up_cost(conf, level, level_to - level) if level_to > level else 0
+    mats = [acc.get_card(i) for i in consume]
+    if (exp is None or None in mats or len(mats) < need or acc.get_currency(gameconfig.GOLD) < gold
+            or acc.get_currency(gameconfig.CARD_EXP) < exp):
+        return await _cultivate_fail(client, inst, f"requirements not met (mats {len(mats)}/{need}, gold {gold}, exp {exp})")
+    removed = [acc.remove_card(i) for i in consume]
+    f = wire.set_varint(wire.set_varint(f, 4, level_to), 6, star_to)
+    card = wire.build([x for x in f if x[0] != 5])  # exp resets with each level
+    acc.put_card(card)
+    entries = []
+    if gold:
+        entries.append(acc.set_currency(gameconfig.GOLD, acc.get_currency(gameconfig.GOLD) - gold))
+    if exp:
+        entries.append(acc.set_currency(gameconfig.CARD_EXP, acc.get_currency(gameconfig.CARD_EXP) - exp))
+    acc.save()
+    log.info(f"  CARD cultivate inst={inst} conf={conf} lv {level}->{level_to} star {star}->{star_to}, "
+             f"-{gold} gold -{exp} exp, consumed {len(removed)}")
+    for e in entries:  # Garena: gold first, then EXP, each in its own message
+        await client.send_packet(MSG_CURRENCY_CHANGE, wire.build([(1, 2, e)]))
+    if removed:
+        await client.send_packet(MSG_CARD_CHANGE, wire.build([(1, 2, card_info(c)) for c in removed] + [(2, 0, CARD_REMOVE)]))
+    await client.send_packet(MSG_CARD_CHANGE, wire.build([(1, 2, card_info(card)), (2, 0, CARD_UPDATE)]))
+    await client.send_packet(0x090C, b"")
+    if level_to > level:
+        await mission_event(client, missions.LEVEL_UP_CARD, level_to - level)
+    if star_to > star:
+        await mission_event(client, missions.PROMOTE_CARD, star_to - star)
+
+
+async def _cultivate_fail(client, inst, reason):
+    log.info(f"  CARD 0x090C inst={inst}: {reason}")
+    await client.send_packet(0x090C, wire.build([(1, 0, 1)]))  # error FAILED
+
+
 async def handle_card_skill(client: GameClient, pb_data: bytes):
     """0x0907 PlayerCardUpGradeSkillC2S{1=inst 2=consume_inst_ids 3=consume_item_inst_ids} (packed).
 
@@ -1001,6 +1072,25 @@ def player_name(client: GameClient) -> str:
     return name.decode("utf-8", "replace") if isinstance(name, bytes) else str(name)
 
 
+async def before_result(client: GameClient, result: bytes, room):
+    """Called right before every 0x0304 result: card missions of a won match (61001), sent as TaskChange
+    before the result as Garena does (capture: 0x0E02 directly ahead of 0x0304)."""
+    try:
+        won = matches.P.PVPResultS2C.FromString(result).battle_result.result.winner == 1
+    except Exception:
+        return
+    m = getattr(client, "missions", None)
+    if not won or m is None:
+        return
+    cards = {p.info.conf_id for p in room.home.formation.players[:7] if p.info.conf_id}  # court + libero
+    m.card_win(room.room_args.pvp_type, cards)
+    if m.changed_tasks:
+        m.save()
+        client.account.save()
+        await client.send_packet(MSG_TASK_CHANGE, m.change_message())
+        log.info(f"  MISSIONS card wins {sorted(cards)}")
+
+
 async def handle_preset_result(client: GameClient, match):
     """Result of a server-built match: decided outcome, stage rewards, stage progress and stars."""
     acc = client.account
@@ -1019,7 +1109,9 @@ async def handle_preset_result(client: GameClient, match):
             updates += acc.clear_contest(stage - matches.CONTEST_STAGE_BASE)
     if room.room_args.pvp_type == matches.P.FIGHT_SPECIFIC_TRIAL:  # Specialty Trial: progress / Hell score
         updates += trial.on_result(int(client.gid), acc, stage, won, match)
-    await client.send_packet(0x0304, matches.build_result(room, won, stars, rewards))
+    result = matches.build_result(room, won, stars, rewards, matches.played_of(match))
+    await before_result(client, result, room)
+    await client.send_packet(0x0304, result)
     await grant_rewards(client, rewards, popup=False,
                         lineup=[p.info.inst_id for p in room.home.formation.players[:7] if p.info.inst_id])
     for mid, pb in updates:
@@ -1282,6 +1374,7 @@ MESSAGE_HANDLERS = {
     0x3C07: handle_recalling_unequip,
     0x3C06: handle_recalling_lock,
     0x0906: handle_card_star,
+    0x090C: handle_card_cultivate,
     0x0907: handle_card_skill,
     0x0302: handle_pvp_create,
     0x0304: handle_pvp_result,
@@ -1327,6 +1420,11 @@ import homestead  # noqa: E402  home schedules (earnings every 15 minutes)
 MESSAGE_HANDLERS.update(homestead.HANDLERS)
 import memorybook  # noqa: E402  memory gallery: the kinds this player ever had
 MESSAGE_HANDLERS.update(memorybook.HANDLERS)
+import weekly  # noqa: E402  weekly activity "Bonus Training" (0x2F01 / 0x2F02) per player
+MESSAGE_HANDLERS.update(weekly.HANDLERS)
+pvp.HOOKS.update(before_result=before_result)
+import monthcard  # noqa: E402  month / quarter card: the daily reward
+MESSAGE_HANDLERS.update(monthcard.HANDLERS)
 pvp.HOOKS.update(replies=REPLIES, grant_rewards=grant_rewards, player_name=player_name, generic=handle_generic,
                  mission_event=mission_event)
 

@@ -407,7 +407,8 @@ def finish_game(match, home_score: int, away_score: int) -> tuple[bytes, list, d
     me["series"] = series
     wins = series["wins"]
     done = wins.count(True) >= 2 or wins.count(False) >= 2 or len(wins) >= TEAMS
-    res = P.PVPResultS2C.FromString(matches.build_result(match.info, won, 0b111 if won else 0, []))
+    res = P.PVPResultS2C.FromString(matches.build_result(match.info, won, 0b111 if won else 0, [],
+                                                                matches.played_of(match)))
     br = res.battle_result
     for side, score in ((br.result.home, home_score), (br.result.away, away_score)):
         if not side.bo_statistics:
@@ -623,6 +624,7 @@ async def handle_result(client, match):
     br, rewards, settled = finish_game(match, h, a)
     res = P.PVPResultS2C()
     res.battle_result.ParseFromString(br)
+    await pvp.HOOKS["before_result"](client, res.SerializeToString(), match.info)
     await client.send_packet(0x0304, res.SerializeToString())
     if settled:
         await pvp.HOOKS["grant_rewards"](client, rewards, False)

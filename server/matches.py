@@ -311,6 +311,11 @@ class Match:
         return self.live.won if self.live else self._won
 
 
+def played_of(match) -> dict | None:
+    """The rallies a live match sent (for build_result's statistics), None for scripted matches."""
+    return getattr(match.live, "played", None) if match is not None and match.live else None
+
+
 def win_chance(home_power: int, away_power: int) -> float:
     return min(0.95, max(0.05, 0.5 + (home_power / max(away_power, 1) - 1) * 1.5))
 
@@ -390,7 +395,104 @@ def roll_stage_rewards(stage_id: int, first_clear: bool) -> list[tuple[int, int]
     return gameconfig.open_rewards(out)
 
 
-def build_result(room: P.PVPRoomInfo, won: bool, stars: int, rewards: list[tuple[int, int]]) -> bytes:
+RECEIVE_FORMULAS = (7, 8)  # DigSpike / Save: the result lists them as 2 (receive) for the home team
+
+
+def live_statistics(result, room: P.PVPRoomInfo, played: dict) -> None:
+    """Fills PVPRoomResult.home/away from the rallies of a server-streamed match (as the client saw them),
+    instead of the captured match's statistics. Rules checked against all 188 complete Garena matches of
+    the captures (decrypted_*; decoded/analysis/frame_format.md 3.1):
+
+      bo_statistics[0]  score = points won, win, round_num = rallies played
+      player_statistics one per line-up card (inst_id), in line-up order
+        formula_statistics  one per announced touch (round_data.action_data) of the player:
+                            formula_type (7/8 -> 2 for the home team), hit_result, link, skill_id, crit,
+                            frame_idx = global frame of the announcement (earlier rallies' last frame_index
+                            summed), skill_win = the last touch of the team that won the point
+        score_skills        skill_id of those point-winning touches
+        serve_balls         the hand serve result (EHandServeResult) of every hand serve of the player
+        on_stage            the player is in the last rally
+        formidable_*        the last power_hit_ball_data of the match (count = attack + defence)
+      score_act_statistics  per point won: own scorer's card (-1 without an own touch), the opponent who
+                            touched last (card), own formula (-1), that opponent's player id ("rival_formula")
+      morale_max 120, morale_num = rallies in which the team released its morale skill
+    Not from the captures (cleared): attr, formidable_serve_score, tactic_num, physical_recovery_total."""
+    acts, wins, last_ids, power = [], [], set(), {}
+    released = {0: 0, 1: 0}
+    g0, prev = 0, (0, 0)
+    order = sorted(played)
+    for n, key in enumerate(order):
+        frames, hand = played[key]
+        frames = [P.FrameData.FromString(b) if isinstance(b, (bytes, bytearray)) else b for b in frames]
+        rally, winner, morale = [], None, set()
+        for f in frames:
+            if f.HasField("round_data") and f.round_data.HasField("action_data"):
+                rally.append((g0 + f.frame_index, f.round_data.action_data))
+            if f.HasField("game_data") and f.game_data.HasField("score"):
+                sc = (f.game_data.score.host_score, f.game_data.score.guest_score)
+                winner = 0 if sc[0] > prev[0] else 1
+                prev = sc
+            for t in f.team_data:
+                if t.morale_skill.state == P.Released and t.morale_skill.skill_id:
+                    morale.add(t.team_id)
+            for ph in f.power_hit_ball_data:
+                power[ph.hit_player] = (int(ph.formidable_attack), int(ph.formidable_defend))
+            if n == len(order) - 1:
+                last_ids.update(pd.player_id for pd in f.player_data)
+        for t in morale:
+            released[t] += 1
+        if frames:
+            g0 += frames[-1].frame_index
+        acts.append((rally, winner, hand))
+        wins.append(winner)
+    conf = {i: p.info.conf_id for i, p in enumerate(room.home.formation.players)}
+    conf.update({13 + i: p.info.conf_id for i, p in enumerate(room.away.formation.players)})
+    for team, (side, lineup) in enumerate(((result.home, room.home), (result.away, room.away))):
+        tactic = P.TeamTacticChosen()
+        if side.bo_statistics:
+            tactic.CopyFrom(side.bo_statistics[0].tactic_chosen)
+        del side.bo_statistics[:]
+        bo = side.bo_statistics.add()
+        bo.tactic_chosen.CopyFrom(tactic)
+        bo.score = sum(1 for w in wins if w == team)
+        bo.round_num = len(order)
+        side.morale_max, side.morale_num = 120, released[team]
+        side.tactic_num = side.physical_recovery_total = 0
+        stats = {}
+        for i, p in enumerate(lineup.formation.players):
+            if p.info.inst_id:
+                pid = team * 13 + i
+                st = bo.player_statistics.add(inst_id=p.info.inst_id, on_stage=pid in last_ids)
+                a, d = power.get(pid, (0, 0))
+                st.formidable_attack, st.formidable_defend, st.formidable_count = a, d, a + d
+                stats[pid] = st
+        for rally, winner, hand in acts:
+            mine = [(g, a) for g, a in rally if (a.hit_player >= 13) == (team == 1)]
+            rival = [(g, a) for g, a in rally if (a.hit_player >= 13) != (team == 1)]
+            scorer = mine[-1][0] if winner == team and mine else None
+            for g, a in mine:
+                st = stats.get(a.hit_player)
+                if st is None:
+                    continue
+                formula = 2 if team == 0 and a.formula_type in RECEIVE_FORMULAS else a.formula_type
+                st.formula_statistics.add(formula=formula, result=a.hit_result, link=a.link, skill_id=a.skill_id,
+                                          skill_win=g == scorer, frame_idx=g, crit=a.crit)
+                if g == scorer:
+                    st.score_skills.append(a.skill_id)
+                if hand and a.formula_type == 1:  # the serve of a rally the user hand-served
+                    st.serve_balls.append(hand)
+            if winner == team:
+                own = mine[-1][1] if mine else None
+                riv = rival[-1][1] if rival else None
+                bo.score_act_statistics.add(player_id=conf.get(own.hit_player, 0) if own else -1,
+                                            touch_rival=conf.get(riv.hit_player, 0) if riv else 0,
+                                            score_formula=own.formula_type if own else -1,
+                                            rival_formula=riv.hit_player if riv else 0)
+        bo.win = bo.score > sum(1 for w in wins if w == 1 - team)
+
+
+def build_result(room: P.PVPRoomInfo, won: bool, stars: int, rewards: list[tuple[int, int]],
+                 played: dict | None = None) -> bytes:
     res = _captured("0x0304", P.PVPResultS2C)
     br = res.battle_result
     br.info.CopyFrom(room)
@@ -419,7 +521,9 @@ def build_result(room: P.PVPRoomInfo, won: bool, stars: int, rewards: list[tuple
             for st, inst in zip(bo.player_statistics, ids):
                 st.inst_id = inst
             del bo.player_statistics[len(ids):]
-    # captured match statistics (score per set) stay; only the winner flag follows the outcome
+    if played:  # a server-streamed match: statistics counted from its rallies, as Garena's
+        live_statistics(br.result, room, played)
+    # otherwise (scripted presets) the captured match statistics (score per set) stay
     br.result.home.bo_win_count, br.result.away.bo_win_count = (1, 0) if won else (0, 1)
     del br.result.play_back_records[:]
     return res.SerializeToString()

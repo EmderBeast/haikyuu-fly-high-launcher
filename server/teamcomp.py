@@ -271,7 +271,8 @@ async def handle_result(client, match):
         settled = settle(game.gid, game.comp, series["scores"]) if last else None
     won = settled["pass"] if settled else h > a
     stars = settled["stars"] if settled else 0
-    res = P.PVPResultS2C.FromString(matches.build_result(match.info, won, (1 << stars) - 1 if stars else 0, []))
+    res = P.PVPResultS2C.FromString(matches.build_result(match.info, won, (1 << stars) - 1 if stars else 0, [],
+                                                                matches.played_of(match)))
     br = res.battle_result
     for side, score in ((br.result.home, h), (br.result.away, a)):
         if not side.bo_statistics:
@@ -281,6 +282,7 @@ async def handle_result(client, match):
     pvp.save()
     if settled:  # the result screen reads the stars from the group data
         await client.send_packet(MSG_UPDATE, update(game.gid, [group_of(game.comp)]))
+    await pvp.HOOKS["before_result"](client, res.SerializeToString(), match.info)
     await client.send_packet(0x0304, res.SerializeToString())
     if settled and settled["rewards"]:
         await pvp.HOOKS["grant_rewards"](client, settled["rewards"], True)

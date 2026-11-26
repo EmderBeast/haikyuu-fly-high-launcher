@@ -506,7 +506,8 @@ def finish(match) -> tuple[bytes, list[tuple[int, int]], int]:
     new = (ladder(fight.gid)["score"], opponent_score(fight.entry))
     save()
     rewards = list(WIN_REWARD if won else LOSS_REWARD)
-    res = P.PVPResultS2C.FromString(matches.build_result(match.info, won, 0b111 if won else 0, rewards))
+    res = P.PVPResultS2C.FromString(matches.build_result(match.info, won, 0b111 if won else 0, rewards,
+                                                                matches.played_of(match)))
     # the arena result screen shows old -> new points of both sides (ArenaSettlementViewLogic)
     for side, o, n in ((res.battle_result.player_grade.home, old[0], new[0]),
                        (res.battle_result.player_grade.away, old[1], new[1])):
@@ -749,6 +750,7 @@ async def handle_quick(client, pb: bytes):
 async def handle_result(client, match):
     """0x0304 for an arena room (called by server.handle_pvp_result)."""
     result, rewards, change = finish(match)
+    await HOOKS["before_result"](client, result, match.info)
     await client.send_packet(0x0304, result)
     await HOOKS["grant_rewards"](client, rewards, False)
     await client.send_packet(MSG_ARENA_INFO, arena_info(client.gid, client.account))

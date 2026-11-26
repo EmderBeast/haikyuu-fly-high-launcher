@@ -233,6 +233,11 @@ class SideView:
     def won(self) -> bool:
         return self.score[0] > self.score[1]
 
+    @property
+    def played(self) -> dict:
+        """Rallies this client was sent (its own view), for the result statistics (matches.live_statistics)."""
+        return {i + 1: (self._view(r), None) for i, r in enumerate(self.room.rallies[:self.n])}
+
     def _view(self, frames: list[bytes]) -> list[bytes]:
         return frames if self.side == 0 else [mirror_frame(f) for f in frames]
 

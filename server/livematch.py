@@ -196,6 +196,9 @@ class LiveMatch:
         self.pending_subs: list[tuple[int, int, int]] = []  # (team, on, off) for the next rally
         self.auto_skill = False  # auto play (0x030C): the server releases the user's ultimates itself
         self.power_tot: dict[int, list[float]] = {}  # player -> [attack, defence] power this match
+        # rally number -> (frames as sent, hand serve result or None): the last version of every rally,
+        # from which the result message's statistics are counted (matches.live_statistics)
+        self.played: dict[int, tuple[list[bytes], int | None]] = {}
 
     @property
     def won(self) -> bool:
@@ -417,6 +420,7 @@ class LiveMatch:
         self.serve = point
         self.over = end
         self.last = out
+        self.played[self.rally_no] = (out, self.inputs.get("hand"))
         return out
 
     @staticmethod

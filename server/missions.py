@@ -16,6 +16,8 @@ import wire
 from accounts import TASK_FINISH
 
 DAILY, WEEKLY = 1, 6
+CARD = 20  # missions of one card (taskdepotconfig TaskType 20), e.g. "Win 120 matches of any type"
+CARD_WIN = 61001  # TastConditionTow [fight type (0 = any), card conf id]
 RESET_HOUR = 6  # "Resets Daily at 6:00 AM"
 DAILY_POINTS, WEEKLY_POINTS = 107, 114
 # Achievement gallery: the points of each achievement group are a currency of their own
@@ -135,6 +137,22 @@ class Missions:
                 progress = wire.get(wire.parse(self.acc.task(tid)), 3, 0) + amount
                 target = cfg.get("Value") or 1
                 self._set(tid, TASK_FINISH if progress >= target else 0, min(progress, target))
+
+    def card_win(self, fight_type: int, cards: set[int]):
+        """A won match: +1 on every open 61001 card mission whose card played in the home line-up.
+        Garena capture (decoded_tshark.json with match_msgs.json, 6 results): wins with card 5104 in the line-up
+        raised task 20510405 ([0, 5104]) by one each, a club boss win with 5104 and 2711 raised both cards'
+        missions, a lost arena match with 5104 and wins without the cards changed nothing."""
+        for tid in self._tasks_of(CARD):
+            cfg = _cfg(tid)
+            cond = cfg.get("TastConditionTow") or []
+            if cfg.get("TaskSubTargetType") != CARD_WIN or self.acc.task_state(tid) != 0 or len(cond) < 2:
+                continue
+            if cond[0] not in (0, fight_type) or cond[1] not in cards:
+                continue
+            progress = wire.get(wire.parse(self.acc.task(tid)), 3, 0) + 1
+            target = cfg.get("Value") or 1
+            self._set(tid, TASK_FINISH if progress >= target else 0, min(progress, target))
 
     def on_claimed(self, task_id: int, rewards: list) -> list:
         """Book activity points of a claimed mission; returns the rewards that are real items."""
