@@ -50,6 +50,27 @@ BACKUP_KEEP = 20
 LOG_MAX = 1_000_000  # launcher.log is rotated to launcher.log.1 above this size  # automatic + manual backups of server/accounts kept in backups/
 
 MODES = {"private": "Private Server", "garena": "Garena (offiziell)"}
+# game content of the private server (server/edition.py): the Garena tables, or the JP version's content -
+# then the proxy also hands the client the patched bundles (patch_proxy.py of the client work)
+EDITIONS = {"global": "Global", "jp": "JP"}
+
+
+def jp_data_ready(base: Path) -> bool:
+    """The server's JP tables (gamedata-jp, or HFH_GAMEDATA_JP like server/edition.py)."""
+    root = Path(os.environ.get("HFH_GAMEDATA_JP") or base / "gamedata-jp")
+    return (root / "cfg" / "playerlist.json").exists()
+
+
+def jp_patch(base: Path, settings: dict) -> tuple:
+    """(proxy addon, folder of the patched client files) for JP, None where missing.
+    Addon: HFH_PATCH_PROXY, settings "jp_patch_proxy", else <base>/patch/patch_proxy.py.
+    Files: HFH_PATCH_DIR, settings "jp_patch_dir", else out/Install next to the addon (its own default)."""
+    addon = Path(os.environ.get("HFH_PATCH_PROXY") or settings.get("jp_patch_proxy")
+                 or base / "patch" / "patch_proxy.py")
+    if not addon.is_file():
+        return None, None
+    files = Path(os.environ.get("HFH_PATCH_DIR") or settings.get("jp_patch_dir") or addon.parent / "out" / "Install")
+    return addon, (files if files.is_dir() and any(files.rglob("*")) else None)
 
 
 # ----------------------------------------------------------------------------
@@ -226,6 +247,7 @@ class Launcher:
         self.base = base
         self.settings = load_settings()
         self.settings.setdefault("mode", "private")
+        self.settings.setdefault("edition", "global")
         if "server" not in self.settings:  # a package for a shared server presets the address
             try:
                 defaults = json.loads((base / "launcher_defaults.json").read_text(encoding="utf-8"))
@@ -342,6 +364,21 @@ class Launcher:
                   activebackground="#1a5276", activeforeground="white").pack(side="left")
         tk.Label(srv_row, text="leer = lokal, sonst host[:port]", bg=BG, fg=GREY,
                  font=("Segoe UI", 9)).pack(side="left", padx=8)
+
+        # game content: Global / JP (server tables + patched client bundles)
+        ed_row = tk.Frame(self.root, bg=BG)
+        ed_row.pack(padx=20, pady=(8, 0), fill="x")
+        tk.Label(ed_row, text="Inhalte:", bg=BG, fg="#eeeeee", font=font).pack(side="left")
+        self.edition_btns = {}
+        for name, label in EDITIONS.items():
+            b = tk.Button(ed_row, text=label, width=8, bg="#0f3460", fg="white", relief="flat", cursor="hand2",
+                          font=font, activebackground="#1a5276", activeforeground="white",
+                          command=lambda n=name: self.switch_edition(n))
+            b.pack(side="left", padx=(8, 0))
+            self.edition_btns[name] = b
+        tk.Label(ed_row, text="JP = Karten und Inhalte der japanischen Fassung", bg=BG, fg=GREY,
+                 font=("Segoe UI", 9)).pack(side="left", padx=8)
+        self.show_edition()
 
         # status line
         status = tk.Frame(self.root, bg=BG)
@@ -568,6 +605,59 @@ class Launcher:
             except Exception:
                 proc.kill()
 
+    def show_edition(self):
+        current = self.settings.get("edition", "global")
+
+        def apply():
+            for name, b in self.edition_btns.items():
+                b.configure(relief="sunken" if name == current else "flat",
+                            bg="#c97a00" if name == current else "#0f3460")
+        self.ui(apply)
+
+    def switch_edition(self, name):
+        """Global / JP: store it (launcher settings and server/edition.json), restart server and proxy,
+        restart the game so it fetches the matching client files."""
+        if name == self.settings.get("edition", "global"):
+            return
+        if name == "jp":
+            addon, files = jp_patch(self.base, self.settings)
+            missing = []
+            if not self.remote() and not jp_data_ready(self.base):
+                missing.append(f"JP-Tabellen ({self.base / 'gamedata-jp' / 'cfg'})")
+            if addon is None:
+                missing.append("Proxy-Zusatz patch_proxy.py (patch/ oder Einstellung jp_patch_proxy)")
+            elif files is None:
+                missing.append("gepatchte Client-Dateien (out/Install oder Einstellung jp_patch_dir)")
+            if missing:
+                self.log("JP geht noch nicht, es fehlt: " + "; ".join(missing))
+                return
+        self.settings["edition"] = name
+        save_settings(self.settings)
+        try:
+            (self.base / "server" / "edition.json").write_text(json.dumps({"edition": name}), encoding="utf-8")
+        except OSError as e:
+            self.log(f"server/edition.json nicht geschrieben: {e}")
+        self.show_edition()
+        note = " – die Fassung des Online-Servers bestimmt dessen Betreiber" if self.remote() else ""
+        self.log(f"Inhalte: {EDITIONS[name]}{note}")
+        self.job(self.switch_edition_job)
+
+    def switch_edition_job(self):
+        """Replace our server (local only) and proxy, then restart the game."""
+        remote = self.remote()
+        self.stop_proc(self.mitm_proc)
+        self.mitm_proc = None
+        if not remote:
+            self.stop_proc(self.server_proc)
+            self.server_proc = None
+        for _ in range(20):
+            if not port_in_use(PROXY_PORT) and (remote or not port_in_use(GAME_PORT)):
+                break
+            time.sleep(0.25)
+        self.start_processes()
+        if self.ld is not None and self.serial is not None and self.game_running():
+            self.start_game(restart=True)
+
     def restart_game_clicked(self):
         self.job(self.restart_game_job)
 
@@ -586,7 +676,7 @@ class Launcher:
                 self.mitm_proc and self.mitm_proc.poll() is None:
             return
         env = dict(os.environ, HFH_SETTINGS=str(SETTINGS_FILE), PYTHONUNBUFFERED="1",
-                   PYTHONIOENCODING="utf-8")
+                   PYTHONIOENCODING="utf-8", HFH_EDITION=self.settings.get("edition", "global"))
         remote = self.remote()
         if self.server_proc and self.server_proc.poll() is None:
             pass  # ours (server or relay) is still running
@@ -633,8 +723,17 @@ class Launcher:
             self.set_status("proxy", "läuft (extern)", OK)
         else:
             script = self.base / "patch" / "mitm_redirect.py"
+            extra = []
+            if self.settings.get("edition") == "jp":
+                addon, files = jp_patch(self.base, self.settings)
+                if addon and files:
+                    extra = ["-s", str(addon)]
+                    env["HFH_PATCH_DIR"] = str(files)
+                    self.log(f"Proxy mit JP-Client-Dateien aus {files}.")
+                else:
+                    self.log("JP: Proxy-Zusatz oder Client-Dateien fehlen – Proxy ohne JP-Dateien.")
             self.mitm_proc = subprocess.Popen(
-                child_cmd("--run-mitm", "-s", str(script), "--mode", f"regular@{PROXY_PORT}",
+                child_cmd("--run-mitm", "-s", str(script), *extra, "--mode", f"regular@{PROXY_PORT}",
                           "--set", "ssl_insecure=true", "--set", "termlog_verbosity=warn"),
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
                 creationflags=NO_WINDOW)

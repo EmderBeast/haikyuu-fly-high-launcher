@@ -17,12 +17,15 @@ and stacking details. Unknown condition keys fail, so a skill we cannot read doe
 Driving skills (ultimates, cast by the user) are not run here (engine stage 4).
 """
 import json
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import edition
+
 ROOT = Path(__file__).parent.parent
-CFG = ROOT / "gamedata" / "cfg"
-TYPED = ROOT / "decoded" / "analysis" / "typed" / "skill.json"
+CFG = edition.CFG  # tables of the edition the server runs (global / jp)
+TYPED = edition.TYPED / "skill.json"
 NONE = -2147483648
 HOST, GUEST = 0, 1
 TEAM_IDS = 13
@@ -45,6 +48,10 @@ NO_TARGET_NO_BUFF = True
 OWN_MARK_SKIP = False
 SKILL_TAG_ZERO = True  # a tag condition without a number means tag 0 (Power Attack), not "any tag"
 BUFF_TAG_EVENT = True  # GetBuffTag / LoseBuffTag / HaveBuffTag read the buff table's Tag column
+BUFF_COUNT_EVENT = True  # IGetBuff / BuffNumberDecrease: checked for the holder when that buff comes / shrinks
+TYPE_REMOVAL = True  # RemoveRandomTypeBuff / RemoveAllTypeBuff take debuffs (buff table BuffType2) away
+STAMINA_FORMS = True  # stamina buffs with a duration or with ArgsType 3 / 9 / 10 change stamina too (once)
+STAMINA_COUNTERS = True  # AddBuffByTeamEnergyCost / AddBuffByPropertyCostByLevel count stamina spent / regained
 LOSE_DEBUFF_EVENT = True  # ILoseDeBuff: checked for the holder for every stack of a debuff he loses
 TAG_KEYS = {"GetBuffTag", "LoseBuffTag", "HaveBuffTag"}  # their Value names the tag (none = tag 0)
 
@@ -128,6 +135,10 @@ TRAMMEL = {r["ID"]: r for r in _load("trammel")} if (CFG / "trammel.json").exist
 AVAILABLE = bool(SKILLS and BUFFS)
 # skills that only run as part of another one (Before/AfterSkill, OverrideSkill, LetSkillCD targets)
 # or carry the touch itself (SkillBehaviour): never fired on their own
+# buffs some skill waits for: "getbuff" (IGetBuff) / "buffdown" (BuffNumberDecrease) -> buff ids
+WATCHED = {ev: {_num(t.get("Args")) for s in SKILLS.values() for t in s.get("Trigger") or []
+                if isinstance(t, dict) and t.get("Key") == key}
+           for ev, key in (("getbuff", "IGetBuff"), ("buffdown", "BuffNumberDecrease"))}
 CHAINED = {x for s in SKILLS.values() for k in ("BeforeSkill", "AfterSkill") for x in _flat(s.get(k))} | {
     _num(e.get("V1")) for s in SKILLS.values() for e in s.get("SkillEffect") or []
     if e.get("Key") == "OverrideSkill"} | {
@@ -181,6 +192,8 @@ class Ctx:
     gate: str = ""  # "spike", "block" or "catch": which ultimate trigger this touch is
     hand: int = 0  # hand serve result 1 bad / 2 normal / 3 good
     tag: int = -1  # buff tag of a "gettag" / "losetag" event
+    buff: int = 0  # buff of a "getbuff" / "buffdown" event
+    count: int = 0  # stacks that came / went in that event
 
 
 @dataclass
@@ -292,6 +305,10 @@ class Battle:
         self._pbuff: set = set()  # buffs whose change is being handled (see _buff_changed)
         self._tags: set = set()  # (event, tag) being handled (see _tag_event)
         self._losing = False  # ILoseDeBuff skills are being checked (see _debuff_lost)
+        self._counting: set = set()  # (event, buff) being handled (see _count_event)
+        self.spent: dict[int, float] = {}  # team -> stamina its players have spent so far
+        self.healed: dict[int, float] = {}  # player -> stamina he has got back so far
+        self._paid: dict[tuple, float] = {}  # (owner, buff) -> part of spent / healed already turned into stacks
         self._entered: int | None = None  # ultimate that just went on cooldown (SkillEnterCD)
         self.points = [0, 0]  # rallies won by each team in this match
         self.history: list[tuple] = []  # (team, link, formula, result, player, crit) this rally
@@ -336,6 +353,10 @@ class Battle:
         if new == old:
             return
         self.energy[pid] = new
+        if new < old:
+            self.spent[self.team_of(pid)] = self.spent.get(self.team_of(pid), 0.0) + old - new
+        else:
+            self.healed[pid] = self.healed.get(pid, 0.0) + new - old
         self.changes.append(BuffChange(("e", pid), 0, new, 0))
         ratio = new / ENERGY_MAX
         me = ("p", pid)
@@ -368,11 +389,11 @@ class Battle:
         if not row:
             return
         if (_num(row.get("Type")) == 2 and _flat(row.get("ModifyTarget")) == [STAMINA]
-                and not _num(row.get("Time"), 0) and _num(row.get("ArgsType"), 1) == 1):
-            # stamina buffs act once and stay (no duration, no RevertAddition): +/- Args / 10000
+                and self._stamina_form(row)):
+            # stamina buffs act once and stay (no RevertAddition): +/- Args / 10000
             pids = [entity[1]] if entity[0] == "p" else self.court(entity[1])
             for pid in pids:
-                self.spend(pid, -self._args(row)[0] / 10000 * stacks)
+                self.spend(pid, -self._stamina_amount(row, pid) * stacks)
             self._tag_event(entity, row, True)
             return
         if _num(row.get("MountType"), 1) == 2 and entity[0] == "p":
@@ -384,6 +405,7 @@ class Battle:
             if _num(keeper.row.get("Type")) == 13 and _flat(keeper.row.get("ModifyTarget")) == [0, buff_id]:
                 left = max(left or 0, self._args(keeper.row)[0] // 10000)
         b = have.get(buff_id)
+        had = b.stacks if b else 0
         own_clock = OWN_CLOCKS and left is not None and _num(row.get("OverlayType"), 2) == 1
         if b and _num(row.get("OverlayType"), 2) in (1, 3):
             b.stacks = min(limit, b.stacks + stacks)
@@ -411,6 +433,7 @@ class Battle:
         if entity[0] == "t":
             self._team_buff_changed(entity[1], buff_id)
         self._tag_event(entity, row, True)
+        self._count_event("getbuff", entity, buff_id, max(b.stacks - had, 0))
         btype = _num(row.get("Type"))
         if btype == 13:  # duration keeper (captures: 111851121 keeps the marker 55011131 for 99 rallies)
             tg = _flat(row.get("ModifyTarget"))
@@ -423,6 +446,31 @@ class Battle:
             self.morale[team] = min(MORALE_MAX, max(0.0, self.morale[team] + self._args(row)[0] / 10000 * stacks))
         elif btype == 5:  # cooldown change
             self._cd_change(entity, row)
+
+    @staticmethod
+    def _stamina_form(row: dict) -> bool:
+        """Whether a stamina buff is one we can apply: a fixed amount without a duration (all the
+        captures show), and with STAMINA_FORMS also the rows with a duration (none of them has
+        RevertAddition, so the change stays: 5703's -12 / +10 per stack) and the amounts that depend on
+        something (ArgsType 3 share of a property, 9 / 10 per stack of a buff)."""
+        at, timed = _num(row.get("ArgsType"), 1), _num(row.get("Time"), 0) > 0
+        if at == 1 and not timed:
+            return True
+        return STAMINA_FORMS and at in (1, 3, 9, 10) and _num(row.get("RevertAddition"), 0) <= 0
+
+    def _stamina_amount(self, row: dict, pid: int) -> float:
+        """Stamina one stack of the buff gives pid (negative = takes)."""
+        args, at = self._args(row), _num(row.get("ArgsType"), 1)
+        if at == 3 and len(args) >= 2:
+            # share of a property; [8, -2000] = 20 % of the stamina he has now (5704 "teammates lose
+            # 20 % of their current Stamina")
+            base = self.energy.get(pid, ENERGY_MAX) if args[0] == STAMINA else self.attr(pid, args[0], raw=True)
+            return base * args[1] / 10000
+        if at in (9, 10) and len(args) >= 2:  # per stack of a buff he (or his team) has, up to args[2]
+            n = self.stacks(("p", pid), args[0]) or self.stacks(("t", self.team_of(pid)), args[0])
+            v = args[1] * n
+            return (min(v, args[2]) if len(args) > 2 and args[2] > 0 else v) / 10000
+        return args[0] / 10000
 
     def _tag_event(self, entity: tuple, row: dict, gained: bool):
         """A buff with a Tag was given (every time) or is gone: the holder's GetBuffTag / LoseBuffTag
@@ -442,6 +490,22 @@ class Battle:
             self.fire(ctx, owners=[p for p in pids if p in self.cards])
         finally:
             self._tags.discard((event, tag))
+
+    def _count_event(self, event: str, entity: tuple, buff_id: int, count: int):
+        """A player got a buff ("getbuff": his IGetBuff skills for it) or has fewer stacks of it
+        ("buffdown": BuffNumberDecrease). ctx.count = the stacks that came / went, for the effects
+        that give something per stack (AddBuffByIGetBuff, AddBuffByILoseDeBuff). Read from the skill
+        texts (5703 "for every stack of the debuff he gets, he loses 12 Stamina"); no capture."""
+        if (not BUFF_COUNT_EVENT or entity[0] != "p" or entity[1] not in self.cards
+                or (event, buff_id) in self._counting or buff_id not in WATCHED.get(event, ())):
+            return
+        self._counting.add((event, buff_id))
+        try:
+            ctx = Ctx(event)
+            ctx.buff, ctx.count = buff_id, count
+            self.fire(ctx, owners=[entity[1]])
+        finally:
+            self._counting.discard((event, buff_id))
 
     def _debuff_lost(self, entity: tuple, row: dict, stacks: int):
         """A player lost stacks of a debuff (BuffType2 1; removed or run out): his ILoseDeBuff skills
@@ -512,11 +576,12 @@ class Battle:
         if b.stacks <= 0:
             self._tag_event(entity, b.row, False)
         self._debuff_lost(entity, b.row, lost)
+        self._count_event("buffdown", entity, buff_id, lost)
 
     def tick(self, unit: int, team: int | None = None, pids=None, spare=None):
         """One unit of time passes: buffs and cooldowns counted in it run down. spare = (entity, buff)
         pairs that were given just now and keep their full time."""
-        gone, debuffs = [], []
+        gone, debuffs, down = [], [], []
         for entity, have in self.buffs.items():
             if pids is not None and (entity[0] != "p" or entity[1] not in pids):
                 continue
@@ -533,6 +598,7 @@ class Battle:
                     if b.lefts:
                         if len(b.lefts) != b.stacks:
                             debuffs.append((entity, b.row, b.stacks - len(b.lefts)))
+                            down.append((entity, bid, b.stacks - len(b.lefts)))
                             b.stacks = len(b.lefts)
                             self.changes.append(BuffChange(entity, bid, b.stacks, max(b.lefts)))
                         b.left = max(b.lefts)
@@ -543,12 +609,15 @@ class Battle:
                     del have[bid]
                     self.changes.append(BuffChange(entity, bid, 0, 0))
                     debuffs.append((entity, b.row, b.stacks))
+                    down.append((entity, bid, b.stacks))
                     if _tag(b.row) is not None:
                         gone.append((entity, b.row))
         for entity, row in gone:
             self._tag_event(entity, row, False)
         for entity, row, n in debuffs:
             self._debuff_lost(entity, row, n)
+        for entity, bid, n in down:
+            self._count_event("buffdown", entity, bid, n)
         for (pid, sid), c in list(self.cd.items()):
             if c[0] != unit:
                 continue
@@ -931,6 +1000,14 @@ class Battle:
             return 0xFFFF if ctx.event == ("gettag" if key == "GetBuffTag" else "losetag") and ctx.tag == arg else 0
         if key == "ILoseDeBuff":  # see _debuff_lost
             return ctx.event == "losedebuff"
+        if key in ("IGetBuff", "BuffNumberDecrease"):  # see _count_event
+            return ctx.event == ("getbuff" if key == "IGetBuff" else "buffdown") and ctx.buff == arg
+        if key == "PlayerSkillCDType":
+            # the PlayerSkillCDType column of the skill the ball is touched with (1 = a skill with a
+            # cooldown of its own; 5704 "when a teammate uses a ball-touch skill")
+            return max(_num(SKILLS.get(ctx.skill_id, {}).get("PlayerSkillCDType"), 0), 0)
+        if key == "TeamEnergy":  # stamina of the team's players on court, added up
+            return sum(self.energy.get(p, ENERGY_MAX) for p in self.court(team))
         if key == "HaveBuffTag":  # the owner (or his team) has a buff of that tag
             if not BUFF_TAG_EVENT:
                 return 0xFFFF
@@ -1137,6 +1214,47 @@ class Battle:
             elif k == "RemoveBuffByLevel":
                 for ent in self._targets(v3 or v2, owner, ctx):
                     self.remove_buff(ent, v1 + level - 1, 99)
+            elif k in ("RemoveRandomTypeBuff", "RemoveAllTypeBuff") and TYPE_REMOVAL:
+                # V1 = BuffType2 (1 debuff), V2 = stacks (99 and more: all), V3 = target. Random: the
+                # stacks come off debuffs picked at random (5605 "removes 1 stack of a random debuff
+                # from the teammates on court"); All: every debuff goes.
+                for ent in self._targets(v3, owner, ctx, v4):
+                    mine = [b for b in list(self.buffs.get(ent, {}).values())
+                            if _num(b.row.get("BuffType2")) == v1]
+                    if k == "RemoveAllTypeBuff" or v2 >= 99:
+                        for b in mine:
+                            self.remove_buff(ent, b.id, 99)
+                        continue
+                    for _ in range(max(v2, 1)):
+                        mine = [b for b in mine if self.stacks(ent, b.id)]
+                        if not mine:
+                            break
+                        self.remove_buff(ent, random.choice(mine).id, 1)
+            elif k in ("AddBuffByIGetBuff", "AddBuffByILoseDeBuff"):
+                # V2 once per stack of V1 that came / went in this event (5703: -12 Stamina per stack
+                # of his debuff he gets, +10 per stack he loses)
+                if ctx.buff == v1 and ctx.count > 0:
+                    self.add_buff(("p", owner), v2, ctx.count, owner, level)
+            elif k == "AddBuffByTeamEnergyCost" and STAMINA_COUNTERS:
+                # one stack of V2 per V1 Stamina the team has spent since this skill ran last, the rest
+                # is kept (5704 "for every 10 Stamina lost, 1 stack")
+                step = max(v1, 1)
+                n = int((self.spent.get(self.team_of(owner), 0.0) - self._paid.get((owner, v2), 0.0)) // step)
+                if n > 0:
+                    self._paid[(owner, v2)] = self._paid.get((owner, v2), 0.0) + n * step
+                    for ent in self._targets(v3, owner, ctx):
+                        self.add_buff(ent, v2, n, owner, level)
+            elif k == "AddBuffByPropertyCostByLevel" and STAMINA_COUNTERS:
+                # V1 136 (EnergyHeal) = Stamina the owner got back, V3 = per how much, V4 = buff (by
+                # level), V5 = target (5703 "for every 20 Stamina he regains, Power Attack +10 %").
+                # V1 135 and V2 are not understood: only 136 is counted.
+                if v1 == 136:
+                    step = max(v3, 1)
+                    n = int((self.healed.get(owner, 0.0) - self._paid.get((owner, v4), 0.0)) // step)
+                    if n > 0:
+                        self._paid[(owner, v4)] = self._paid.get((owner, v4), 0.0) + n * step
+                        for ent in self._targets(_num(e.get("V5"), 1), owner, ctx):
+                            self.add_buff(ent, v4 + level - 1, n, owner, level)
             elif k == "LetSkillCD":
                 row = SKILLS.get(v1)
                 if row and _num(row.get("CDType")):
@@ -1205,6 +1323,10 @@ class Battle:
             return "losetag"
         if "ILoseDeBuff" in keys:
             return "losedebuff"
+        if BUFF_COUNT_EVENT and "IGetBuff" in keys:
+            return "getbuff"
+        if BUFF_COUNT_EVENT and "BuffNumberDecrease" in keys:
+            return "buffdown"
         if keys & {"RoundEnd", "Score"}:
             return "end"
         if "BallOverNet" in keys:

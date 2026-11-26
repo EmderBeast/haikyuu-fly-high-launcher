@@ -18,7 +18,9 @@ import random
 from dataclasses import dataclass, field
 from pathlib import Path
 
-CFG = Path(__file__).parent.parent / "gamedata" / "cfg"
+import edition
+
+CFG = edition.CFG  # tables of the edition the server runs (global / jp)
 NONE = -2147483648
 SERVE, DIG_SERVE, SAVE, SET, SPIKE, BLOCK, DIG_SPIKE, DIG_NO_ATTACK = range(1, 9)
 HOST, GUEST = 0, 1

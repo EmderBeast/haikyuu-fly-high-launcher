@@ -117,21 +117,87 @@ async def main():
     check("lands emptied, decrease kept", reply.status == H.HARVEST and len(reply.furniture) == 12
           and all(not f.land.weed_id and f.land.decrease == 7000 and not f.land.gain_times for f in reply.furniture))
 
-    # two harvests (4002005, GainNum [7, 7]): the first one leaves the land growing
+    # one land ripe to the limit, as in the own recording wcy2611 (status 2): 4002002 GainNum [16, 16, 16],
+    # GainLimit 32, CostValue 1000 -> 32, 1000 cement, the third round grows again from now (4 h / 1.5)
     one = all_lands[0]
-    g["lands"][str(one.inst_id)] = P.GardenLand(weed_id=4002005, decrease=10000, start_time=now,
-                                                gain_times=[now + 10, now + 20], update_time=now + 20).SerializeToString().hex()
-    req = P.HomeGardenLandWeedC2S(status=H.HARVEST, inst_id=[one.inst_id])
+    g["lands"][str(one.inst_id)] = P.GardenLand(weed_id=4002002, decrease=7000, start_time=now - 99999,
+                                                speed_total_time_before=9587).SerializeToString().hex()
+    c.account.set_currency(H.CEMENT, 1960533)
+    req = P.HomeGardenLandWeedC2S(status=H.HARVEST_ONE, inst_id=[one.inst_id], weed_id=4002002)
     c.sent.clear()
     await H.handle_land_weed(c, req.SerializeToString(), now=now + 15)
-    land = P.HomeGardenLandWeedS2C.FromString(c.sent[-1][1]).furniture[0].land
-    check("first of two harvests: 7, land keeps growing", P.NotifyRewardsS2C.FromString(c.sent[1][1]).items[0].number == 7
-          and land.weed_id == 4002005 and land.gain_round == 1)
+    check("order as Garena: cement, pack, popup, update, reply",
+          [m for m, _ in c.sent] == [0x0405, H.MSG_PACK_CHANGE, 0x0404, H.MSG_UPDATE, H.MSG_LAND_WEED], f"{[hex(m) for m, _ in c.sent]}")
+    reply = P.HomeGardenLandWeedS2C.FromString(c.sent[-1][1])
+    land = reply.furniture[0].land
+    m = H.watering(one, [f for f in H.furnitures(c).values() if f.conf_id in H.MACHINES])
+    check("32 eggplants (GainLimit), 1000 cement", P.NotifyRewardsS2C.FromString(c.sent[2][1]).items[0].number == 32
+          and c.account.get_currency(H.CEMENT) == 1959533)
+    check("third round grows again: round 2, soil 10000, ripe 9600 s after the harvest",
+          reply.status == H.HARVEST_ONE and land.weed_id == 4002002 and land.gain_round == 2 and land.decrease == 10000
+          and land.start_time == now + 15 and list(land.gain_times) == [now + 15 + 9600]
+          and land.water_inst_id == m.inst_id, str(land).replace(chr(10), " "))
     c.sent.clear()
-    await H.handle_land_weed(c, req.SerializeToString(), now=now + 25)
+    await H.handle_land_weed(c, req.SerializeToString(), now=now + 16)
+    check("not ripe again yet: refused", P.HomeGardenLandWeedS2C.FromString(c.sent[-1][1]).err == H.FAILED)
+    c.sent.clear()
+    await H.handle_land_weed(c, req.SerializeToString(), now=now + 15 + 9600)
     land = P.HomeGardenLandWeedS2C.FromString(c.sent[-1][1]).furniture[0].land
-    check("second harvest: 7 more, land empty", P.NotifyRewardsS2C.FromString(c.sent[1][1]).items[0].number == 7
-          and not land.weed_id)
+    check("last round: 16, land empty, no cement", P.NotifyRewardsS2C.FromString(c.sent[1][1]).items[0].number == 16
+          and not land.weed_id and c.sent[0][0] == H.MSG_PACK_CHANGE)
+
+    # repair as in wcy2611: work 19161, running for 51 s -> 78 %, count 22 -> 132 cement, 777638 -> 997638, work 153
+    mach = next(f for f in H.furnitures(c).values() if f.conf_id == 4001005)
+    t0 = now + 50000
+    g["machines"][str(mach.inst_id)] = P.GardenMachine(effect_area=mach.machine.effect_area, work=19161,
+                                                       start_time=t0, update_time=t0 + 9621).SerializeToString().hex()
+    c.account.set_currency(H.CEMENT, 1958533)
+    c.sent.clear()
+    await H.handle_repair(c, P.HomeGardenFurnitureRepairC2S(inst_id=mach.inst_id, count=22).SerializeToString(), now=t0 + 51)
+    check("repair: cement, record, reply", [m_ for m_, _ in c.sent] == [0x0405, H.MSG_UPDATE, H.MSG_REPAIR])
+    rec = P.HomeUpdateS2C.FromString(c.sent[1][1]).repair_records[0]
+    rep = P.HomeGardenFurnitureRepairS2C.FromString(c.sent[2][1]).furniture.machine
+    check("repair numbers = Garena's (132, 777638 -> 997638, work 153)",
+          (rec.number, rec.before, rec.after, rec.conf_id, rep.work) == (132, 777638, 997638, 227, 153)
+          and c.account.get_currency(H.CEMENT) == 1958401, f"{rec.number} {rec.before} {rec.after} {rep.work}")
+    c.sent.clear()
+    await H.handle_repair(c, P.HomeGardenFurnitureRepairC2S(inst_id=mach.inst_id, count=50).SerializeToString(), now=t0 + 52)
+    check("repairing more than is missing: refused", P.HomeGardenFurnitureRepairS2C.FromString(c.sent[-1][1]).err == H.FAILED)
+
+    # orders as in wcy2611 (garden level 13): rewards per slot + garden EXP, crops taken, week counter
+    data = P.HomeGardenOrderData(last_refresh_time=H._last_change(now), week_order_num=0)
+    for weeds in ([(920000103, 46)], [(920000102, 46), (920000104, 8)], [(920000106, 46), (920000101, 38)],
+                  [(920000104, 16)]):
+        o = data.curr_order_list.add(order_level=13)
+        for conf, n in weeds:
+            o.weed_list.add(conf_id=conf, number=n)
+    data.next_order_list.add(order_level=13).weed_list.add(conf_id=920000107, number=14)
+    g["orders"] = data.SerializeToString().hex()
+    for conf in (920000101, 920000102, 920000103, 920000104, 920000106):
+        H.add_crop(c, conf, 100, now)
+    want = {0: [(117, 5), (100, 28500), (280, 23000)], 1: [(117, 5), (102, 19000), (280, 23500)],
+            2: [(117, 5), (127, 1340), (280, 22900)], 3: [(117, 18), (280, 24000)]}
+    ok = True
+    for slot in range(4):
+        c.sent.clear()
+        await H.handle_order(c, P.HomeGardenOrderFinishC2S(order_id=slot).SerializeToString(), now=now + 60)
+        popup = next(P.NotifyRewardsS2C.FromString(b) for m_, b in c.sent if m_ == 0x0404)
+        ok &= [(i.conf_id, i.number) for i in popup.items] == want[slot]
+        ok &= c.sent[0][0] == H.MSG_PACK_CHANGE and c.sent[-1] == (H.MSG_ORDER, P.HomeGardenOrderFinishS2C(order_id=slot).SerializeToString())
+    check("all four orders: Garena's rewards and order of messages", ok)
+    crops = H._crops(c)
+    check("crops taken (920000103: 100 - 46; 920000104: 96 harvested + 100 - 8 - 16)",
+          crops[920000103].number == 54 and crops[920000104].number == 172,
+          f"{crops[920000103].number} {crops[920000104].number}")
+    d4 = H.orders(c, now + 60)
+    check("four finished, week counter 4", all(o.is_finish for o in d4.curr_order_list) and d4.week_order_num == 4)
+    c.sent.clear()
+    await H.handle_order(c, P.HomeGardenOrderFinishC2S(order_id=0).SerializeToString(), now=now + 61)
+    check("an order twice: refused", P.HomeGardenOrderFinishS2C.FromString(c.sent[-1][1]).err == H.FAILED)
+    nxt = H.orders(c, H._last_change(now) + 86400)
+    check("06:00 UTC: the preview becomes today's orders", len(nxt.curr_order_list) == 1
+          and not nxt.curr_order_list[0].is_finish and nxt.curr_order_list[0].weed_list[0].conf_id == 920000107
+          and not nxt.next_order_list)
 
     # uproot: the land is emptied, nothing harvested; an empty land is refused
     g["lands"][str(one.inst_id)] = P.GardenLand(weed_id=4002003, decrease=10000, start_time=now,
@@ -149,7 +215,9 @@ async def main():
     c2 = await login(990801)
     crops = [P.FurniturePackItemChangeS2C.FromString(p) for mid, p in c2.sent if mid == H.MSG_PACK_CHANGE]
     check("login sends this player's crops", crops and {(i.conf_id, i.number) for i in crops[-1].gain_items}
-          == {(920000104, 96), (920000105, 14)}, f"{crops[-1] if crops else None}")
+          == {(k, v.number) for k, v in H._crops(c2).items()} and (920000104, 172) in {(i.conf_id, i.number) for i in crops[-1].gain_items})
+    orders_at_login = [u for mid, p_ in c2.sent if mid == H.MSG_UPDATE and p_ for u in [P.HomeUpdateS2C.FromString(p_)] if u.HasField("garden_order")]
+    check("login sends this player's orders", orders_at_login and orders_at_login[-1].garden_order.week_order_num == 4)
     garden = [P.HomeUpdateS2C.FromString(p) for mid, p in c2.sent if mid == H.MSG_UPDATE and p]
     lands_now = [f for u in garden for f in u.furnitures if f.conf_id == H.LAND_CONF]
     check("login sends this player's garden", len(lands_now) == 12, f"{len(lands_now)}")

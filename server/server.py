@@ -402,6 +402,9 @@ async def handle_login(client: GameClient, pb_data: bytes):
         if m["msg_id"].upper() == "0X3701":  # assistant settings: the baseline's plus this player's changes
             await client.send_packet(MSG_ASSIST_INFO, assistant_info(client.account))
             continue
+        if m["msg_id"].upper() == "0X2B01":  # mini games: this player's own week score and best scores
+            await client.send_packet(0x2B01, minigame.info(int(gid), client.account))
+            continue
         if m["msg_id"].upper() == "0X2901":  # Specialty Trial: this player's own state, not the capture
             await client.send_packet(0x2901, trial.info(int(gid), client.account))
             continue
@@ -1684,6 +1687,8 @@ import memorybook  # noqa: E402  memory gallery: the kinds this player ever had
 MESSAGE_HANDLERS.update(memorybook.HANDLERS)
 import weekly  # noqa: E402  weekly activity "Bonus Training" (0x2F01 / 0x2F02) per player
 MESSAGE_HANDLERS.update(weekly.HANDLERS)
+import minigame  # noqa: E402  mini games (Arder 0x2B01 / 0x2B03) per player
+MESSAGE_HANDLERS.update(minigame.HANDLERS)
 import coach  # noqa: E402  coaches per player: level up (0x5503), dismantle (0x5505)
 MESSAGE_HANDLERS.update(coach.HANDLERS)
 import cardlock  # noqa: E402  lock / unlock a player card (0x0909)
