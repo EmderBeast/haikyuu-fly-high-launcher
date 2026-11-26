@@ -144,6 +144,20 @@ PHRASES = [
     ("Manager-Level setzen:", "Set manager level:"),
     ("Währungen (Haken = auf diesen Wert setzen):", "Currencies (tick = set to this value):"),
     ("Unendlich Ausdauer:", "Infinite stamina:"),
+    ("Perfekte Potentials nach Guide (alle Karten):", "Perfect potentials from the guide (all cards):"),
+    ("Scan vom HFH-Bot laden …", "Load HFH-Bot scan …"),
+    ("Scan entfernen", "Remove scan"),
+    ("Kein Scan gewählt.", "No scan chosen."),
+    ("Keine Scan-Datei des HFH-Bots", "Not a scan file of the HFH-Bot"),
+    ("Spieler", "players"),
+    ("Übernimmt Spieler (Level, Sterne, Skills, Memory, Potentials), Potentials und Memories im Inventar und Coaches "
+     "aus der Scan-Datei (HFH-Bot → scans). Ein neuer Scan ersetzt den alten.",
+     "Takes players (level, stars, skills, memory, potentials), potentials and memories in the inventory and coaches "
+     "from the scan file (HFH-Bot → scans). A new scan replaces the old one."),
+    ("Jede Karte trägt die Sets und Werte aus ihrem Potential-Guide (max). Neue Karten bekommen sie beim nächsten "
+     "Login. Aus = die alten Potentials kommen zurück.",
+     "Every card wears the sets and stats of its potential guide (max). New cards get them at the next login. "
+     "Off = the old potentials come back."),
     ("unverändert", "unchanged"),
     ("Alle Charaktere freischalten (je eine Karte von jedem, den du noch nicht hast)",
      "Unlock all characters (one card of each you don't have yet)"),

@@ -31,8 +31,10 @@ def main():
         return
     skill_id = 56043111 if 56043111 in skills.SKILLS else 53055221
     gain = skills._num(skills.SKILLS[skill_id]["SkillEffect"][0]["V1"])
+    other_clock = skills._num(skills.BUFFS[gain].get("Time"), 0)  # the debuff must not run out with the gain
     debuff = next(i for i, r in sorted(skills.BUFFS.items())
                   if skills._num(r.get("BuffType2")) == 1 and skills._num(r.get("OverlayType")) == 1
+                  and skills._num(r.get("Time"), 0) != other_clock
                   and skills._num(r.get("OverlayLimit"), 0) >= 3 and skills._num(r.get("Time"), 0)
                   and skills._num(r.get("MountType"), 1) == 1 and skills._num(r.get("Type")) == 2
                   and skills._flat(r.get("ModifyTarget")) != [skills.STAMINA])

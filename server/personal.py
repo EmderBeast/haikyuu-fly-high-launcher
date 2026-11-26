@@ -71,6 +71,8 @@ def update(gid: int, acc) -> bytes:
     except Exception:
         pass
     extra = unlocks(gid)
+    import unlockall
+    base = unlockall.item_ids(acc, base)  # Admin Mode "unlock everything": every profile item of the tables
     out = P.PersonalUpdateS2C()
     out.item_ids.extend(base + [i for i in extra if i not in base])
     for i, t in sorted(extra.items()):
@@ -250,7 +252,9 @@ def _save_wallpaper(gid: int, w):
 def info_message(gid: int, acc, body: bytes) -> bytes:
     """The baseline's PersonalInfoS2C with this player's wallpapers (field 15), everything else untouched."""
     w = wallpaper(gid, acc).SerializeToString()
+    import unlockall
     import wire
+    body = unlockall.personal_info(acc, body)  # Admin Mode "unlock everything": every profile item
     return wire.build([x for x in wire.parse(body) if x[0] != 15] + [(15, 2, w)])
 
 

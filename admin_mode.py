@@ -26,6 +26,8 @@ RARITY = {1: "Stufe 1 (max Lv. 6)", 2: "Stufe 2 (max Lv. 6)", 3: "Stufe 3 (max L
           4: "Stufe 4 (max Lv. 12)"}
 MAX_LEVEL = {1: 6, 2: 6, 3: 9, 4: 12}
 POSITIONS = [0, 1, 2, 3, 4, 5]
+COACH_JOBS = {1: 20074475, 2: 680108, 3: 643604, 4: 32911123, 5: 814991}  # job -> language id (server/admin.py)
+COACH_BUFF_LEVELS = [3, 6, 9, 12, 15]  # coachconstant 2: one job buff per reached level
 
 
 class GameData:
@@ -57,6 +59,24 @@ class GameData:
         self.specialty = {}  # (suit, rare, position) -> row
         for r in load("specialty"):
             self.specialty[(r["SuitID"], r["Rare"], r.get("Position") or 0)] = r
+        # coaches (server/coach.py): id -> row, buff id -> text with its numbers, top level per rarity
+        self.coaches, self.coach_buffs, self.coach_top = {}, {}, {}
+        try:
+            for r in load("coachlist"):
+                self.coaches[r["ID"]] = dict(r, name=f"{de(r.get('CoachName')) or r['ID']} ★{r.get('CoachRare')}")
+            for r in load("coachbuff"):
+                text = de(r.get("BuffName")) or str(r["ID"])
+                for i, val in enumerate(str(r.get("BuffNumber") or "").split("_")):
+                    text = text.replace("{%d}" % i, val)
+                self.coach_buffs[r["ID"]] = dict(r, text=text)
+            for r in load("coachlevel"):
+                self.coach_top[r["CoachRare"]] = max(self.coach_top.get(r["CoachRare"], 0), r["Level"])
+            for r in load("coachconstant"):
+                if r["ID"] == 2 and r.get("Data2"):
+                    COACH_BUFF_LEVELS[:] = [int(x) for x in str(r["Data2"]).split(",") if x.strip()]
+        except Exception:
+            pass  # older game data without coaches: the tab stays empty
+        self.jobs = {j: (de(lid) or str(j)).replace("- ", "") for j, lid in COACH_JOBS.items()}
 
     def attr_label(self, attr_id):
         return f"{self.attr.get(attr_id, attr_id)} ({attr_id})"
@@ -101,6 +121,7 @@ class AdminWindow:
         self.pending_specs = []
         self.pending_power = {}
         self.pending_reso = {}
+        self.pending_coaches = []
 
         self.win = tk.Toplevel(launcher.root)
         self.win.title("Admin Mode")
@@ -136,6 +157,8 @@ class AdminWindow:
         nb.add(self.tab_cards(nb), text=i18n.tr("Charaktere & Gegenstände"))
         nb.add(self.tab_potentials(nb), text=i18n.tr("Potentials"))
         nb.add(self.tab_power(nb), text=i18n.tr("Stärke"))
+        if self.data.coaches:
+            nb.add(self.tab_coach(nb), text=i18n.tr("Trainer"))
         if self.shared():
             nb.add(self.tab_rights(nb), text=i18n.tr("Rechte"))
 
@@ -282,6 +305,21 @@ class AdminWindow:
         self.max_cards = tk.BooleanVar()
         self.items_on = tk.BooleanVar()
         self.items = tk.IntVar(value=999)
+        # "unlock everything" (server/unlockall.py): all kinds at once, or only cheers / cosmetics
+        self.unlock_all = tk.BooleanVar()
+        self.unlock_cheers = tk.BooleanVar()
+        self.unlock_cosmetics = tk.BooleanVar()
+        tk.Checkbutton(f, text="ALLES freischalten: alle Charaktere und Memories auf max, Gegenstände, Währungen, "
+                               "alle Trainer, perfekte Potentials, alle Cheers und die ganze Kosmetik",
+                       variable=self.unlock_all, bg=PANEL, fg=GOLD, selectcolor=BG, activebackground=PANEL,
+                       wraplength=680, justify="left", font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=12, pady=(14, 2))
+        r = tk.Frame(f, bg=PANEL)
+        r.pack(anchor="w", padx=36)
+        tk.Label(r, text="oder nur:", bg=PANEL, fg="#aaaaaa").pack(side="left")
+        tk.Checkbutton(r, text="alle Cheers (höchster Stern)", variable=self.unlock_cheers, bg=PANEL, fg=FG,
+                       selectcolor=BG, activebackground=PANEL).pack(side="left", padx=6)
+        tk.Checkbutton(r, text="alle Kosmetik (Porträts, Rahmen, Titel, Hintergründe …)", variable=self.unlock_cosmetics,
+                       bg=PANEL, fg=FG, selectcolor=BG, activebackground=PANEL).pack(side="left", padx=6)
         for var, text in ((self.all_cards, "Alle Charaktere und Memories freischalten (je eins von jedem, das du noch nicht hast)"),
                           (self.max_cards, "Alles auf max: Karten 6 Sterne / Level 80, volle Skill-Resonance, Memories Level 80 / Tier V")):
             tk.Checkbutton(f, text=text, variable=var, bg=PANEL, fg=FG, selectcolor=BG,
@@ -301,11 +339,62 @@ class AdminWindow:
                      width=14).pack(side="left", padx=6)
         tk.Label(f, text="Stufen je Karte (4/6/8/10/12 Skill-Level). Einzelne Karten: Tab „Stärke“.",
                  bg=PANEL, fg="#aaaaaa", font=("Segoe UI", 9)).pack(anchor="w", padx=36)
+
+        # a scan file of the HFH-Bot (made for the CC simulator / Fly High Hub): the scanned account here
+        self.pending_scan = None
+        r = tk.Frame(f, bg=PANEL)
+        r.pack(anchor="w", padx=12, pady=(18, 2))
+        tk.Button(r, text="Scan vom HFH-Bot laden …", command=self.load_scan, bg="#0f3460", fg="white",
+                  relief="flat").pack(side="left")
+        tk.Button(r, text="Scan entfernen", command=self.clear_scan, bg="#53354a", fg="white",
+                  relief="flat").pack(side="left", padx=6)
+        self.scan_info = TrVar(value=i18n.tr("Kein Scan gewählt."))
+        tk.Label(f, textvariable=self.scan_info, bg=PANEL, fg="#00ff88", font=("Segoe UI", 9), wraplength=680,
+                 justify="left").pack(anchor="w", padx=36)
+        tk.Label(f, text="Übernimmt Spieler (Level, Sterne, Skills, Memory, Potentials), Potentials und Memories im "
+                         "Inventar und Coaches aus der Scan-Datei (HFH-Bot → scans). Ein neuer Scan ersetzt den alten.",
+                 bg=PANEL, fg="#aaaaaa", font=("Segoe UI", 9), wraplength=680, justify="left").pack(anchor="w", padx=36)
         return f
+
+    def load_scan(self):
+        from tkinter import filedialog
+        start = Path.home() / "Downloads" / "HFH-Bot" / "HFH-Bot" / "scans"
+        path = filedialog.askopenfilename(parent=self.win, title=i18n.tr("Scan vom HFH-Bot laden …"),
+                                          initialdir=str(start) if start.exists() else str(Path.home()),
+                                          filetypes=[("HFH-Bot Scan", "*.json"), ("JSON", "*.json")])
+        if not path:
+            return
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+            if not isinstance(data, dict) or int(data.get("hfhscan") or 0) != 1:
+                raise ValueError(i18n.tr("Keine Scan-Datei des HFH-Bots"))
+        except Exception as e:
+            messagebox.showerror("Admin Mode", f"{Path(path).name}: {e}", parent=self.win)
+            return
+        self.pending_scan = data
+        parts = [f"{len(data.get(k) or [])} {i18n.tr(n)}" for k, n in
+                 (("players", "Spieler"), ("pots", "Potentials"), ("memoryCopies", "Memories"), ("coaches", "Coaches"))
+                 if data.get(k)]
+        self.scan_info.set(f"{Path(path).name} ({data.get('date', '?')}): " + ", ".join(parts))
+
+    def clear_scan(self):
+        self.pending_scan = None
+        self.scan_info.set(i18n.tr("Kein Scan gewählt."))
 
     def tab_potentials(self, nb):
         f = self.frame(nb)
         d = self.data
+        self.perfect = tk.StringVar(value="keep")
+        r = tk.Frame(f, bg=PANEL)
+        r.pack(anchor="w", padx=12, pady=(12, 0))
+        tk.Label(r, text="Perfekte Potentials nach Guide (alle Karten):", bg=PANEL, fg=GOLD,
+                 font=("Segoe UI", 10, "bold")).pack(side="left")
+        for text, value in (("unverändert", "keep"), ("an", "on"), ("aus", "off")):
+            tk.Radiobutton(r, text=text, value=value, variable=self.perfect, bg=PANEL, fg=FG,
+                           selectcolor=BG, activebackground=PANEL).pack(side="left", padx=4)
+        tk.Label(f, text="Jede Karte trägt die Sets und Werte aus ihrem Potential-Guide (max). Neue Karten bekommen "
+                         "sie beim nächsten Login. Aus = die alten Potentials kommen zurück.",
+                 bg=PANEL, fg="#aaaaaa", font=("Segoe UI", 9), wraplength=680, justify="left").pack(anchor="w", padx=12)
         grid = tk.Frame(f, bg=PANEL)
         grid.pack(anchor="w", padx=12, pady=(12, 4))
 
@@ -422,6 +511,11 @@ class AdminWindow:
         self.pending_power.clear()
         self.pending_reso.clear()
         self.reso_all.set("unverändert")
+        self.pending_coaches.clear()
+        for var in (self.unlock_all, self.unlock_cheers, self.unlock_cosmetics):
+            var.set(False)
+        if hasattr(self, "coach_list"):
+            self.coach_list.delete(0, "end")
 
     def describe(self, s):
         d = self.data
@@ -429,6 +523,128 @@ class AdminWindow:
         vice = ", ".join(f"{d.attr.get(a, a)}+{lv}" for a, lv in s["vices"])
         return (f"{s['count']}x {d.suits.get(row.get('SuitID'), '?')} · Platz {(row.get('Position') or 0) + 1} · "
                 f"Stufe {row.get('Rare')} · Lv {s['level']} · {d.attr.get(s['main'], s['main'])} | {vice}")
+
+    # --- coaches: build your own (queue entry "coach", server/coach.py check_build) -----------
+
+    def tab_coach(self, nb):
+        f = self.frame(nb)
+        d = self.data
+        tk.Label(f, text="Eigenen Trainer bauen: Trainer und Stufe wählen, dann je Platz eine Position und einen Buff. "
+                         "Wie im Spiel gibt es je einen Platz ab Stufe 3, 6, 9, 12 und 15. Der Trainer steht nach dem "
+                         "nächsten Login in der Trainer-Liste.",
+                 bg=PANEL, fg="#aaaaaa", font=("Segoe UI", 9), wraplength=700, justify="left").pack(
+            anchor="w", padx=12, pady=(10, 4))
+        head = tk.Frame(f, bg=PANEL)
+        head.pack(anchor="w", padx=12, pady=4)
+        grid = tk.Frame(f, bg=PANEL)
+        grid.pack(anchor="w", padx=12, pady=4)
+        self.coach_var = tk.StringVar()
+        self.coach_level = tk.IntVar(value=15)
+        self.coach_lock = tk.BooleanVar(value=True)
+        self.coach_all = tk.BooleanVar(value=False)
+        names = [f"{r['name']} ({i})" for i, r in sorted(d.coaches.items(), key=lambda e: (-e[1]["CoachRare"], e[0]))]
+        tk.Label(head, text="Trainer:", bg=PANEL, fg=FG).pack(side="left")
+        ttk.Combobox(head, textvariable=self.coach_var, values=names, state="readonly", width=34).pack(
+            side="left", padx=6)
+        tk.Label(head, text="Stufe:", bg=PANEL, fg=FG).pack(side="left", padx=(12, 4))
+        tk.Spinbox(head, from_=1, to=15, textvariable=self.coach_level, width=4).pack(side="left")
+        self.coach_rows = []
+        jobs = [""] + [f"{n} ({j})" for j, n in d.jobs.items()]
+        for i, lv in enumerate(COACH_BUFF_LEVELS):
+            tk.Label(grid, text=f"Platz {i + 1} (ab Stufe {lv}):", bg=PANEL, fg=FG).grid(
+                row=1 + i, column=0, sticky="w", pady=2)
+            job, buff = tk.StringVar(), tk.StringVar()
+            ttk.Combobox(grid, textvariable=job, values=jobs, state="readonly", width=18).grid(
+                row=1 + i, column=1, sticky="w")
+            box = ttk.Combobox(grid, textvariable=buff, state="readonly", width=62)
+            box.grid(row=1 + i, column=2, sticky="w", padx=(8, 0))
+            buff.trace_add("write", lambda *_a, v=buff: self.coach_detail.set(v.get()))
+            self.coach_rows.append((job, buff, box))
+        self.coach_detail = tk.StringVar()  # the chosen buff's whole text (the boxes cut long ones off)
+        tk.Label(f, textvariable=self.coach_detail, bg=PANEL, fg=GOLD, font=("Segoe UI", 9), wraplength=700,
+                 justify="left", height=2, anchor="nw").pack(fill="x", padx=12)
+        opts = tk.Frame(f, bg=PANEL)
+        opts.pack(anchor="w", padx=12, pady=2)
+        tk.Checkbutton(opts, text="Trainer sperren (kann nicht zerlegt werden)", variable=self.coach_lock, bg=PANEL,
+                       fg=FG, selectcolor=BG, activebackground=PANEL).pack(side="left")
+        tk.Checkbutton(opts, text="Auch schwächere Werte zeigen", variable=self.coach_all, bg=PANEL, fg=FG,
+                       selectcolor=BG, activebackground=PANEL, command=self.refresh_coach).pack(side="left", padx=12)
+        btns = tk.Frame(f, bg=PANEL)
+        btns.pack(anchor="w", padx=12, pady=6)
+        tk.Button(btns, text="Hinzufügen", command=self.add_coach, bg="#0f3460", fg="white",
+                  relief="flat").pack(side="left")
+        tk.Button(btns, text="Liste leeren", command=self.clear_specs, bg="#53354a", fg="white",
+                  relief="flat").pack(side="left", padx=6)
+        self.coach_list = tk.Listbox(f, height=6, bg="#0f0f23", fg="#00ff88", font=("Consolas", 9))
+        self.coach_list.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+        self.coach_var.trace_add("write", lambda *_: self.refresh_coach())
+        self.coach_var.set(names[0])
+        return f
+
+    def coach_buff_choices(self, conf, every=False):
+        """The buffs this coach can have, strongest rarity first; without `every` the best roll of each kind."""
+        d = self.data
+        pool = [b for b in d.coaches.get(conf, {}).get("CoachBuffId") or [] if b in d.coach_buffs]
+        if not every:
+            pool = [b for b in pool if d.coach_buffs[b].get("BuffNumber") == d.coach_buffs[b].get("MaxNumber")]
+        pool.sort(key=lambda b: (-d.coach_buffs[b].get("Rare", 0), b))
+        return [f"★{d.coach_buffs[b].get('Rare')} {d.coach_buffs[b]['text']} ({b})" for b in pool]
+
+    def refresh_coach(self):
+        conf = GameData.id_of(self.coach_var.get())
+        row = self.data.coaches.get(conf)
+        if not row:
+            return
+        self.coach_level.set(min(int(self.coach_level.get() or 1), self.data.coach_top.get(row["CoachRare"], 15)))
+        choices = [""] + self.coach_buff_choices(conf, self.coach_all.get())
+        for _job, buff, box in self.coach_rows:
+            box.configure(values=choices)
+            if buff.get() not in choices:
+                buff.set("")
+
+    def check_coach(self, conf, level, buffs):
+        """Same rules as the server (coach.check_build); returns an error text or None."""
+        d = self.data
+        row = d.coaches.get(conf)
+        if not row:
+            return "Bitte einen Trainer wählen."
+        top = d.coach_top.get(row["CoachRare"], 15)
+        if not 1 <= level <= top:
+            return f"Stufe {level} geht nicht (1 bis {top})."
+        slots = sum(1 for lv in COACH_BUFF_LEVELS if lv <= level)
+        if len(buffs) > slots:
+            return f"Zu viele Buffs: Stufe {level} erlaubt {slots}."
+        if any(b not in (row.get("CoachBuffId") or []) for _j, b in buffs):
+            return "Diesen Buff kann der Trainer nicht haben."
+        return None
+
+    def add_coach(self):
+        conf = GameData.id_of(self.coach_var.get())
+        try:
+            level = int(self.coach_level.get())
+        except (ValueError, tk.TclError):
+            level = 0
+        buffs = []
+        for n, (job, buff, _box) in enumerate(self.coach_rows):
+            j, b = GameData.id_of(job.get()), GameData.id_of(buff.get())
+            if bool(j) != bool(b):
+                messagebox.showerror("Admin Mode", f"Platz {n + 1}: bitte Position und Buff wählen (oder beides leer).",
+                                     parent=self.win)
+                return
+            if j:
+                buffs.append([j, b])
+        err = self.check_coach(conf, level, buffs)
+        if err:
+            messagebox.showerror("Admin Mode", err, parent=self.win)
+            return
+        spec = {"conf": conf, "level": level, "buffs": buffs, "lock": bool(self.coach_lock.get())}
+        self.pending_coaches.append(spec)
+        self.coach_list.insert("end", i18n.tr(self.describe_coach(spec)))
+
+    def describe_coach(self, s):
+        d = self.data
+        buffs = ", ".join(f"{d.jobs.get(j, j)}: {b}" for j, b in s["buffs"]) or "ohne Buffs"
+        return f"{d.coaches[s['conf']]['name']} · Stufe {s['level']} · {buffs}"
 
     # --- apply ---------------------------------------------------------------------
 
@@ -623,12 +839,21 @@ class AdminWindow:
             actions.append({"currency": cur})
         if self.stamina.get() != "keep":
             actions.append({"flags": {"infinite_stamina": self.stamina.get() == "on"}})
+        if self.perfect.get() != "keep":
+            actions.append({"flags": {"perfect_potentials": self.perfect.get() == "on"}})
+        if self.unlock_all.get():
+            actions.append({"unlock_all": True})
+        elif self.unlock_cheers.get() or self.unlock_cosmetics.get():
+            actions.append({"unlock": [k for k, v in (("cheers", self.unlock_cheers), ("cosmetics", self.unlock_cosmetics))
+                                       if v.get()]})
         if self.all_cards.get():
             actions.append({"all_cards": True})
         if self.max_cards.get():
             actions.append({"max_cards": True})
         if self.items_on.get():
             actions.append({"items": int(self.items.get())})
+        if self.pending_scan:
+            actions.append({"scan": self.pending_scan})
         if self.pending_power:
             actions.append({"power": dict(self.pending_power)})
         reso = dict(self.pending_reso)
@@ -638,6 +863,8 @@ class AdminWindow:
             actions.append({"resonance": reso})
         if self.pending_specs:
             actions.append({"specialties": list(self.pending_specs)})
+        if self.pending_coaches:
+            actions.append({"coach": list(self.pending_coaches)})
         return actions
 
     def apply(self):

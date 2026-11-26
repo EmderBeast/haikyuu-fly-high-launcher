@@ -26,8 +26,19 @@ the lock or setting was gone again after the next login):
     reply carries only err, the client takes the setting from CoachUpdateS2C.setting (or CoachInfoS2C.setting
     at login)
   Assumed: order update then reply, as captured for the level-up; an unknown coach is answered with an error.
-Not built: what the settings do on the server (auto-dismantling of new coaches); matches still use the
-captured room's coach card.
+In a match: the line-up names its coach (TeamFormation.coach_card_inst_id, seen in Garena's 0x0B01 / 0x0B03);
+matches.own_coach puts that coach of the player into the match team and skills.Battle turns its job_buffs into
+skills for the players of that job. Not built: the coach's own skill (coachlist.PropertyBuff), its stat share
+(coachlevel.Property, coachlist.PropertyNumber), a player's coach for teams with captured skill_extras, and the
+line-ups of Peak / Freedom / team competition (peak.build_team has no coach in its line-ups).
+Admin Mode "build your own coach" (admin.py queue entry {"coach": ...}, commands /coach, /coaches, /coachbuffs):
+  From the tables: which coaches exist (coachlist), the top level per rarity (coachlevel), which buffs a coach
+  can roll (coachlist.CoachBuffId -> coachbuff), the jobs 1-5 (coachconstant 3) and that a coach holds one buff
+  per reached level of coachconstant 2 (3/6/9/12/15), so at most 5. A job may repeat and so may a buff
+  (captured coach: job 5 twice, buff 1014 twice).
+  Assumed: job 1-5 = Wing Spiker, Middle Blocker, Setter, Libero, Opposite Hitter (read off playerlist.Job of
+  known players); the client shows a coach with fewer buffs than its level gives without trouble; new instance
+  ids continue after the highest one, as for coaches from the trial boxes (hstrials.py).
 State: pvp.json "coaches" {gid: {"cards": {inst: CoachCard hex}, "deleted": [inst], "setting": hex}}.
 """
 import random
@@ -93,6 +104,72 @@ def info(gid: int, acc) -> bytes:
 def _save(gid: int, card):
     _store(gid)["cards"][str(card.inst_id)] = card.SerializeToString().hex()
     pvp.save()
+
+
+JOBS = [j for j, _ in JOB_WEIGHTS] or [1, 2, 3, 4, 5]
+INST_BASE = 1559926981427148799  # as hstrials.credit: new coaches continue after the highest instance id
+
+
+def buff_slots(level: int) -> int:
+    """How many job buffs a coach of this level holds on Garena (one per reached level of coachconstant 2)."""
+    return sum(1 for lv in BUFF_LEVELS if lv <= level)
+
+
+def check_build(spec: dict, have: dict | None = None) -> tuple[dict | None, str | None]:
+    """Validate an Admin Mode coach {"conf", "level", "buffs": [[job, buff_id], ...], "lock", "inst"} against
+    the tables. Returns (clean spec, None) or (None, German error text). With `inst` (a coach the player has,
+    `have` = cards()) conf and level default to that coach's."""
+    try:
+        inst = int(spec.get("inst") or 0)
+        old = (have or {}).get(inst) if inst else None
+        if inst and have is not None and old is None:
+            return None, f"Trainer {inst} gibt es bei diesem Spieler nicht."
+        conf = int(spec.get("conf") or (old.conf_id if old else 0))
+        level = int(spec.get("level") or (old.level if old else 1))
+        buffs = [(int(j), int(b)) for j, b in spec.get("buffs") or []]
+    except (TypeError, ValueError):
+        return None, "Trainer-Eintrag hat ein falsches Format."
+    row = COACHES.get(conf)
+    if row is None:
+        return None, f"Trainer {conf} gibt es nicht."
+    top = MAX_LEVEL.get(row.get("CoachRare"), 15)
+    if not 1 <= level <= top:
+        return None, f"Stufe {level} geht nicht (1 bis {top})."
+    pool = set(row.get("CoachBuffId") or [])
+    for job, buff in buffs:
+        if job not in JOBS:
+            return None, f"Position {job} gibt es nicht (1 bis {max(JOBS)})."
+        if buff not in BUFFS:
+            return None, f"Buff {buff} gibt es nicht."
+        if buff not in pool:
+            return None, f"Buff {buff} kann dieser Trainer nicht haben."
+    if len(buffs) > buff_slots(level):
+        return None, (f"Zu viele Buffs: Stufe {level} erlaubt {buff_slots(level)} "
+                      f"(je einer ab Stufe {', '.join(map(str, BUFF_LEVELS))}).")
+    out = {"conf": conf, "level": level, "buffs": [list(b) for b in buffs], "lock": bool(spec.get("lock", True))}
+    if inst:
+        out["inst"] = inst
+    return out, None
+
+
+def admin_build(gid: int, acc, spec: dict):
+    """Create (or, with "inst", rebuild) a coach with exactly the given job buffs. Returns the CoachCard;
+    raises ValueError with a German text for a spec the tables do not allow."""
+    import time
+    P = _P()
+    have = cards(gid, acc)
+    clean, err = check_build(spec, have)
+    if err:
+        raise ValueError(err)
+    card = have.get(clean.get("inst", 0))
+    if card is None:
+        card = P.CoachCard(inst_id=max(list(have) + [INST_BASE]) + 1, create_time=int(time.time()))
+    card.conf_id, card.level, card.exp, card.locked = clean["conf"], clean["level"], 0, clean["lock"]
+    del card.job_buffs[:]
+    for job, buff in clean["buffs"]:
+        card.job_buffs.add(job=job, buff_id=buff)
+    _save(gid, card)
+    return card
 
 
 def _rare(card) -> int:

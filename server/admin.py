@@ -21,6 +21,12 @@ In-game commands for admins: the gift code field takes "/command [value] [@playe
   /gold N  /diamonds N  /exp N  /stamina N  /level N  /items N  /allcards  /maxcards
   /card <name>  (every version of that character)   /potential <set name>  (full set, max)
   /infinite on|off  /power N|off  (all cards' match strength in percent)
+  /perfect on|off  (every card wears its potential guide's perfect set, see sync_perfect)
+  /unlockall  (everything collectable: cards, memories, max, items, currencies, coaches, potentials, cheers,
+      cosmetics)   /unlock <kind> ... [off]  (single kinds, "off" takes cheers / cosmetics back; unlockall.py)
+  /coaches  (list of the coaches)   /coachbuffs <coach> [word | all]  (the buffs that coach can have)
+  /coach <name or id> [level] <job:buff> ...   build a coach with exactly these job buffs, e.g.
+      /coach ukai 15 ws:4071 mb:4072 s:4078 l:4079 op:4073   (job: 1-5 or ws mb s l op; see coach.py)
 Owner only (shared server): /admin <player>  /unadmin <player>
 
 Potentials (PlayerSpecialty) can also be put on / taken off cards in game
@@ -33,13 +39,22 @@ Queue entries (list, applied in order):
   {"cards": [conf, ...]}                        one card of each of these characters
   {"max_cards": true}                           every card to the top star and level 80
   {"items": 999}                                every bag item kind (as in the captured account) to this count
-  {"flags": {"infinite_stamina": true}}
+  {"scan": {"hfhscan": 1, ...}}                 a scan file of the HFH-Bot (scanimport.py)
+  {"flags": {"infinite_stamina": true}}         also "perfect_potentials": guide sets on every card
   {"specialties": [{"conf": 3051045, "level": 12, "main": 1023,
                     "vices": [[2010, 2], [2023, 1], ...], "count": 1}]}
   {"power": {"<card inst or *>": {"pct": 150, "stats": {"<attr type>": value}} | null}}
       match strength per card ("*" = every card): all 7 stats in percent and/or single stats
       set to a value as shown in game; null removes it. Applied when the team for a match is
       built (matches.home_team -> apply_power), so the match engine uses it.
+  {"unlock_all": true}   {"unlock": ["cheers", "cosmetics", ...]}   {"relock": ["cheers", "cosmetics"]}
+      everything collectable or single kinds of it, see unlockall.py (what is in, what is left out and why)
+  {"coach": {"conf": 9, "level": 15, "buffs": [[1, 4071], [3, 4078]], "lock": true}}
+      a new coach (coachlist id) with exactly these job buffs [job 1-5, coachbuff id]; with "inst" an
+      owned coach is rebuilt instead. Checked against the tables (coach.check_build): the coach and level
+      exist, every buff is one this coach can roll, at most one buff per reached level of 3/6/9/12/15 as
+      on Garena. A wrong entry changes nothing and is reported. In the coach list after the login; in a
+      match the coach chosen in the line-up counts with its job buffs only (matches.own_coach, see coach.py).
 """
 import hashlib
 import json
@@ -278,6 +293,25 @@ def _apply(acc, action: dict) -> list[str]:
     for key, value in action.get("flags", {}).items():
         acc.admin_flags[key] = bool(value)
         done.append(f"{key} = {bool(value)}")
+    if action.get("scan"):  # a scan file of the HFH-Bot (players, potentials, memories, coaches)
+        import scanimport
+        done += scanimport.apply(acc, action["scan"])
+    if action.get("unlock_all") or action.get("unlock"):
+        import unlockall
+        done += unlockall.apply(acc, unlockall.KINDS if action.get("unlock_all") else action["unlock"], _apply)
+    if action.get("relock"):
+        import unlockall
+        done += unlockall.relock(acc, action["relock"])
+    if action.get("coach"):
+        import coach
+        specs = action["coach"] if isinstance(action["coach"], list) else [action["coach"]]
+        for spec in specs:
+            try:
+                card = coach.admin_build(int(acc.gid), acc, spec)
+                done.append(f"Trainer {coach_names().get(card.conf_id, card.conf_id)} Stufe {card.level} "
+                            f"mit {len(card.job_buffs)} Buff(s)")
+            except ValueError as e:
+                done.append(f"Trainer nicht gebaut: {e}")
     if action.get("specialties"):
         rows = _specialty_rows()
         n = 0
@@ -495,6 +529,107 @@ def suit_names() -> dict:
     return _names_cache["suits"]
 
 
+# --- coaches (coach.py): names for the lists and the /coach command -----------------------------
+JOB_TEXT = {1: ("ws", 20074475), 2: ("mb", 680108), 3: ("s", 643604), 4: ("l", 32911123), 5: ("op", 814991)}
+JOB_CODES = {code: job for job, (code, _) in JOB_TEXT.items()}
+
+
+def job_name(job: int) -> str:
+    code, lid = JOB_TEXT.get(job, (str(job), 0))
+    return _text(lid).replace("- ", "") or code.upper()
+
+
+def coach_names() -> dict:
+    """coachlist id -> "KEISHIN UKAI ★4" (the same coach exists once per rarity 2-4)."""
+    if "coaches" not in _names_cache:
+        import coach
+        _names_cache["coaches"] = {c: f"{_text(r.get('CoachName')) or c} ★{r.get('CoachRare')}"
+                                   for c, r in coach.COACHES.items()}
+    return _names_cache["coaches"]
+
+
+def buff_text(buff_id: int) -> str:
+    """A coach buff as the game words it, with its numbers filled in."""
+    import coach
+    row = coach.BUFFS.get(buff_id, {})
+    text = _text(row.get("BuffName")) or str(buff_id)
+    for i, val in enumerate(str(row.get("BuffNumber") or "").split("_")):
+        text = text.replace("{%d}" % i, val)
+    return text
+
+
+def find_coach(text: str) -> int | None:
+    """coachlist id for "9" or a name ("ukai": the highest rarity; "ukai 3": that rarity)."""
+    import coach
+    words = text.split()
+    if len(words) == 1 and words[0].isdigit():
+        return int(words[0]) if int(words[0]) in coach.COACHES else None
+    rare = int(words.pop()) if len(words) > 1 and words[-1].isdigit() else None
+    words = [_norm(w) for w in words if _norm(w)]
+    hits = [c for c, r in coach.COACHES.items() if words and all(w in _norm(_text(r.get("CoachName"))) for w in words)
+            and rare in (None, r.get("CoachRare"))]
+    if len({_text(coach.COACHES[c].get("CoachName")) for c in hits}) != 1:
+        return None
+    return max(hits, key=lambda c: coach.COACHES[c].get("CoachRare") or 0)
+
+
+def coach_buffs(conf: int, word: str = "") -> list[int]:
+    """The buffs a coach can have: without a word the best roll of every kind, "alle"/"all" every roll,
+    another word only the buffs whose text contains it."""
+    import coach
+    pool = [b for b in coach.COACHES.get(conf, {}).get("CoachBuffId") or [] if b in coach.BUFFS]
+    if word.lower() in ("alle", "all"):
+        return pool
+    best = [b for b in pool if coach.BUFFS[b].get("BuffNumber") == coach.BUFFS[b].get("MaxNumber")]
+    if word:
+        best = [b for b in best if _norm(word) in _norm(buff_text(b))]
+    return best
+
+
+def _mails(gid, lines: list[str], size: int = 1500):
+    """Send a long list as several mails."""
+    chunk = ""
+    for line in lines:
+        if chunk and len(chunk) + len(line) > size:
+            notify(gid, chunk)
+            chunk = ""
+        chunk += line + "\n"
+    if chunk:
+        notify(gid, chunk)
+
+
+def coach_help() -> str:
+    return ("Trainer bauen: /coach <Name oder Nummer> [Stufe] <Position:Buff> … – z. B. /coach ukai 15 ws:4071 "
+            "s:4078. Positionen: " + ", ".join(f"{c} = {job_name(j)}" for c, j in JOB_CODES.items())
+            + ". Trainer: /coaches, Buffs: /coachbuffs <Trainer> [Suchwort | alle].")
+
+
+def parse_coach(args: list[str]) -> tuple[dict | None, str | None]:
+    """/coach arguments -> (checked queue spec, None) or (None, German error text)."""
+    import coach
+    buffs, rest = [], []
+    for a in args:
+        if ":" in a:
+            job, _, buff = a.partition(":")
+            job = JOB_CODES.get(job.lower(), int(job) if job.isdigit() else 0)
+            if not buff.isdigit():
+                return None, f"„{a}“ verstehe ich nicht. " + coach_help()
+            buffs.append([job, int(buff)])
+        else:
+            rest.append(a)
+    if not rest:
+        return None, coach_help()
+    level = None
+    if len(rest) > 1 and rest[-1].isdigit():  # "ukai 15": level; "ukai 3 15": rarity 3, level 15
+        level = int(rest.pop())
+    conf = find_coach(" ".join(rest))
+    if conf is None:
+        return None, f"Trainer „{' '.join(rest)}“ nicht eindeutig gefunden. Liste: /coaches."
+    if level is None:
+        level = coach.MAX_LEVEL.get(coach.COACHES[conf].get("CoachRare"), 15)
+    return coach.check_build({"conf": conf, "level": level, "buffs": buffs})
+
+
 def _norm(t: str) -> str:
     return "".join(ch for ch in t.lower() if ch.isalnum())
 
@@ -542,9 +677,151 @@ def find_suit(text: str) -> int | None:
     return hits[0] if len(hits) == 1 else None
 
 
+# --- perfect potentials after the in-game potential guide ------------------------------------
+# The guide (PlayerGuideViewLogic::RefreshSpecialPage) shows per player playerlist.SpecialtySuit (recommended
+# sets, each with its 2- and 4-piece bonus, specialtysuitconf NumA / NumB) and SpecialtyProperty (recommended
+# stats, property ids). "Perfect" here: 4 places of the first recommended set + 2 of the second (the 4-piece
+# skill and both 2-piece bonuses; one set only: all 6), top rarity and max level, the variable main stats and
+# the 4 sub stats picked by the recommended stats (percent before flat), every sub stat upgrade on the best one.
+# Admin switch "perfect_potentials": at every login every card gets such a set (created once per card, kept
+# when it is still on the card); switched off, the created ones are removed and each card gets its old
+# potentials back (those still free).
+PERFECT = "perfect_potentials"
+_attr_cache = {}
+
+
+def _attr_ids() -> tuple[dict, dict]:
+    """attr -> potential attr id: main (Attrtype 1) and sub (Attrtype 2) stats (specialtyattrconf)."""
+    if not _attr_cache:
+        main, vice = {}, {}
+        try:
+            for r in json.loads((gameconfig.CFG / "specialtyattrconf.json").read_text(encoding="utf-8")):
+                (main if r.get("Attrtype") == 1 else vice).setdefault(r.get("Attr", 0), r["AttrID"])
+        except Exception:
+            pass
+        _attr_cache.update(main=main, vice=vice)
+    return _attr_cache["main"], _attr_cache["vice"]
+
+
+def _listify(v) -> list:
+    return v if isinstance(v, list) else [] if v in (None, "", -2147483648) else [v]
+
+
+def _vice_pool() -> dict:
+    try:
+        return {r["ID"]: r["Viceattr"] for r in json.loads(
+            (gameconfig.CFG / "specialtyviceattr.json").read_text(encoding="utf-8"))}
+    except Exception:
+        return {}
+
+
+def perfect_set(conf: int) -> list[dict]:
+    """The guide's perfect potentials of a character: [{"conf", "level", "main", "vices", "position"}]."""
+    guide = gameconfig.PLAYERS.get(conf) or gameconfig.PLAYERS.get(conf - TWIN_BASE) or {}
+    suits = _listify(guide.get("SpecialtySuit"))
+    if not suits:
+        return []
+    props = _listify(guide.get("SpecialtyProperty"))
+    main_id, vice_id = _attr_ids()
+    attr_of = {v: k for k, v in main_id.items()}
+    attr_of.update({v: k for k, v in vice_id.items()})
+    wanted = [a for p in props for a in ((200 + p, p) if 0 <= p <= 6 else (p,))]
+    rows, pools = _specialty_rows(), _vice_pool()
+    plan = [suits[0]] * 4 + [suits[1] if len(suits) > 1 else suits[0]] * 2  # places 0-3 / 4-5
+    out = []
+    for pos, suit in enumerate(plan):
+        cands = [r for r in rows.values() if r["SuitID"] == suit and (r.get("Position") or 0) == pos]
+        if not cands:
+            continue
+        row = max(cands, key=lambda r: r["Rare"])
+        level = {1: 6, 2: 6, 3: 9}.get(row["Rare"], 12)
+        mains = _listify(row["MainattrID"])
+        main = next((main_id[a] for a in wanted if main_id.get(a) in mains), mains[0])
+        pool = [v for v in pools.get(row.get("ViceattrPool"), []) if attr_of.get(v) != attr_of.get(main)]
+        best = [vice_id[a] for a in wanted if vice_id.get(a) in pool]
+        vices = list(dict.fromkeys(best + pool))[:4]
+        out.append({"conf": row["ID"], "level": level, "main": main, "position": pos,
+                    "vices": [[v, level // 3 if i == 0 else 0] for i, v in enumerate(vices)]})
+    return out
+
+
+def sync_perfect(acc) -> int:
+    """Admin switch on: every card wears its guide's perfect set; off: back to the old potentials.
+    Returns the number of cards changed. Called at login (server.handle_login)."""
+    st = acc.admin_flags.get("perfect")
+    on = flag(acc, PERFECT)
+    if not on and not st:
+        return 0
+    changed, new_cards, plans = 0, {}, {}
+    cards = _all_cards(acc)
+    if not on:  # switched off: remove the created potentials, put the old ones back where still free
+        made = {int(i) for ids in st.get("made", {}).values() for i in ids}
+        for inst, card in cards.items():
+            if str(inst) not in st.get("made", {}):
+                continue
+            old = st.get("prev", {}).get(str(inst), [0] * SLOTS)
+            slots = []
+            for sid in old:
+                sid = int(sid)
+                spec = acc.get_specialty(sid) if sid and sid not in made else None
+                free = spec is not None and wire.get(wire.parse(spec), 6, 0) in (0, inst)
+                slots.append(sid if free else 0)
+                if free:
+                    _set_owner(acc, sid, inst)
+            new_cards[inst] = _with_slots(card, slots)
+            changed += 1
+        for sid in made:
+            acc.specialties.pop(sid, None)
+        acc.admin_flags.pop("perfect", None)
+        _put_cards(acc, new_cards)
+        acc.save()
+        return changed
+    st = acc.admin_flags.setdefault("perfect", {"prev": {}, "made": {}})
+    for inst, card in cards.items():
+        conf = wire.get(wire.parse(card), 3, 0)
+        mine = [int(i) for i in st["made"].get(str(inst), [])]
+        if mine and sorted(i for i in _slots(card) if i) == sorted(mine) and all(acc.get_specialty(i) for i in mine):
+            continue
+        if conf not in plans:
+            plans[conf] = perfect_set(conf)
+        plan = plans[conf]
+        if not plan:
+            continue
+        current = _slots(card)
+        if str(inst) not in st["prev"]:
+            st["prev"][str(inst)] = current
+        for sid in current:  # what sits there now comes off
+            if sid and sid not in mine:
+                _set_owner(acc, sid, 0)
+        slots = [0] * SLOTS
+        ids = []
+        for i, p in enumerate(plan):
+            sid = mine[i] if i < len(mine) and acc.get_specialty(mine[i]) else 0
+            if not sid:
+                sid = SPECIALTY_INST_BASE + acc.next_inst
+                acc.next_inst += 1
+                acc.put_specialty(make_specialty(sid, p["conf"], p["level"], p["main"], p["vices"]))
+            _set_owner(acc, sid, inst)
+            slots[p["position"]] = sid
+            ids.append(sid)
+        st["made"][str(inst)] = ids
+        new_cards[inst] = _with_slots(card, slots)
+        changed += 1
+    if changed:
+        _put_cards(acc, new_cards)
+        acc.save()
+    return changed
+
+
+def _put_cards(acc, new_cards: dict[int, bytes]):
+    """Store many changed cards at once (Account.put_card scans the whole list for every card)."""
+    if new_cards:
+        acc.cards = [c for c in acc.cards if wire.get(wire.parse(c), 1) not in new_cards] + list(new_cards.values())
+
+
 HELP = ("Befehle: /gold N, /diamonds N, /exp N, /stamina N (kommen sofort als Post), /level N, "
-        "/items N, /allcards, /maxcards, /card <Name>, /potential <Set>, /infinite on|off, "
-        "/power N|off – mit @Name für einen anderen Spieler.")
+        "/items N, /allcards, /maxcards, /card <Name>, /potential <Set>, /perfect on|off, /infinite on|off, "
+        "/power N|off, /coach (eigenen Trainer bauen, Hilfe: /coach), /unlockall (alles freischalten), /unlock <Art> (Hilfe: /unlock) – mit @Name für einen anderen Spieler.")
 
 
 def notify(gid, text: str, items: list | None = None) -> bool:
@@ -643,8 +920,45 @@ def command(gid, code: str) -> tuple[str, str | None, str | None, str | None]:
                     "Set nicht eindeutig gefunden. Sets: " + ", ".join(sorted(suit_names().values())) + ".",
                     None, None)
         action = {"specialties": full_set(suit)}
+    elif cmd == "/unlockall":
+        action = {"unlock_all": True}
+    elif cmd == "/unlock":
+        import unlockall
+        off = bool(args) and args[-1].lower() in ("off", "aus")
+        kinds = [unlockall.kind_of(a) for a in (args[:-1] if off else args)]
+        if not kinds or None in kinds or (off and any(k not in unlockall.SWITCHES for k in kinds)):
+            text = ("Aufruf: /unlock <Art> … – Arten: " + ", ".join(f"{k} ({unlockall.NAMES[k]})" for k in unlockall.KINDS)
+                    + ". Alles auf einmal: /unlockall. Zurücknehmen geht bei cheers und cosmetics: /unlock cheers off.")
+            return f"/unlock: bad arguments {args!r}", text, None, None
+        action = {"relock": kinds} if off else {"unlock": kinds}
+    elif cmd == "/coaches":
+        import coach
+        _mails(gid, ["Trainer (Nummer: Name, Seltenheit):"]
+               + [f"{c}: {n} – höchste Stufe {coach.MAX_LEVEL.get(coach.COACHES[c].get('CoachRare'), 15)}, "
+                  f"{len(coach.COACHES[c].get('CoachBuffId') or [])} mögliche Buffs"
+                  for c, n in sorted(coach_names().items())] + [coach_help()])
+        return f"{code!r}: coach list sent", None, None, None
+    elif cmd == "/coachbuffs":
+        word = args.pop() if len(args) > 1 and not args[-1].isdigit() and find_coach(" ".join(args)) is None else ""
+        conf = find_coach(" ".join(args)) if args else None
+        if conf is None:
+            return (f"/coachbuffs: no coach {' '.join(args)!r}",
+                    "Trainer nicht eindeutig gefunden. Aufruf: /coachbuffs <Trainer> [Suchwort | alle]. Liste: /coaches.",
+                    None, None)
+        ids = coach_buffs(conf, word)
+        head = (f"Buffs für {coach_names()[conf]} ({len(ids)}"
+                + ("" if word else ", je Art der beste Wert – alle Werte: /coachbuffs … alle") + "), Nummer: Text")
+        _mails(gid, [head] + [f"{b}: {buff_text(b)}" for b in ids] + [coach_help()])
+        return f"{code!r}: {len(ids)} buffs sent", None, None, None
+    elif cmd == "/coach":
+        spec, err = parse_coach(args)
+        if err:
+            return f"/coach: {err}", err, None, None
+        action = {"coach": spec}
     elif cmd == "/maxcards":
         action = {"max_cards": True}
+    elif cmd == "/perfect" and args and args[0].lower() in ("on", "an", "off", "aus"):
+        action = {"flags": {PERFECT: args[0].lower() in ("on", "an")}}
     elif cmd == "/infinite" and args and args[0].lower() in ("on", "an", "off", "aus"):
         action = {"flags": {"infinite_stamina": args[0].lower() in ("on", "an")}}
     elif cmd == "/power" and args and (num is not None or args[0].lower() in ("off", "aus")):

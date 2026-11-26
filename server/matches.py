@@ -154,7 +154,9 @@ def card_attrs(conf_id: int, level: int, star: int, train: int = 0, stage: dict 
 
 
 def card_power(attrs: list) -> int:
-    return sum(a.val for a in attrs if a.type in (s[0] for s in STATS)) // SCALE
+    """Sum of the 7 stats incl. extrval (Garena's power follows val + extrval: 0.86-1.06 of it on the
+    captured cards; its crit power factors and the coach / bond share are not modelled)."""
+    return sum(a.val + a.extrval for a in attrs if a.type in (s[0] for s in STATS)) // SCALE
 
 
 def _extras(card: P.PlayerCard, recalling: bytes | None) -> list:
@@ -175,18 +177,154 @@ def _extras(card: P.PlayerCard, recalling: bytes | None) -> list:
     return out
 
 
-def card_entry(card: P.PlayerCard, stage: dict | None = None, recalling: bytes | None = None) -> P.PlayerCardInfo:
-    attrs = card_attrs(card.conf_id, card.level, card.star, card.train, stage)
-    extra = 0
+# --- potentials and memory stats (client: PlayerSystem.PlayerAttributeUtility) ----------------------
+# BuildPlayerAttribute = star/level (PlayerCardAttr.val) + training, skill resonance, memory, potentials, all
+# into extrval. AddExtrAttr(attr, value): attr >= 200 adds value / 10000 of the star/level val of stat
+# attr - 200, else value itself. Potentials (BuildSpecialtyAttr): main and every sub stat -> specialtyattrconf
+# row (AttrID, Level = attr level, Rare = specialty rarity) -> AddExtrAttr(Attr, Value); then per set
+# (SuitID) with >= NumA potentials AttrA, >= NumB AttrB (SkillB, a set skill, is not modelled). Memory
+# (BuildRecallingAttr): recallingarrt row of recalling.AttrGroupId for the memory's level, every BaseAttr
+# (attr, value) + level * UpAttr[i], only when recalling.Job == the player's job.
+# Checked on the 13 cards of the captured home team (0x0302): their extrval minus training, resonance,
+# memory and potentials leaves per stat the same team-wide amount (coach / bonds, not modelled) on most
+# cards; the crit and bonus stats 9-14 come out exactly.
+_STAT_TABLES = {}
+
+
+def _stat_tables() -> dict:
+    if not _STAT_TABLES:
+        def rows(name):
+            try:
+                return json.loads((_CFG / f"{name}.json").read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                return []
+        _STAT_TABLES["attr"] = {(r["AttrID"], r.get("Level", 0), r["Rare"]): r for r in rows("specialtyattrconf")}
+        _STAT_TABLES["spec"] = {r["ID"]: r for r in rows("specialty")}
+        _STAT_TABLES["suit"] = {r["ID"]: r for r in rows("specialtysuitconf")}
+        _STAT_TABLES["memory"] = {r["ID"]: r for r in rows("recalling")}
+        groups = {}
+        for r in rows("recallingarrt"):
+            groups.setdefault(r.get("Group"), []).append(r)
+        _STAT_TABLES["memory_attr"] = {g: sorted(v, key=lambda r: r.get("Level", 0)) for g, v in groups.items()}
+    return _STAT_TABLES
+
+
+def _kv_pairs(v) -> list[tuple[int, int]]:
+    """Table pair lists [8, key, 16, value, ...]; a value without its key has key 0 (protobuf default)."""
+    flat = []
+    for x in v if isinstance(v, list) else []:
+        flat += x if isinstance(x, list) else [x]
+    out, key = [], 0
+    for i in range(0, len(flat) - 1, 2):
+        if flat[i] == 8:
+            key = flat[i + 1]
+        elif flat[i] == 16:
+            out.append((key, flat[i + 1]))
+            key = 0
+    return out
+
+
+def _add_extra(extra: dict, base: dict, attr: int, value: int):
+    if attr >= 200:
+        extra[attr - 200] = extra.get(attr - 200, 0) + base.get(attr - 200, 0) * value // SCALE
+    else:
+        extra[attr] = extra.get(attr, 0) + value
+
+
+def potential_stats(base: dict, specialties: list) -> dict:
+    """{stat: extra} of the equipped potentials (PlayerSpecialty) and their set bonuses."""
+    t = _stat_tables()
+    extra, suits = {}, {}
+    for s in specialties:
+        cfg = t["spec"].get(s.conf_id)
+        if not cfg:
+            continue
+        for a in [s.main_attr] + list(s.vice_attrs):
+            row = t["attr"].get((a.attr_id, a.attr_lev, cfg["Rare"]))
+            if row:
+                _add_extra(extra, base, row.get("Attr", 0), row["Value"])
+        suits[cfg["SuitID"]] = suits.get(cfg["SuitID"], 0) + 1
+    for suit, n in suits.items():
+        row = t["suit"].get(suit, {})
+        if n >= _num(row.get("NumA"), 99):
+            for k, v in _kv_pairs(row.get("AttrA")):
+                _add_extra(extra, base, k, v)
+        if n >= _num(row.get("NumB"), 99):
+            for k, v in _kv_pairs(row.get("AttrB")):
+                _add_extra(extra, base, k, v)
+    return extra
+
+
+def memory_stats(base: dict, conf_id: int, memory) -> dict:
+    """{stat: extra} of an equipped memory (PlayerRecalling), only on a player of the memory's job."""
+    t = _stat_tables()
+    cfg = t["memory"].get(memory.conf_id)
+    if not cfg or cfg.get("Job") != gameconfig.PLAYERS.get(conf_id, {}).get("Job"):
+        return {}
+    pick = None
+    for row in t["memory_attr"].get(cfg.get("AttrGroupId"), []):
+        if memory.level >= row.get("Level", 0):
+            pick = row
+    extra = {}
+    if pick:
+        ups = pick.get("UpAttr") or []
+        for i, (k, v) in enumerate(_kv_pairs(pick.get("BaseAttr"))):
+            up = ups[i] if i < len(ups) and isinstance(ups[i], int) else 0
+            _add_extra(extra, base, k, v + memory.level * up)
+    return extra
+
+
+def card_entry(card: P.PlayerCard, stage: dict | None = None, recalling: bytes | None = None,
+               specialties: list | None = None) -> P.PlayerCardInfo:
+    """A card's PlayerCardInfo as Garena builds it: val = star / level, extrval = training, skill resonance
+    (percent of val), memory and potentials (`specialties`: the equipped PlayerSpecialty bytes)."""
+    attrs = card_attrs(card.conf_id, card.level, card.star, 0, stage)
+    base = {a.type: a.val for a in attrs}
+    extra = dict(_train_bonus(card.conf_id, card.train)) if card.train else {}
+    power_extra = 0
     if card.skill_resonance_unlock_level:  # skill resonance: +x % basic stats, extra power
-        pct, extra = gameconfig.resonance_bonus(card.conf_id, card.skill_resonance_unlock_level)
-        for a in attrs:
-            if a.type in pct:
-                a.val = a.val * (10000 + pct[a.type]) // 10000
-    entry = P.PlayerCardInfo(info=card, attr=attrs, power=card_power(attrs) + extra)
-    if recalling:  # equipped memory: its entity and skills (plus resonance skills, as the client expects)
-        entry.recalling_entity.ParseFromString(recalling)
+        pct, power_extra = gameconfig.resonance_bonus(card.conf_id, card.skill_resonance_unlock_level)
+        for t, v in pct.items():
+            extra[t] = extra.get(t, 0) + base.get(t, 0) * v // SCALE
+    rec = None
+    if recalling:
+        rec = P.PlayerRecalling()
+        rec.ParseFromString(recalling)
+        for t, v in memory_stats(base, card.conf_id, rec).items():
+            extra[t] = extra.get(t, 0) + v
+    specs = [P.PlayerSpecialty.FromString(s) for s in specialties or [] if s]
+    for t, v in potential_stats(base, specs).items():
+        extra[t] = extra.get(t, 0) + v
+    for a in attrs:
+        a.extrval = extra.get(a.type, 0)
+    entry = P.PlayerCardInfo(info=card, attr=attrs, power=card_power(attrs) + power_extra)
+    entry.specialtys_entity.extend(specs)
+    if rec is not None:  # equipped memory: its entity and skills (plus resonance skills, as the client expects)
+        entry.recalling_entity.CopyFrom(rec)
         entry.skill_extras.extend(_extras(card, recalling))
+    return entry
+
+
+def equipped_specialties(acc, card: P.PlayerCard) -> list:
+    """The PlayerSpecialty bytes on a card (PlayerCard.specialtys = inst ids by place, 0 = empty)."""
+    return [s for s in (acc.get_specialty(i) for i in card.specialtys if i) if s]
+
+
+def with_specialties(real: P.PlayerCardInfo, specialties: list) -> P.PlayerCardInfo:
+    """A captured card's real PlayerCardInfo (incl. coach / bonds) with other potentials: the old ones'
+    share comes off extrval, the new ones' goes on."""
+    entry = P.PlayerCardInfo()
+    entry.CopyFrom(real)
+    base = {a.type: a.val for a in entry.attr}
+    old = potential_stats(base, list(real.specialtys_entity))
+    specs = [P.PlayerSpecialty.FromString(s) for s in specialties if s]
+    new = potential_stats(base, specs)
+    for a in entry.attr:
+        a.extrval += new.get(a.type, 0) - old.get(a.type, 0)
+    # Garena's power stays, moved by the difference of the 7 stats
+    entry.power += sum(new.get(t, 0) - old.get(t, 0) for t, _, _ in STATS) // SCALE
+    del entry.specialtys_entity[:]
+    entry.specialtys_entity.extend(specs)
     return entry
 
 
@@ -233,23 +371,46 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
         card = P.PlayerCard()
         card.ParseFromString(raw)
         real = captured.get(inst)
+        specs = equipped_specialties(acc, card)
         if real and _same_card(real.info, card):
-            # unchanged since the capture: real stats incl. specialties, coach and bonds
-            entry = P.PlayerCardInfo()
-            entry.CopyFrom(real)
+            # unchanged since the capture: real stats incl. specialties, coach and bonds; other potentials
+            # (e.g. Admin Mode's perfect sets) replace the old ones' share
+            if list(real.info.specialtys) == list(card.specialtys):
+                entry = P.PlayerCardInfo()
+                entry.CopyFrom(real)
+            else:
+                entry = with_specialties(real, specs)
+                entry.info.CopyFrom(card)
             team.formation.players.append(entry)
         else:
             rec = acc.all_recallings().get(card.recalling) if card.recalling else None
-            team.formation.players.append(card_entry(card, recalling=rec))
+            team.formation.players.append(card_entry(card, recalling=rec, specialties=specs))
     team.power = sum(p.power for p in team.formation.players[:7])
     if any(p.info.inst_id in captured for p in team.formation.players):
         # the captured room's team-wide extras (coach, bonds) belong to these cards
         team.formation.coach_card.CopyFrom(template.formation.coach_card)
         team.formation.fetter_id_levels.extend(template.formation.fetter_id_levels)
         team.skill_extras.extend(template.skill_extras)
+    own_coach(team, acc, gid, form)
     import admin  # Admin Mode: per-card power changes (no-op without any)
     admin.apply_power(acc, team)
     return team
+
+
+def own_coach(team: P.PVPTeamInfo, acc, gid: int, form) -> bool:
+    """The line-up names its coach itself (TeamFormation.coach_card_inst_id, as in Garena's 0x0B01 / 0x0B03):
+    that coach of the player (coach.py: levelled, built in Admin Mode, ...) goes into the match team. Kept as it
+    is when the line-up names no coach, one the player does not have, or the captured room's own coach.
+    skills.py turns coach_card.job_buffs into skills for teams without captured skill_extras."""
+    inst = form.coach_card_inst_id if form else 0
+    if not inst or (team.formation.HasField("coach_card") and team.formation.coach_card.inst_id == inst):
+        return False
+    import coach
+    mine = coach.cards(gid, acc).get(inst)
+    if mine is None:
+        return False
+    team.formation.coach_card.CopyFrom(mine)
+    return True
 
 
 def _same_card(a: P.PlayerCard, b: P.PlayerCard) -> bool:

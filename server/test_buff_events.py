@@ -34,8 +34,9 @@ def pick(want):
     return next(i for i, r in sorted(skills.BUFFS.items()) if want(r))
 
 
-def stat(r):  # a plain stat buff on the player himself
-    return (N(r.get("Type")) == 2 and N(r.get("MountType"), 1) == 1 and skills._tag(r) is None
+def stat(r):  # a plain stat buff on the player himself (debuffs may carry a tag: the JP tables tag them all)
+    return (N(r.get("Type")) == 2 and N(r.get("MountType"), 1) == 1
+            and (skills._tag(r) is None or N(r.get("BuffType2")) == 1)
             and skills._flat(r.get("ModifyTarget")) != [skills.STAMINA] and N(r.get("ArgsType"), 1) == 1)
 
 

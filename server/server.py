@@ -349,6 +349,12 @@ async def handle_login(client: GameClient, pb_data: bytes):
     session_id = os.urandom(16).hex()
     # the captured account for owner gids, a generated starter set for everyone else
     client.account = Account(gid, starter.baseline_for(gid))
+    try:  # Admin Mode switch: every card wears its potential guide's perfect set (or back to the old ones)
+        n = admin.sync_perfect(client.account)
+        if n:
+            log.info(f"  ADMIN perfect potentials: {n} cards changed")
+    except Exception as e:  # never block a login
+        log.error(f"  ADMIN perfect potentials failed: {e!r}")
 
     # LoginBySessionS2C:
     # 1=ERROR (0=SUCCESS), 2=Gamer, 7=time_zone, 9=index
@@ -387,6 +393,10 @@ async def handle_login(client: GameClient, pb_data: bytes):
             await client.send_packet(0x2101, personal.info_message(int(gid), client.account,
                                                                    client.account.b.pb("0x2101")))
             continue
+        if m["msg_id"].upper() == "0X2501" and unlockall.has(client.account, "cheers"):
+            # Admin Mode "unlock everything": every Team Cheer at its top star
+            await client.send_packet(0x2501, unlockall.support_info(client.account, client.account.b.pb("0x2501")))
+            continue
         if m["msg_id"].upper() == "0X0F0A":  # memory recruit pools: this player's own wishes
             await client.send_packet(0x0F0A, recallwish.info(int(gid), client.account), compress=True)
             continue
@@ -419,7 +429,8 @@ async def handle_login(client: GameClient, pb_data: bytes):
     client.missions.save()
     client.account.save()
     for mid, pb in client.account.login_updates():
-        await client.send_packet(mid, pb)
+        # big ones gzip-compressed like Garena's large messages (e.g. thousands of potentials from Admin Mode)
+        await client.send_packet(mid, pb, compress=len(pb) > 8192)
     await client.send_packet(MSG_TASK_CHANGE, client.missions.change_message(all_tasks=True))
     log.info(f"  ACCOUNT {gid}: {len(client.account.cards)} added cards, {len(client.account.items)} changed items")
     try:  # shared-server PvP: snapshot this player's team, arena info from this server's ladder
@@ -1694,6 +1705,7 @@ import weekly  # noqa: E402  weekly activity "Bonus Training" (0x2F01 / 0x2F02) 
 MESSAGE_HANDLERS.update(weekly.HANDLERS)
 import minigame  # noqa: E402  mini games (Arder 0x2B01 / 0x2B03) per player
 MESSAGE_HANDLERS.update(minigame.HANDLERS)
+import unlockall  # noqa: E402  Admin Mode "unlock everything": cheers (0x2501) and profile items (0x2101)
 import coach  # noqa: E402  coaches per player: level up (0x5503), dismantle (0x5505)
 MESSAGE_HANDLERS.update(coach.HANDLERS)
 import cardlock  # noqa: E402  lock / unlock a player card (0x0909)
