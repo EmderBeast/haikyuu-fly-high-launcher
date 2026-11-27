@@ -399,6 +399,8 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
     if COACH_STATS:
         switch_coach(team, old if had else None, set(captured))
         team.power += coach_force(team.formation.coach_card if team.formation.HasField("coach_card") else None)
+    import cheers  # the line-up's cheers: one morale entry each, at this account's stars
+    cheers.team_morale(team, acc, form)
     import admin  # Admin Mode: per-card power changes (no-op without any)
     admin.apply_power(acc, team)
     return team

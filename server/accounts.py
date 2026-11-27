@@ -178,6 +178,9 @@ class Account:
         # memories (PlayerRecalling) added or changed on top of the baseline: inst_id -> bytes
         self.recallings = {int(k): bytes.fromhex(v) for k, v in d.get("recallings", {}).items()}
         self.removed_recallings = set(d.get("removed_recallings", []))  # consumed or dismantled (recalling.py)
+        self.cheers = d.get("cheers") or {}  # cheer -> star_id changed by star ups (cheers.py)
+        self.cheer_lottery = d.get("cheer_lottery") or {}  # cheer draw units changed by wish / gifts (cheers.py)
+        self.card_auto = d.get("card_auto")  # auto-dismantle player conf ids (cards.py), None = baseline
         self.recalling_auto = d.get("recalling_auto")  # auto-dismantle conf ids (recalling.py), None = baseline
         self.team = bytes.fromhex(d["team"]) if d.get("team") else None  # TeamInfoS2C with saved line-ups
         self.flags = d.get("flags")  # GAMER_FLAGS bit mask (auto skill 1, auto serve 2, speed 4); None = baseline
@@ -216,6 +219,9 @@ class Account:
             "recallings": {str(k): v.hex() for k, v in self.recallings.items()},
             "removed_recallings": sorted(self.removed_recallings),
             "recalling_auto": self.recalling_auto,
+            "card_auto": self.card_auto,
+            "cheers": self.cheers,
+            "cheer_lottery": self.cheer_lottery,
             "team": self.team.hex() if self.team else None,
             "flags": self.flags,
             "assistant": {str(k): v for k, v in self.assistant.items()},

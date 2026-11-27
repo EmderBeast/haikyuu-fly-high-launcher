@@ -414,10 +414,15 @@ async def handle_login(client: GameClient, pb_data: bytes):
             await client.send_packet(0x2101, personal.info_message(int(gid), client.account,
                                                                    client.account.b.pb("0x2101")))
             continue
-        if m["msg_id"].upper() == "0X2501" and (unlockall.has(client.account, "cheers")
+        if m["msg_id"].upper() == "0X2501" and (unlockall.has(client.account, "cheers") or client.account.cheers
                                                 or "scan_cheers" in client.account.admin_flags):
-            # Admin Mode "unlock everything": every Team Cheer at its top star; or the cheers of a loaded scan
-            await client.send_packet(0x2501, unlockall.support_info(client.account, client.account.b.pb("0x2501")))
+            # Admin Mode "unlock everything": every Team Cheer at its top star; or the cheers of a loaded scan;
+            # with this player's star ups on top
+            await client.send_packet(0x2501, cheers.info(client.account, client.account.b.pb("0x2501")))
+            continue
+        if m["msg_id"].upper() == "0X0F07" and client.account.cheer_lottery:  # cheer draw: wish / gifts taken
+            await client.send_packet(0x0F07, cheers.lottery_info(client.account, client.account.b.pb("0x0F07")),
+                                     compress=bool(m["flags"] & 2))
             continue
         if m["msg_id"].upper() == "0X0F0A":  # memory recruit pools: this player's own wishes
             await client.send_packet(0x0F0A, recallwish.info(int(gid), client.account), compress=True)
@@ -439,6 +444,11 @@ async def handle_login(client: GameClient, pb_data: bytes):
             continue
         if m["msg_id"].upper() == "0X2B01":  # mini games: this player's own week score and best scores
             await client.send_packet(0x2B01, minigame.info(int(gid), client.account))
+            continue
+        if m["msg_id"].upper() == "0X0901" and client.account.card_auto is not None:
+            # cards: this player's auto-dismantle list (the cards follow as 0x0902 updates)
+            await client.send_packet(0x0901, cards.pack_info(client.account, client.account.b.pb("0x0901")),
+                                     compress=bool(m["flags"] & 2))
             continue
         if m["msg_id"].upper() == "0X3C01" and client.account.recalling_auto is not None:
             # memories: this player's auto-dismantle list (the memories follow as 0x3C02 updates)
@@ -1789,6 +1799,10 @@ import monthcard  # noqa: E402  month / quarter card: the daily reward
 MESSAGE_HANDLERS.update(monthcard.HANDLERS)
 import freepack  # noqa: E402  free packs of the shop
 MESSAGE_HANDLERS.update(freepack.HANDLERS)
+import cards  # noqa: E402  cards from fragments (0x0903), dismantling (0x0904), auto list (0x090D)
+MESSAGE_HANDLERS.update(cards.HANDLERS)
+import cheers  # noqa: E402  Team Cheers: star up (0x2504), draw wish (0x0F09) and gifts (0x0F13)
+MESSAGE_HANDLERS.update(cheers.HANDLERS)
 import recalling  # noqa: E402  memories: level up / breakthrough, stage, dismantle, auto list (0x3C04/05/08/0A)
 MESSAGE_HANDLERS.update(recalling.HANDLERS)
 import specialty  # noqa: E402  potentials: level up, lock, dismantle, settings (0x1803 / 0x1806 / 0x1808-0x180A)
