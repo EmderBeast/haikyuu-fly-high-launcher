@@ -53,6 +53,8 @@ SCAN = {"hfhscan": 1, "date": "2026-11-26 20:00", "tool": "HFH-Bot",
                      "pas": [{"t": "pServe", "pos": "Li", "v": [5]}, {"t": "r10", "pos": "WS", "v": [10, 12]},
                              {"t": "o1", "pos": "MB", "v": [16, 2]}, {"t": "r8", "pos": "OP", "v": [30, 90]},
                              {"t": "bSave", "pos": "S", "v": [35]}]}],
+        "cheers": {"list": [{"id": "aoba", "stars": 6}, {"id": "karasuno", "stars": 4},
+                            {"id": "fukurodani", "own": False}, {"id": "akiteru", "stars": 2}]},
         "bonds": {"1007": 1}}
 
 
@@ -124,6 +126,9 @@ async def main():
     assert a.admin_flags.get("perfect_potentials") is False and "perfect" not in a.admin_flags
     _, card = card_of(a, 1102)
     assert wire.get(wire.parse(card), 4) == 70 and len([s for s in admin._slots(card) if s]) == 6
+    import pvp as _pvp
+    sup = [p for m, p in cl.sent if m == 0x2501]
+    assert sup and [d.star_id for d in _pvp.P.PlayerSupportInfoS2C.FromString(sup[-1]).datas] == [560, 440, 1120], sup
     done = json.loads((admin.DONE / f"{GID + 1}.json").read_text(encoding="utf-8"))["done"]
     assert any("1 Spieler" in d for d in done) and any("bonds" in d for d in done), done
     print("OK", TMP)

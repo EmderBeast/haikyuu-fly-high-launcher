@@ -61,6 +61,7 @@ EXTRA = [(P.ATTR_MORALE, None), (P.ATTR_ENERGY, "Energy"), (P.ATTR_ATK_CRIT_RATE
          (P.ATTR_ATK_CRIT_DMG, None), (P.ATTR_ATK_BONUS, None), (P.ATTR_DEF_CRIT_RATE, None),
          (P.ATTR_DEF_CRIT_HIT, None), (P.ATTR_DEF_BONUS, None)]
 SCALE = 10000
+COACH_STATS = True  # the coach's stats and skills follow the team's coach (switch_coach)
 TEAM_SIZE = 13  # 7 on court + 6 bench slots
 HOME_WIN = 1
 
@@ -391,10 +392,110 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
         team.formation.coach_card.CopyFrom(template.formation.coach_card)
         team.formation.fetter_id_levels.extend(template.formation.fetter_id_levels)
         team.skill_extras.extend(template.skill_extras)
+    old = P.CoachCard()
+    old.CopyFrom(team.formation.coach_card) if team.formation.HasField("coach_card") else None
+    had = team.formation.HasField("coach_card")
     own_coach(team, acc, gid, form)
+    if COACH_STATS:
+        switch_coach(team, old if had else None, set(captured))
     import admin  # Admin Mode: per-card power changes (no-op without any)
     admin.apply_power(acc, team)
     return team
+
+
+def _kv_pairs(v) -> list[tuple[int, int]]:
+    """A repeated KVPairInt column as the table dump writes it: protobuf tags 8 (key) and 16 (value)
+    with their numbers, the first pair nested and without its key (0)."""
+    flat, out, key = [], [], 0
+    def walk(x):
+        for y in x if isinstance(x, list) else [x]:
+            walk(y) if isinstance(y, list) else flat.append(y)
+    walk(v)
+    it = iter(flat)
+    for tag in it:
+        val = next(it, None)
+        if tag == 8:
+            key = val
+        elif tag == 16:
+            out.append((key, val))
+            key = 0
+    return out
+
+
+def coach_values(card) -> dict[int, int]:
+    """Stats a coach gives every player of its team (client TeamView.TeamCalculator.AddCoachAttr):
+    per coachlist.PropertyNumber pair (attr type, value) value + coachlevel.Property of the coach's
+    level and rarity, added to the player's extrval (x10000). Type 7 goes to the team, not here.
+    Captured rooms: coach 12 (rarity 4) level 15 gives 420000 + 1680000 per basic stat."""
+    if card is None or not card.conf_id:
+        return {}
+    row = _table_cached("coachlist").get(card.conf_id)
+    if not row:
+        return {}
+    lv = next((r for r in _table_cached("coachlevel").values()
+               if r.get("Level") == card.level and r.get("CoachRare") == row.get("CoachRare")), {})
+    extra = _num(lv.get("Property"))
+    return {k: v + extra for k, v in _kv_pairs(row.get("PropertyNumber")) if k != 7}
+
+
+def coach_skills(card) -> tuple[list[int], dict[int, list[int]]]:
+    """(team skills, job -> skills) of a coach: coachlist.PropertyBuff (in Garena's rooms a team-wide
+    skill_extra, target 106) and the skills of its job_buffs (coachbuff.CoachBuffId, per player of
+    that job)."""
+    if card is None or not card.conf_id:
+        return [], {}
+    row = _table_cached("coachlist").get(card.conf_id) or {}
+    pb = row.get("PropertyBuff")
+    team = [x for x in (pb if isinstance(pb, list) else [pb]) if _num(x)]
+    jobs: dict[int, list[int]] = {}
+    for jb in card.job_buffs:
+        ids = (_table_cached("coachbuff").get(jb.buff_id) or {}).get("CoachBuffId")
+        jobs.setdefault(jb.job, []).extend(x for x in (ids if isinstance(ids, list) else [ids]) if _num(x))
+    return team, jobs
+
+
+_TABLES = {}
+
+
+def _table_cached(name: str) -> dict:
+    if name not in _TABLES:
+        try:
+            _TABLES[name] = _table(name)
+        except FileNotFoundError:
+            _TABLES[name] = {}
+    return _TABLES[name]
+
+
+def switch_coach(team: P.PVPTeamInfo, old, captured_ids: set) -> None:
+    """The team's coach is now team.formation.coach_card (old = the one whose share the captured cards'
+    stats and skill_extras already hold, or None). Stats: every player gets the new coach's values,
+    minus the old one's for captured cards. Skills: the old coach's PropertyBuff / job skills leave the
+    extras, the new ones come in (players without extras get job skills from skills.py itself)."""
+    new = team.formation.coach_card if team.formation.HasField("coach_card") else None
+    if old is not None and new is not None and old.SerializeToString() == new.SerializeToString():
+        return
+    nv, ov = coach_values(new), coach_values(old)
+    for p in team.formation.players:
+        base = ov if p.info.inst_id in captured_ids else {}
+        for a in p.attr:
+            d = nv.get(a.type, 0) - base.get(a.type, 0)
+            if d:
+                a.extrval += d
+    (o_team, o_jobs), (n_team, n_jobs) = coach_skills(old), coach_skills(new)
+    keep = [e for e in team.skill_extras if e.skill_id not in o_team]
+    del team.skill_extras[:]
+    team.skill_extras.extend(keep)
+    have = {e.skill_id for e in team.skill_extras}
+    team.skill_extras.extend(P.SkillTarget(skill_id=s, target=106) for s in n_team if s not in have)
+    for p in team.formation.players:
+        if not p.skill_extras:
+            continue  # skills.py gives job_buffs to players without captured extras
+        job = _num((gameconfig.PLAYERS.get(p.info.conf_id) or {}).get("Job"))
+        gone = set(o_jobs.get(job, []))
+        keep = [e for e in p.skill_extras if e.skill_id not in gone]
+        del p.skill_extras[:]
+        p.skill_extras.extend(keep)
+        p.skill_extras.extend(P.SkillTarget(skill_id=s, target=1) for s in n_jobs.get(job, []))
 
 
 def own_coach(team: P.PVPTeamInfo, acc, gid: int, form) -> bool:

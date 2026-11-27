@@ -53,6 +53,8 @@ TYPE_REMOVAL = True  # RemoveRandomTypeBuff / RemoveAllTypeBuff take debuffs (bu
 COME_ON_NOW = True  # ComeOnPlayer = stands on the court right now (False: or was on it earlier in the set)
 POSITION_ARGS = True  # ToPosition 1-4 and PlayerPosition 7 / 8 / none read by their number (rows, leaving, bench)
 BENCH_CD_FREEZE = False  # experiment: cooldowns of players who are not on the court stand still
+RESET_AT_ENTRY = True  # see _reset_waiting
+RESET_CONSUME = True
 SEL6_ALL = True  # cooldown buffs with selector 6 act on every Ultimate (False: Block Ultimates only)
 STAMINA_FORMS = True  # stamina buffs with a duration or with ArgsType 3 / 9 / 10 change stamina too (once)
 STAMINA_COUNTERS = True  # AddBuffByTeamEnergyCost / AddBuffByPropertyCostByLevel count stamina spent / regained
@@ -136,6 +138,15 @@ RESONANCE = {r["ID"]: r for r in _load("resonanceskilldetail")} if (CFG / "reson
 COACHBUFF = {r["ID"]: r for r in _load("coachbuff")} if (CFG / "coachbuff.json").exists() else {}
 PLAYERS = {r["ID"]: r for r in _load("playerlist")} if (CFG / "playerlist.json").exists() else {}
 TRAMMEL = {r["ID"]: r for r in _load("trammel")} if (CFG / "trammel.json").exists() else {}
+# school bonds: line-up bond ids under 100 are schools (schoolinfoconfig ID), their bond row is
+# TrammeIsSchool (11 -> 1072: four Karasuno players of its CharacterID list)
+SCHOOL_BOND = ({r["ID"]: _num(r.get("TrammeIsSchool")) for r in _load("schoolinfoconfig")}
+               if (CFG / "schoolinfoconfig.json").exists() else {})
+# bonds with a joint skill (trammelskill: 1001, 1019, 1031, 1254) -> their skill list ids; the line-up
+# lists a second id for them (100107 next to 100101) that Garena never reports as active
+BOND_SKILL_IDS: dict[int, set] = {}
+for _r in (_load("trammelskill") if (CFG / "trammelskill.json").exists() else []):
+    BOND_SKILL_IDS.setdefault(_r["TrammelID"], set()).add(_r["SkillListID"])
 AVAILABLE = bool(SKILLS and BUFFS)
 # skills that only run as part of another one (Before/AfterSkill, OverrideSkill, LetSkillCD targets)
 # or carry the touch itself (SkillBehaviour): never fired on their own
@@ -147,6 +158,33 @@ CHAINED = {x for s in SKILLS.values() for k in ("BeforeSkill", "AfterSkill") for
     _num(e.get("V1")) for s in SKILLS.values() for e in s.get("SkillEffect") or []
     if e.get("Key") == "OverrideSkill"} | {
     s["ID"] for s in SKILLS.values() if any(e.get("Key") == "SkillBehaviour" for e in s.get("SkillEffect") or [])}
+
+
+def bond_row(fid: int) -> dict | None:
+    """trammel row of a line-up bond id (formation.fetter_id_levels): skill list id // 100, school ids
+    (under 100) through their school's bond."""
+    return TRAMMEL.get(SCHOOL_BOND.get(fid, 0) if fid < 100 else fid // 100)
+
+
+def active_bonds(fetter_ids, conf_ids) -> list[int]:
+    """Bonds of a line-up that are active with these players in the first seven places (court and
+    libero; the bench does not count): "Activate by deploying N players from this Bond", N =
+    CharacterNumber of the bond's CharacterID list. In line-up order without repeats, as Garena lists
+    them in team_data.trammel_ids at the match start and in every 0x0309 reply (all 174 captured cases,
+    order included)."""
+    here = {c % 10000 for c in conf_ids}
+    out = []
+    for fid in dict.fromkeys(fetter_ids):
+        tram = bond_row(fid)
+        if not tram:
+            continue
+        if fid >= 100 and fid // 100 in BOND_SKILL_IDS and fid not in BOND_SKILL_IDS[fid // 100]:
+            continue
+        need = _num(tram.get("CharacterNumber"))
+        if BOND_NEEDS_MEMBERS and need and len(here & set(_flat(tram.get("CharacterID")))) < need:
+            continue
+        out.append(fid)
+    return out
 
 
 def card_skills(card, resonance: bool = True) -> list[tuple[int, int]]:
@@ -229,6 +267,13 @@ class Battle:
         self.cards = {}
         self.skills: dict[int, list[tuple[dict, int]]] = {}
         self.bond_members: dict[tuple[int, int], list[int]] = {}  # (owner, bond skill id) -> members
+        self.fetters = {HOST: list(info.home.formation.fetter_id_levels),
+                        GUEST: list(info.away.formation.fetter_id_levels)}
+        self.bonds: dict[int, list[int]] = {HOST: [], GUEST: []}  # active bond ids (trammel_ids)
+        self.lineup: dict[int, set] = {HOST: set(), GUEST: set()}  # first seven places, after substitutions
+        self.bond_lineup: dict[int, set] = {HOST: set(), GUEST: set()}  # ... counted for bonds (user subs only)
+        self._bond_given: dict[tuple[int, int], tuple] = {}  # (team, bond id) -> (owner, skill entries, members)
+        self._lead: dict[int, int | None] = {}
         extras = {}  # pid -> skill ids Garena listed for the player (PlayerCardInfo.skill_extras)
         for team, t in ((HOST, info.home), (GUEST, info.away)):
             for i, p in enumerate(t.formation.players):
@@ -257,36 +302,12 @@ class Battle:
                     t.get("Key") == "TeamBuffNumberChange" for t in sk.get("Trigger") or [])]
             if lead is not None:  # team-wide extras (e.g. 6100121 → ourTeam)
                 self.skills[lead] += [(SKILLS[e.skill_id], 1) for e in t.skill_extras if e.skill_id in SKILLS]
-            for fid in dict.fromkeys(t.formation.fetter_id_levels):  # bonds: the id is a skilllist id
-                sl = SKILLLIST.get(fid)
-                if sl and lead is not None:
-                    # a bond's skills belong to its SkillCharacterID (trammel.json): triggers such as
-                    # "I serve" are about that player, not about the first one of the line-up
-                    tram = TRAMMEL.get(fid // 100, {})
-                    # "Activate by deploying N players from this Bond": the room lists every bond the
-                    # account owns, but only those with enough members in the line-up are active
-                    # (captures: bond 1184 needs 5501, 5502 and 5503; with two of them its buff never came)
-                    need = _num(tram.get("CharacterNumber"))
-                    here = {self.cards[p].conf_id % 10000 for p in self.cards
-                            if self.team_of(p) == team and p % TEAM_IDS < 7}
-                    if BOND_NEEDS_MEMBERS and need and len(here & set(_flat(tram.get("CharacterID")))) < need:
-                        continue
-                    who = _num(tram.get("SkillCharacterID"))
-                    owner = next((p for p in self.cards if self.team_of(p) == team
-                                  and self.cards[p].conf_id % 10000 == who), None if who else lead)
-                    if owner is None:
-                        # the bond's skill character is not in this team: its skill does not run
-                        # (captures: bond 1184 with only 5501 and 5502 never gave its round-start buff)
-                        continue
-                    self.skills[owner] += [(SKILLS[s], _num(sl.get("Skilllevel"), 1))
-                                           for s in _list(sl.get("Skillid")) if s in SKILLS]
-                    chars = set(_flat(tram.get("CharacterID")))
-                    for s in _list(sl.get("Skillid")):
-                        keys = {t.get("Key") for t in SKILLS.get(s, {}).get("Trigger") or []}
-                        if "RoundStart" not in keys or "OwnPlayerPosition" in keys:
-                            continue  # skills about named players are their SkillCharacterID's
-                        self.bond_members[(owner, s)] = [p for p in self.cards if self.team_of(p) == team
-                                                         and self.cards[p].conf_id % 10000 in chars]
+            # bonds: only those with enough members in the first seven places are active (see
+            # active_bonds); substitutions change that from the next rally on (rally_start)
+            self._lead[team] = lead
+            self.lineup[team] = {p for p in self.cards if self.team_of(p) == team and p % TEAM_IDS < 7}
+            self.bond_lineup[team] = set(self.lineup[team])
+            self._set_bonds(team)
         self.cd: dict[tuple[int, int], list] = {}  # (pid, skill id) -> [unit, left]
         self._bond: list | None = None  # members of the bond whose skill is running
         self._wide = False  # the buff being given goes to a group (see Buff.wide)
@@ -321,6 +342,86 @@ class Battle:
         self.casts: list[Cast] = []  # collected since the last flush
         self.changes: list[BuffChange] = []
         self.armed_fired: set = set()
+
+    def _set_bonds(self, team: int):
+        """Bonds of the team active with its current line-up (self.bond_lineup): skills of bonds that came
+        in are added, those of bonds that went out stop. Their buffs that are still running stay:
+        Garena sends no removal for them (garena2, hfa_1, hfa_3, hfa_series1: bond 1001/1187 buffs
+        stay listed for the rest of the match after the bond went out)."""
+        now = active_bonds(self.fetters[team], [self.cards[p].conf_id for p in self.bond_lineup[team]])
+        if now == self.bonds[team]:
+            return
+        for fid in self.bonds[team]:
+            if fid not in now:
+                owner, entries, _ = self._bond_given.pop((team, fid), (None, [], {}))
+                if owner is not None:
+                    self.skills[owner] = [e for e in self.skills[owner] if not any(e is x for x in entries)]
+        for fid in now:
+            if fid not in self.bonds[team]:
+                self._bond_on(team, fid)
+        self.bonds[team] = now
+        self.bond_members = {}
+        for owner, _, members in self._bond_given.values():
+            self.bond_members.update(members)
+
+    def _bond_on(self, team: int, fid: int):
+        lead = self._lead.get(team)
+        sl = SKILLLIST.get(fid)  # the id is a skilllist id (school bonds have no skills)
+        if not sl or lead is None:
+            return
+        # a bond's skills belong to its SkillCharacterID (trammel.json): triggers such as
+        # "I serve" are about that player, not about the first one of the line-up
+        tram = bond_row(fid) or {}
+        who = _num(tram.get("SkillCharacterID"))
+        owner = next((p for p in self.cards if self.team_of(p) == team
+                      and self.cards[p].conf_id % 10000 == who), None if who else lead)
+        if owner is None:
+            # the bond's skill character is not in this team: its skill does not run
+            # (captures: bond 1184 with only 5501 and 5502 never gave its round-start buff)
+            return
+        entries = [(SKILLS[s], _num(sl.get("Skilllevel"), 1)) for s in _list(sl.get("Skillid")) if s in SKILLS]
+        self.skills[owner] += entries
+        chars = set(_flat(tram.get("CharacterID")))
+        members = {}
+        for s in _list(sl.get("Skillid")):
+            keys = {t.get("Key") for t in SKILLS.get(s, {}).get("Trigger") or []}
+            if "RoundStart" not in keys or "OwnPlayerPosition" in keys:
+                continue  # skills about named players are their SkillCharacterID's
+            members[(owner, s)] = [p for p in self.cards if self.team_of(p) == team
+                                   and self.cards[p].conf_id % 10000 in chars]
+        self._bond_given[(team, fid)] = (owner, entries, members)
+
+    def substitute(self, on: int, off: int, user: bool = True):
+        """A substitution (on comes in for off): line-up places change. Only the user's own
+        substitutions (0x0309) change the active bonds, from the next rally_start on. Substitutions of
+        the server's side (sent in the frames) do not: Garena kept the opponent's bond buffs after them
+        (hfa_atsumu2: bond 1213 after 5702 went out, 19 touches; hfa_peak2111)."""
+        team = self.team_of(off)
+        if on in self.cards and self.team_of(on) == team and off in self.lineup[team] and on not in self.lineup[team]:
+            self.lineup[team] = (self.lineup[team] - {off}) | {on}
+            if user and off in self.bond_lineup[team]:
+                self.bond_lineup[team] = (self.bond_lineup[team] - {off}) | {on}
+
+    def _follow_lineup(self, subs):
+        """Line-up places from who stands on the court (or behind the libero) now. Replays of captures
+        do not see the user's substitutions (Garena echoes them in the 0x0309 reply, not in the frames):
+        a player new on the court took the place of a line-up player who is gone; the libero's place
+        stays, and a player missing from the court already in the rally before (behind the libero
+        without a new swap message) is the last one taken to have left. Only the user's side (HOST)
+        substitutes that way; the other side's changes all come in the frames."""
+        for on, off in subs:  # the server side's substitutions and libero swaps
+            self.substitute(on, off, user=False)
+        for team in (HOST, GUEST):
+            here = {p for p in self.on_court | self.behind_libero if self.team_of(p) == team}
+            if len([p for p in self.on_court if self.team_of(p) == team]) < 6:
+                continue  # no full court known: keep the line-up as it is
+            new = sorted(here - self.lineup[team])
+            if new:
+                gone = sorted((p for p in self.lineup[team] if p not in here and p % TEAM_IDS != 6),
+                              key=lambda p: (p not in self.was_on_court, p))
+                for on, off in zip(new, gone):  # the user's substitutions (the user is HOST)
+                    self.substitute(on, off, user=team == HOST)
+            self._set_bonds(team)
 
     @staticmethod
     def _extra_level(entry, sid: int) -> int:
@@ -693,6 +794,20 @@ class Battle:
                 if ids and skill["ID"] in ids:
                     change += self._args(b.row)[0] // 10000 * b.stacks
         return max(base + change, 0)
+
+    def _reset_waiting(self, pid: int, sid: int) -> bool:
+        """A cooldown reset buff (Type 5, mode 0, -99) that the player already holds when the skill
+        enters its cooldown resets it then (5502 "when he uses [DIVINE REFLEXES] ... resets its
+        cooldown": the buff comes with the touch, before the cooldown starts). With RESET_CONSUME the
+        buff is used up by it."""
+        for b in list(self._active(pid)):
+            r = b.row
+            if (_num(r.get("Type")) == 5 and (_flat(r.get("ModifyTarget")) or [9])[0] == 0
+                    and self._args(r)[0] <= -900000 and sid in (self._cd_skills(pid, r) or [])):
+                if RESET_CONSUME:
+                    self.remove_buff(("p", pid), b.id)
+                return True
+        return False
 
     def _cd_change(self, entity, row):
         amount = self._args(row)[0]
@@ -1331,6 +1446,8 @@ class Battle:
             self.spend(owner, cost)
         if _num(skill.get("CDType")):
             length = self._cd_length(owner, skill)
+            if length > 0 and RESET_AT_ENTRY and self._reset_waiting(owner, sid):
+                length = 0
             if length > 0:
                 self.cd[(owner, sid)] = [skill["CDType"], length]
                 if _num(skill.get("Type")) & DRIVING and self._entered is None:
@@ -1578,6 +1695,7 @@ class Battle:
             new = [p for p in here if p not in self.slot]
             for p, old in zip(new, gone):
                 self.slot[p] = self.slot.pop(old)
+        self._follow_lineup(subs)  # substitutions change the active bonds from this rally on
         self.fire(Ctx("start"))
 
     def before_touch(self, pid: int, formula: int, link: int, skill_id: int) -> Ctx:

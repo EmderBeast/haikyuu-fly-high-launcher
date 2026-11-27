@@ -21,7 +21,11 @@ What the file holds (HFH-Bot README, scans in HFH-Bot/scans) and how it is mappe
     Positional Advantage (bot name t -> text, PA_TEXTS) becomes the coachbuff of the coach's pool with that text
     and the value nearest to v, on job pos (WS 1, MB 2, S 3, Li 4, OP 5); a coach whose advantages do not all
     fit keeps the ones drawn by the level-ups.
-Not imported (the server has no such state): bonds, collections, cheers, the gallery value.
+  - cheers {"list": [{id (the bot's name, CHEERS), stars, own}]}: the owned cheers at their star
+    (admin_flags["scan_cheers"], sent as 0x2501 at the login instead of the captured ones; which cheers are
+    deployed the bot does not read);
+Not imported (the server has no such state): bonds, collections (the client works them out from the cards),
+the gallery value.
 A second import replaces the potentials, memories and coaches of the first one (admin_flags "scan_import").
 """
 import json
@@ -112,6 +116,55 @@ PA_TEXTS = {  # the HFH-Bot's names of the Positional Advantages (its gamedata.j
     'bReceive': 'Increases Receive stat by {0}',
     'bPowerQuick': 'Increases Power/Quick Attack stat by {0}',
 }
+CHEERS = {  # the HFH-Bot's cheer names (its gamedata.json cheers) -> supportconf id
+    'kiyoko-sport': 1,
+    'yachi-uni': 2,
+    'aoba': 5,
+    'shira': 6,
+    'date': 8,
+    'takinoue': 9,
+    'shimada': 10,
+    'yachi-cheer': 37,
+    'saeko-cap': 3,
+    'karasuno': 4,
+    'inarizaki': 7,
+    'fukurodani': 27,
+    'yachi-winter': 34,
+    'saeko-spring': 35,
+    'kiyoko-cap': 36,
+    'kiyoko-uni': 24,
+    'yachi-sport': 25,
+    'johzenji': 26,
+    'akiteru': 11,
+    'amanai': 12,
+    'michimiya': 14,
+    'tashiro': 17,
+    'uchizawa': 18,
+    'mori': 22,
+    'akane': 29,
+    'alisa': 30,
+    'nekoma': 28,
+}
+
+
+def cheer_star_ids(scan: dict) -> list[int] | None:
+    """The scan's cheers {"list": [{id, stars, own}]} -> PlayerSupportData star ids (cheer * 100 + star * 10,
+    unlockall.py), the owned ones only; None when the scan has no cheers."""
+    lst = (scan.get("cheers") or {}).get("list") if isinstance(scan.get("cheers"), dict) else None
+    if not isinstance(lst, list):
+        return None
+    top = {}
+    for r in _cfg("supportstarupconf"):
+        top[r["ID"] // 100] = max(top.get(r["ID"] // 100, 0), r["ID"])
+    out = []
+    for c in lst:
+        conf, stars = CHEERS.get(c.get("id")), int(c.get("stars") or 0)
+        if conf is None or stars <= 0 or c.get("own") is False:
+            continue
+        out.append(min(conf * 100 + min(stars, 9) * 10, top.get(conf, conf * 100 + 60)))
+    return out
+
+
 PA_JOBS = {"WS": 1, "MB": 2, "S": 3, "Li": 4, "OP": 5}  # coach.py: job 1-5
 
 
@@ -373,7 +426,11 @@ def apply(acc, scan: dict) -> list[str]:
             new_state["coaches"].append(card.inst_id)
             n += 1
         report.append(f"Scan: {n} Coaches ({exact} mit den gescannten Positional Advantages)")
-    skipped = [k for k in ("bonds", "collections", "cheers", "gallery") if k in scan]
+    cheers = cheer_star_ids(scan)
+    if cheers is not None:
+        acc.admin_flags["scan_cheers"] = cheers
+        report.append(f"Scan: {len(cheers)} Cheers")
+    skipped = [k for k in ("bonds", "collections", "gallery") if k in scan]
     if skipped:
         report.append("Scan: nicht übernommen (gibt es auf dem Server nicht): " + ", ".join(skipped))
     acc.admin_flags["scan_import"] = new_state

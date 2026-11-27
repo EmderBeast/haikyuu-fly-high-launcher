@@ -92,11 +92,16 @@ def personal_info(acc, body: bytes) -> bytes:
 
 
 def support_info(acc, body: bytes) -> bytes:
-    """PlayerSupportInfoS2C (0x2501) with every cheer at its top star when cheers are unlocked."""
-    if not has(acc, "cheers"):
-        return body
+    """PlayerSupportInfoS2C (0x2501) with every cheer at its top star when cheers are unlocked, else the cheers
+    of a loaded HFH-Bot scan (scanimport.py, admin_flags["scan_cheers"]), else unchanged."""
     P = pvp.P
-    return P.PlayerSupportInfoS2C(datas=[P.PlayerSupportData(star_id=i) for i in cheer_star_ids()]).SerializeToString()
+    if has(acc, "cheers"):
+        ids = cheer_star_ids()
+    else:
+        ids = (getattr(acc, "admin_flags", None) or {}).get("scan_cheers")
+        if ids is None:
+            return body
+    return P.PlayerSupportInfoS2C(datas=[P.PlayerSupportData(star_id=int(i)) for i in ids]).SerializeToString()
 
 
 def _all_coaches(acc, rng=random) -> int:

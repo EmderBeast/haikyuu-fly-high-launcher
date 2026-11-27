@@ -409,8 +409,9 @@ async def handle_login(client: GameClient, pb_data: bytes):
             await client.send_packet(0x2101, personal.info_message(int(gid), client.account,
                                                                    client.account.b.pb("0x2101")))
             continue
-        if m["msg_id"].upper() == "0X2501" and unlockall.has(client.account, "cheers"):
-            # Admin Mode "unlock everything": every Team Cheer at its top star
+        if m["msg_id"].upper() == "0X2501" and (unlockall.has(client.account, "cheers")
+                                                or "scan_cheers" in client.account.admin_flags):
+            # Admin Mode "unlock everything": every Team Cheer at its top star; or the cheers of a loaded scan
             await client.send_packet(0x2501, unlockall.support_info(client.account, client.account.b.pb("0x2501")))
             continue
         if m["msg_id"].upper() == "0X0F0A":  # memory recruit pools: this player's own wishes

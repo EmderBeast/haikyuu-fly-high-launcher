@@ -217,17 +217,34 @@ class LiveMatch:
         self.rally_no += 1
         self.inputs = {}
         self.seed = random.getrandbits(32)
-        for team, on, off in self.pending_subs:  # user substitutions take effect now
+        self.apply_subs()
+        self._before = (list(self.score), self.serve, {k: list(v) for k, v in self.stance.items()},
+                        self.global_frame, self.battle.snapshot() if self.battle else None, dict(self.lib_for),
+                        {k: list(v) for k, v in self.power_tot.items()})
+        return self._play()
+
+    def apply_subs(self):
+        """The user's substitutions take effect (start of the next rally)."""
+        for team, on, off in self.pending_subs:
             base = self.stance[team]
             if off in base:
                 base[base.index(off)] = on
             if self.lib_for[team] == off:  # the new player sits behind the libero instead
                 self.lib_for[team] = on
+            if self.battle:  # its bonds follow from this rally on
+                self.battle.substitute(on, off)
         self.pending_subs = []
-        self._before = (list(self.score), self.serve, {k: list(v) for k, v in self.stance.items()},
-                        self.global_frame, self.battle.snapshot() if self.battle else None, dict(self.lib_for),
-                        {k: list(v) for k, v in self.power_tot.items()})
-        return self._play()
+
+    def bond_ids(self, team: int) -> list[int]:
+        """Active bonds of a team (trammel_ids) with its line-up as it is after the pending
+        substitutions: court and libero count, the bench does not (skills.active_bonds)."""
+        here = set(self.stance[team]) | ({self.libero[team]} if self.libero[team] is not None else set())
+        for t, on, off in self.pending_subs:
+            if t == team and off in here:
+                here = (here - {off}) | {on}
+        players = (self.info.home, self.info.away)[team].formation.players
+        return skills.active_bonds((self.info.home, self.info.away)[team].formation.fetter_id_levels,
+                                   [players[p - team * 13].info.conf_id for p in here])
 
     def formation_change(self, body: bytes) -> bytes:
         """0x0309 PVPFormationChangeC2S: the user's substitutions, applied from the next rally
@@ -247,6 +264,9 @@ class LiveMatch:
             self.subs_left[HOST] -= 1
             rep.subs.on_stage.append(on)
             rep.subs.off_stage.append(off)
+        # the bonds active after the change (the client shows them: OnFormationChangeResponse ->
+        # MatchTrammelDataComponent.Update); Garena sends the full list in every reply
+        rep.trammel_ids.extend(self.bond_ids(HOST))
         return rep.SerializeToString()
 
     INT_MIN = -2147483648
@@ -368,10 +388,18 @@ class LiveMatch:
         self.score[point] += 1
         end = max(self.score) >= self.target
         out = []
+        # the user's active bonds at the match start: rally 1, frame 3 (all captures), team 0 only
+        bond_frame = (3 if any(src.frame_index == 3 for src in rally.frames) else 2) if self.rally_no == 1 else None
         for src in rally.frames:
             f = P.FrameData()
             f.CopyFrom(src)
             f.game_id, f.round_id = 1, self.rally_no
+            if any(td.have_trammel for td in f.team_data):  # a captured rally's bonds are not ours
+                keep = [td for td in f.team_data if not td.have_trammel]
+                del f.team_data[:]
+                f.team_data.extend(keep)
+            if f.frame_index == bond_frame:
+                f.team_data.add(team_id=HOST, have_trammel=True).trammel_ids.extend(self.bond_ids(HOST))
             if f.HasField("round_data"):
                 f.round_data.id = self.rally_no if f.round_data.id else 0
                 f.round_data.serve_team = self.serve

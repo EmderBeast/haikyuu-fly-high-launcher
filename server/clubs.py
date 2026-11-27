@@ -56,7 +56,9 @@ P = matches.P
 (MSG_INFO, MSG_LIST, MSG_REVIEW, MSG_JOIN, _, MSG_APPOINT, MSG_CREATE, MSG_APPLY, MSG_DECL, MSG_LV,
  MSG_DISBAND, MSG_EXIT, _, MSG_INVITE, MSG_RECRUIT, MSG_SELECT) = range(0x2E01, 0x2E11)
 MSG_DAILY, MSG_NOTIFY, MSG_ICON, MSG_READ, MSG_NAME = 0x2E17, 0x2E18, 0x2E19, 0x2E1A, 0x2E23
-MSG_CURRENCY_CHANGE = 0x0404
+# currency balance after a cost: 0x0405 NotifyCurrencyChangeS2C {1=repeated {1=id 2=number}} (the client's
+# OnCurrencyChanged; Garena capture decoded_tshark.json 2807). 0x0404 is the reward pop-up (OnItemGained).
+from accounts import MSG_CURRENCY_CHANGE  # noqa: E402
 
 LEVELS = {r["ID"]: r for r in pvp._cfg("association")}
 _CONST = {r["ID"]: r for r in pvp._cfg("associationconstant")}
