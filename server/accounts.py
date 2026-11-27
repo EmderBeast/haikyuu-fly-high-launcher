@@ -465,6 +465,30 @@ class Account:
         cards = {**self.b.cards, **{wire.get(wire.parse(c), 1): c for c in self.cards}}
         return {wire.get(wire.parse(c), 3) for i, c in cards.items() if i not in self.removed_cards}
 
+    def statistics(self) -> bytes:
+        """0x0408 NotifyStatisticsS2C{1=all 2=PlayerRecord{1=player 2=star 3=level}}: the best star and
+        level the player ever had of every character. In the capture it holds every character the
+        account has a card of (133 of 133, plus 4 he no longer has). The client works out from it which
+        bonds are collected; with no record at all (a new account) its bond table is never set up and
+        the team screen throws NullReferenceException in PlayerAllFetterData.GetFetterSkillId as soon
+        as bond partners stand in a line-up. So: the baseline records raised by the cards held now."""
+        best = {}
+        raw = self.b.pb("0x0408")
+        for num, _, v in wire.parse(raw) if raw else []:
+            if num == 2:
+                f = wire.parse(v)
+                best[wire.get(f, 1, 0)] = (wire.get(f, 2, 0), wire.get(f, 3, 0))
+        held = {**self.b.cards, **{wire.get(wire.parse(c), 1): c for c in self.cards}}
+        for inst, card in held.items():
+            if inst in self.removed_cards:
+                continue
+            f = wire.parse(card)
+            conf, star, level = wire.get(f, 3, 0), wire.get(f, 6, 0), wire.get(f, 4, 0)
+            old = best.get(conf, (0, 0))
+            best[conf] = (max(old[0], star), max(old[1], level))
+        return wire.build([(1, 0, 1)] + [(2, 2, wire.build([(1, 0, c), (2, 0, st), (3, 0, lv)]))
+                                         for c, (st, lv) in best.items()])
+
     def team_info(self) -> bytes:
         """0x0B01 TeamInfoS2C: the baseline line-ups with the ones saved since (0x0B02). Cards a saved
         line-up names but the account no longer has (removed, or gone from the starter set such as the

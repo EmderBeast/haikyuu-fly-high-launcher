@@ -39,6 +39,10 @@ Admin Mode "build your own coach" (admin.py queue entry {"coach": ...}, commands
   Assumed: job 1-5 = Wing Spiker, Middle Blocker, Setter, Libero, Opposite Hitter (read off playerlist.Job of
   known players); the client shows a coach with fewer buffs than its level gives without trouble; new instance
   ids continue after the highest one, as for coaches from the trial boxes (hstrials.py).
+CoachInfoS2C.setting is always sent (the captured login has it: {skip_lv_up_anim, auto_resolve_rare}). Seen in the
+client 27.11.2026: a starter account's CoachInfoS2C had no setting, and the coach view of a coach then stayed on
+its placeholders ("Lv.{0}") with a NullReferenceException in Coach.CoachMainViewLogic.UpdateBaseInfo; with an
+(empty) setting the view shows level, stats, the coach's skill and the positional advantages.
 State: pvp.json "coaches" {gid: {"cards": {inst: CoachCard hex}, "deleted": [inst], "setting": hex}}.
 """
 import random
@@ -98,6 +102,7 @@ def info(gid: int, acc) -> bytes:
     mine = _store(gid).get("setting")
     if mine is not None:
         out.setting.CopyFrom(P.CoachCardSetting.FromString(bytes.fromhex(mine)))
+    out.setting.SetInParent()  # always present: without it the client's coach view fails (see below)
     return out.SerializeToString()
 
 

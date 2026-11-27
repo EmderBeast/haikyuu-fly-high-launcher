@@ -8,10 +8,13 @@ back work; a player without rights on a shared server gets nothing. Temporary ac
 import asyncio
 import hashlib
 import json
+import sys
 import tempfile
 from pathlib import Path
 
 import accounts
+
+sys.stdout.reconfigure(encoding="utf-8")  # names carry a star; a redirected console is cp1252
 
 TMP = Path(tempfile.mkdtemp(prefix="hfh-adminunlock-"))
 accounts.ACCOUNTS = TMP

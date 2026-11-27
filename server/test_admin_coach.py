@@ -8,10 +8,13 @@ match team (matches.own_coach) where skills.Battle applies its job buffs. Tempor
 import asyncio
 import hashlib
 import json
+import sys
 import tempfile
 from pathlib import Path
 
 import accounts
+
+sys.stdout.reconfigure(encoding="utf-8")  # names carry a star; a redirected console is cp1252
 
 TMP = Path(tempfile.mkdtemp(prefix="hfh-admincoach-"))
 accounts.ACCOUNTS = TMP
@@ -108,6 +111,9 @@ async def main():
     admin.CONFIG.write_text(json.dumps({"pw_sha256": hashlib.sha256(PW.encode()).hexdigest()}), encoding="utf-8")
     c = await login(GID)
     check("a new player has no coaches", not coaches(c))
+    # the client's coach view needs CoachInfoS2C.setting (NullReference in CoachMainViewLogic.UpdateBaseInfo without)
+    check("CoachInfoS2C carries a setting also for a new player",
+          P.CoachInfoS2C.FromString(c.last(coach.MSG_INFO)).HasField("setting"))
     await gift(c, PW)
     check("password unlocks Admin Mode", admin.is_admin(GID))
     admin.queue(GID, [{"coach": {"conf": conf, "level": 15, "buffs": five}},

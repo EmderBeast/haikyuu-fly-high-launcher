@@ -380,6 +380,9 @@ async def handle_login(client: GameClient, pb_data: bytes):
     await client.send_packet(0x0101, response)
 
     for m in client.account.b.sync:
+        if m["msg_id"].upper() == "0X0408":  # the characters this account has had (bonds hang on it)
+            await client.send_packet(0x0408, client.account.statistics(), compress=bool(m["flags"] & 2))
+            continue
         if m["msg_id"].upper() == "0X0B01" and client.account.team:  # line-ups saved since the baseline
             await client.send_packet(0x0B01, client.account.team)
             continue
