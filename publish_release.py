@@ -16,9 +16,15 @@ Steps (never touches this working checkout, which other people edit):
 3. release: tag launcher-latest -> public HEAD, zips uploaded (replaced), local copies next to
    the repo folder.
 
+JP add-on (HFH-FlyHigh-JP.zip, the content of the Japanese version for "Inhalte: JP"): built from
+gamedata-jp of this checkout and the patched client files (release.json "jp_install" = the out/Install
+of the client work; without it there is no JP add-on); built and uploaded only when those files changed (hash), since the
+zip is large and changes rarely.
+
 Local, not in git: ../hfh-release/release.json (next to the repo folder)
   {"admin_pw": "..."}            admin password for the admin zip (required)
-  {"last_sha": "..."}            written by this script
+  {"jp_install": "..."}          folder with Bundle/ of the patched client (optional)
+  {"last_sha": "...", "jp_hash": "..."}   written by this script
 Log: ../hfh-release/release.log. Run hourly by the Windows task "HFH Launcher Release".
 """
 import gzip
@@ -39,12 +45,13 @@ APP_DIR = HERE.parent / "hfh-release"  # next to the repo, outside git (AppData 
 CONFIG = APP_DIR / "release.json"
 LOG = APP_DIR / "release.log"
 ZIPS = ["HFH-FlyHigh.zip", "HFH-FlyHigh-Admin.zip"]
+JP_ZIP = "HFH-FlyHigh-JP.zip"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # what the public repo contains (paths at origin/main); server/*.py is added automatically
 PUBLIC_FILES = [
     "launcher.py", "launcher_i18n.py", "admin_mode.py", "build_launcher.py", "publish_release.py", "LIESMICH.txt", "README_EN.txt",
-    "patch/mitm_redirect.py", "decoded/message_ids.json", "decoded/proto/haikyuu.proto",
+    "patch/mitm_redirect.py", "patch/patch_proxy.py", "decoded/message_ids.json", "decoded/proto/haikyuu.proto",
     "server/data/anim_table.json", "server/data/rallies.bin",
     "server/data/login_sync.json", "server/data/replies.json",
 ]
@@ -198,13 +205,29 @@ def export(sha: str, subject: str) -> bool:
     return True
 
 
+def jp_hash(install: Path) -> str | None:
+    """Content hash of what goes into the JP add-on; None when its files are not there."""
+    import hashlib
+    parts = [install / "Bundle", HERE / "gamedata-jp" / "cfg", HERE / "gamedata-jp" / "typed"]
+    if not all(d.is_dir() for d in parts):
+        return None
+    h = hashlib.md5()
+    for d in parts:
+        for f in sorted(d.rglob("*")):
+            if f.is_file():
+                h.update(f.relative_to(d.parent).as_posix().encode())
+                h.update(f.read_bytes())
+    return h.hexdigest()
+
+
 def notes(sha: str, subject: str) -> str:
     return f"""Ein-Klick-Launcher für Haikyuu Fly High auf dem eigenen Server (LDPlayer 9/14, kein Python nötig).
 Wird automatisch neu gebaut, sobald es eine neue Version gibt.
 
 **Downloads**
 - `HFH-FlyHigh.zip` – normale Version: Launcher + Server + Spieldaten, Feld für eine Server-Adresse (leer = eigener Server).
-- `HFH-FlyHigh-Admin.zip` – zusätzlich **Admin Mode**: im Spiel Einstellungen → Gift Code → Admin-Passwort, danach im Launcher Level, Währungen, alle Charaktere, Max-Karten, Gegenstände und Potentials einstellen.
+- `HFH-FlyHigh-Admin.zip` – zusätzlich **Admin Mode**: im Spiel Einstellungen → Gift Code → Admin-Passwort, danach im Launcher Level, Währungen, alle Charaktere, Max-Karten, Gegenstände und Potentials einstellen; eigenen Trainer bauen (Reiter „Trainer“) und „ALLES freischalten“ (alle Charaktere, Trainer, Cheers, Kosmetik).
+- `HFH-FlyHigh-JP.zip` – **Zusatz: Inhalte der japanischen Fassung**, u. a. vier neue Spieler: Kiyoomi Sakusa (WB), Motoya Komori (WB), Aran Ojiro (WS), Koshi Sugawara (WS), Balance-Stand vom 26.11.2026. Neben den Launcher-Ordner entpacken, dann im Launcher bei „Inhalte“ auf **JP** klicken; das Spiel lädt die neuen Dateien (ca. 160 MB) und startet neu. Zurück auf **Global** lädt es die Originaldateien wieder von Garena (ca. 150 MB). Namen und Fähigkeiten der neuen Spieler sind auf Deutsch, die neuen Karten gibt es über den Admin Mode.
 
 **Start:** Zip entpacken (nicht nach „C:\\Programme“), `HFH-Launcher.exe` starten, Anleitung in `LIESMICH.txt`.
 Voraussetzung: LDPlayer 9 oder 14 mit installiertem Haikyuu Fly High, Root an (schaltet der Launcher selbst ein, wenn er den Emulator startet).
@@ -230,10 +253,16 @@ def main():
     log(f"neue Version {sha[:7]}: {subject}")
 
     log("öffentliches Repo aktualisiert" if export(sha, subject) else "öffentliches Repo unverändert")
+    install = Path(cfg["jp_install"]) if cfg.get("jp_install") else None
+    new_jp = jp_hash(install) if install else None
+    jp = new_jp is not None and (new_jp != cfg.get("jp_hash") or force)
+    if new_jp is None:
+        log(f"JP-Zusatz übersprungen: jp_install in {CONFIG.name} fehlt, oder Bundle / gamedata-jp fehlt")
+    extra = ["--jp", str(install)] if jp else []
     out = sh(sys.executable.replace("pythonw.exe", "python.exe"), "build_launcher.py",
-             "--data", str(HERE), "--admin-pw", cfg["admin_pw"], cwd=PUBLIC_DIR, timeout=3600)
+             "--data", str(HERE), "--admin-pw", cfg["admin_pw"], *extra, cwd=PUBLIC_DIR, timeout=3600)
     log(out.splitlines()[-1] if out else "build ok")
-    zips = [PUBLIC_DIR / "dist" / z for z in ZIPS]
+    zips = [PUBLIC_DIR / "dist" / z for z in ZIPS + ([JP_ZIP] if jp else [])]
     for z in zips:
         if not z.exists():
             raise RuntimeError(f"{z} fehlt nach dem Build")
@@ -253,6 +282,9 @@ def main():
         shutil.copy(z, HERE.parent / z.name)
 
     cfg["last_sha"] = sha
+    if jp:
+        cfg["jp_hash"] = new_jp
+        log(f"JP-Zusatz neu hochgeladen ({(PUBLIC_DIR / 'dist' / JP_ZIP).stat().st_size // 2**20} MB)")
     CONFIG.write_text(json.dumps(cfg, indent=1), encoding="utf-8")
     log(f"veröffentlicht: {sha[:7]} -> {PUBLIC_REPO}")
     return 0

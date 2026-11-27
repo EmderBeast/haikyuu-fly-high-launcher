@@ -24,6 +24,8 @@ PHRASES = [
      "JP: proxy add-on or client files missing – proxy without JP files."),
     ("gepatchte Client-Dateien", "patched client files"),
     ("JP-Tabellen", "JP tables"),
+    ("JP-Inhalte", "JP content"),
+    ("neben dem Launcher-Ordner entpacken", "unpack next to the launcher folder"),
     ("nicht geschrieben", "not written"),
     ("Garena (offiziell)", "Garena (official)"),
     ("Wiederherstellen", "Restore"),
@@ -171,6 +173,32 @@ PHRASES = [
     ("Anzahl:", "Amount:"),
     ("Stufe +", "Level +"),
     ("Hinzufügen", "Add"),
+    # Admin Mode: unlock everything, own coach (admin_mode.py, tab "Trainer")
+    ("ALLES freischalten: alle Charaktere und Memories auf max, Gegenstände, Währungen, "
+     "alle Trainer, perfekte Potentials, alle Cheers und die ganze Kosmetik",
+     "Unlock EVERYTHING: all characters and memories at max, items, currencies, "
+     "all coaches, perfect potentials, all cheers and all cosmetics"),
+    ("alle Kosmetik (Porträts, Rahmen, Titel, Hintergründe …)", "all cosmetics (portraits, frames, titles, backgrounds …)"),
+    ("alle Cheers (höchster Stern)", "all cheers (highest star)"),
+    ("oder nur:", "or only:"),
+    ("Eigenen Trainer bauen: Trainer und Stufe wählen, dann je Platz eine Position und einen Buff. "
+     "Wie im Spiel gibt es je einen Platz ab Stufe 3, 6, 9, 12 und 15. Der Trainer steht nach dem "
+     "nächsten Login in der Trainer-Liste.",
+     "Build your own coach: choose the coach and its level, then a position and a buff for each slot. "
+     "As in the game there is one slot from level 3, 6, 9, 12 and 15. The coach is in the coach list "
+     "after the next login."),
+    ("Trainer sperren (kann nicht zerlegt werden)", "Lock the coach (cannot be dismantled)"),
+    ("Auch schwächere Werte zeigen", "Also show weaker values"),
+    ("Bitte einen Trainer wählen.", "Please choose a coach."),
+    ("Diesen Buff kann der Trainer nicht haben.", "This coach cannot have this buff."),
+    ("bitte Position und Buff wählen (oder beides leer).", "please choose a position and a buff (or leave both empty)."),
+    ("Zu viele Buffs:", "Too many buffs:"),
+    ("geht nicht (1 bis", "is not possible (1 to"),
+    ("ab Stufe", "from level"),
+    ("erlaubt", "allows"),
+    ("Trainer:", "Coach:"),
+    ("Stufe:", "Level:"),
+    ("Trainer", "Coach"),
     ("Ganzes Set (alle 6 Plätze, max)", "Whole set (all 6 slots, max)"),
     ("Liste leeren", "Clear list"),
     ("Diese Kombination gibt es im Spiel nicht.", "This combination does not exist in the game."),

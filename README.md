@@ -9,6 +9,7 @@ Unter **[Releases](../../releases/latest)**:
 
 - `HFH-FlyHigh.zip` – normale Version
 - `HFH-FlyHigh-Admin.zip` – zusätzlich mit **Admin Mode**
+- `HFH-FlyHigh-JP.zip` – Zusatz: **Inhalte der japanischen Fassung** (siehe unten)
 
 Die Zips werden automatisch neu gebaut, sobald es eine neue Version gibt.
 
@@ -26,7 +27,16 @@ Im Launcher:
 - **Server** – leer = eigener Server, sonst `host[:port]` eines gemeinsamen Servers.
 - **Admin Mode** (nur Admin-Version) – im Spiel *Einstellungen → Gift Code* das Admin-Passwort
   eingeben, dann im Launcher Level, Währungen, alle Charaktere, Max-Karten, Gegenstände,
-  Potentials und die Stärke im Match einstellen.
+  Potentials und die Stärke im Match einstellen, einen **eigenen Trainer bauen** (Reiter „Trainer“:
+  Trainer, Stufe, je Platz Position und Buff) und **ALLES freischalten** (alle Charaktere, Trainer,
+  perfekte Potentials, alle Cheers und die ganze Kosmetik).
+- **Inhalte: Global / JP** – Global = Inhalte des Garena-Spiels; JP = zusätzlich Inhalte der
+  japanischen Fassung, u. a. vier neue Spieler: **Kiyoomi Sakusa (WB), Motoya Komori (WB),
+  Aran Ojiro (WS), Koshi Sugawara (WS)** mit dem Balance-Stand vom 26.11.2026. Dafür
+  `HFH-FlyHigh-JP.zip` **neben** den Launcher-Ordner entpacken (beide Ordner nebeneinander), dann auf
+  „JP“ klicken – Server und Proxy starten neu, das Spiel lädt die neuen Dateien (ca. 160 MB) und
+  startet neu. Zurück auf „Global“ lädt das Spiel die Originaldateien wieder von Garena (ca. 150 MB).
+  Namen und Fähigkeiten der neuen Spieler sind auf Deutsch; ihre Karten gibt es über den Admin Mode.
 
 **Gemeinsamer Server:** Admin ist nur der Besitzer (wer zuerst das Passwort eingibt) und wem er
 Rechte gibt – alle anderen spielen normal. Admins geben im Spiel unter *Gift Code* Befehle ein,
@@ -42,7 +52,11 @@ Own server and one-click launcher for the shut-down **Haikyuu Fly High** (Garena
 LDPlayer 9/14 on Windows. Download `HFH-FlyHigh.zip` (or `HFH-FlyHigh-Admin.zip` with Admin Mode)
 from **[Releases](../../releases/latest)**, unzip, start `HFH-Launcher.exe` and log in to the game
 with your Garena account. The launcher sets everything up (server, proxy, LDPlayer, root, game),
-keeps backups of the save games and updates itself. Its window is in English on an English Windows (button “DE / EN” switches) – `README_EN.txt` in
+keeps backups of the save games and updates itself. **Content: Global / JP** – unpack
+`HFH-FlyHigh-JP.zip` next to the launcher folder and click “JP” for the Japanese version's content,
+including four new players (Sakusa WB, Komori WB, Aran Ojiro WS, Sugawara WS); back on “Global” the
+game downloads its original files again (~150 MB). The admin version can also build your own coach
+and unlock everything. Its window is in English on an English Windows (button “DE / EN” switches) – `README_EN.txt` in
 the zip explains every button and the admin gift-code commands.
 
 ## Selbst bauen

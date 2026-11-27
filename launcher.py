@@ -55,22 +55,36 @@ MODES = {"private": "Private Server", "garena": "Garena (offiziell)"}
 EDITIONS = {"global": "Global", "jp": "JP"}
 
 
+JP_PACKAGE = "HFH-FlyHigh-JP"  # the public JP add-on zip, unpacked next to the launcher folder
+
+
+def jp_gamedata(base: Path) -> Path | None:
+    """The server's JP tables: HFH_GAMEDATA_JP, <base>/gamedata-jp, or the JP add-on next to the package."""
+    for root in ([Path(os.environ["HFH_GAMEDATA_JP"])] if os.environ.get("HFH_GAMEDATA_JP") else []) + \
+            [base / "gamedata-jp", base.parent / JP_PACKAGE / "gamedata-jp"]:
+        if (root / "cfg" / "playerlist.json").exists():
+            return root
+    return None
+
+
 def jp_data_ready(base: Path) -> bool:
-    """The server's JP tables (gamedata-jp, or HFH_GAMEDATA_JP like server/edition.py)."""
-    root = Path(os.environ.get("HFH_GAMEDATA_JP") or base / "gamedata-jp")
-    return (root / "cfg" / "playerlist.json").exists()
+    return jp_gamedata(base) is not None
 
 
 def jp_patch(base: Path, settings: dict) -> tuple:
     """(proxy addon, folder of the patched client files) for JP, None where missing.
     Addon: HFH_PATCH_PROXY, settings "jp_patch_proxy", else <base>/patch/patch_proxy.py.
-    Files: HFH_PATCH_DIR, settings "jp_patch_dir", else out/Install next to the addon (its own default)."""
+    Files: HFH_PATCH_DIR, settings "jp_patch_dir", out/Install next to the addon (its own default),
+    else Install in the JP add-on next to the package (HFH-FlyHigh-JP/Install)."""
     addon = Path(os.environ.get("HFH_PATCH_PROXY") or settings.get("jp_patch_proxy")
                  or base / "patch" / "patch_proxy.py")
     if not addon.is_file():
         return None, None
-    files = Path(os.environ.get("HFH_PATCH_DIR") or settings.get("jp_patch_dir") or addon.parent / "out" / "Install")
-    return addon, (files if files.is_dir() and any(files.rglob("*")) else None)
+    given = os.environ.get("HFH_PATCH_DIR") or settings.get("jp_patch_dir")
+    for files in [Path(given)] if given else [addon.parent / "out" / "Install", base.parent / JP_PACKAGE / "Install"]:
+        if files.is_dir() and any(files.rglob("*")):
+            return addon, files
+    return addon, None
 
 
 # ----------------------------------------------------------------------------
@@ -628,11 +642,11 @@ class Launcher:
             addon, files = jp_patch(self.base, self.settings)
             missing = []
             if not self.remote() and not jp_data_ready(self.base):
-                missing.append(f"JP-Tabellen ({self.base / 'gamedata-jp' / 'cfg'})")
+                missing.append(f"JP-Inhalte ({JP_PACKAGE}.zip neben dem Launcher-Ordner entpacken)")
             if addon is None:
                 missing.append("Proxy-Zusatz patch_proxy.py (patch/ oder Einstellung jp_patch_proxy)")
             elif files is None:
-                missing.append("gepatchte Client-Dateien (out/Install oder Einstellung jp_patch_dir)")
+                missing.append(f"gepatchte Client-Dateien ({JP_PACKAGE}.zip neben dem Launcher-Ordner entpacken)")
             if missing:
                 self.log("JP geht noch nicht, es fehlt: " + "; ".join(missing))
                 return
@@ -682,6 +696,9 @@ class Launcher:
             return
         env = dict(os.environ, HFH_SETTINGS=str(SETTINGS_FILE), PYTHONUNBUFFERED="1",
                    PYTHONIOENCODING="utf-8", HFH_EDITION=self.settings.get("edition", "global"))
+        jp_root = jp_gamedata(self.base)
+        if jp_root is not None:  # e.g. the JP add-on next to the package: tell the server (server/edition.py)
+            env["HFH_GAMEDATA_JP"] = str(jp_root)
         remote = self.remote()
         if self.server_proc and self.server_proc.poll() is None:
             pass  # ours (server or relay) is still running

@@ -9,6 +9,9 @@ Build HFH-Launcher.exe and a shareable zip.
             (Settings -> gift code); the normal package has no Admin Mode
 --server    preset the normal package's server address (host[:port] of a shared multiplayer
             server, launcher_defaults.json); players can still change it in the launcher
+--jp DIR    also build the JP add-on HFH-FlyHigh-JP (zip): the server's JP tables (<data>/gamedata-jp:
+            cfg + typed) and the patched client files DIR/Bundle (out/Install of build_client.py), which
+            the launcher's proxy hands the client for "Inhalte: JP"; unpacked next to the launcher folder
 
 Output:
   dist/HFH-FlyHigh/              ready-to-run folder (launcher + server snapshot + game config)
@@ -79,9 +82,17 @@ def git_files(repo: Path, prefix: str):
     return [p for p in out.splitlines() if p]
 
 
-def git_show(repo: Path, path: str) -> bytes:
-    return subprocess.run(["git", "-C", str(repo), "show", f"HEAD:{path}"],
-                          capture_output=True, check=True).stdout
+def git_show(repo: Path, path: str, tries: int = 3) -> bytes:
+    """A file of the last commit. Retried: on 26.11. one of the ~150 calls of the hourly public build
+    crashed inside git (exit 0xC0000374, heap corruption) and broke the whole release; it did not
+    happen again with the same file."""
+    for attempt in range(tries):
+        r = subprocess.run(["git", "-C", str(repo), "show", f"HEAD:{path}"], capture_output=True)
+        if r.returncode == 0:
+            return r.stdout
+        print(f"git show HEAD:{path} failed (exit {r.returncode}), attempt {attempt + 1}/{tries}")
+        time.sleep(1)
+    raise subprocess.CalledProcessError(r.returncode, r.args, r.stdout, r.stderr)
 
 
 def package(exe_dir: Path, data: Path, name: str = PACKAGE, admin_pw: str | None = None,
@@ -104,7 +115,9 @@ def package(exe_dir: Path, data: Path, name: str = PACKAGE, admin_pw: str | None
         dest = out / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(git_show(HERE, rel))
-    for rel in ("decoded/message_ids.json", "patch/mitm_redirect.py"):
+    for rel in ("decoded/message_ids.json", "patch/mitm_redirect.py", "patch/patch_proxy.py"):
+        if rel not in git_files(HERE, rel):  # patch_proxy.py: the JP proxy add-on (newer packages)
+            continue
         dest = out / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(git_show(HERE, rel))
@@ -136,6 +149,42 @@ def package(exe_dir: Path, data: Path, name: str = PACKAGE, admin_pw: str | None
     if server:  # multiplayer package: the launcher connects to this server instead of the local one
         import json
         (out / "launcher_defaults.json").write_text(json.dumps({"server": server.strip()}), encoding="utf-8")
+    return out
+
+
+JP_PACKAGE = f"{PACKAGE}-JP"
+JP_README = """HFH-FlyHigh-JP - Inhalte der japanischen Fassung (Zusatz zum Launcher)
+
+Dieses Zip NEBEN den Launcher-Ordner entpacken, so dass die Ordner nebeneinander liegen:
+    ...\\HFH-FlyHigh\\          (oder HFH-FlyHigh-Admin)
+    ...\\HFH-FlyHigh-JP\\
+Dann im Launcher bei "Inhalte" auf "JP" klicken: Server und Proxy starten neu, das Spiel holt die
+neuen Bilder und Tabellen (ca. 160 MB) und startet neu. Zurück auf "Global" lädt das Spiel die
+Originaldateien wieder von Garena (ca. 150 MB).
+
+Enthalten: gamedata-jp (Spieltabellen für den Server) und Install/Bundle (Spieldateien für den Client).
+
+HFH-FlyHigh-JP - content of the Japanese version (add-on for the launcher)
+Unpack this zip NEXT TO the launcher folder (both folders side by side), then click "JP" at
+"Content" in the launcher. Back to "Global" the game downloads the original files again (~150 MB).
+"""
+
+
+def package_jp(data: Path, install: Path) -> Path:
+    """The JP add-on: <data>/gamedata-jp (cfg + typed) and <install>/Bundle - game tables and game files
+    only (no bundles.list, logs, backups or build tools of the folder it is built in)."""
+    out = HERE / "dist" / JP_PACKAGE
+    if out.exists():
+        shutil.rmtree(out)
+    src = data / "gamedata-jp"
+    for part in ("cfg", "typed"):
+        if not (src / part).is_dir():
+            sys.exit(f"{src / part} fehlt (make_server_tables.py)")
+        shutil.copytree(src / part, out / "gamedata-jp" / part, ignore=shutil.ignore_patterns("__pycache__"))
+    if not (install / "Bundle").is_dir():
+        sys.exit(f"{install / 'Bundle'} fehlt (build_client.py)")
+    shutil.copytree(install / "Bundle", out / "Install" / "Bundle")
+    (out / "LIESMICH-JP.txt").write_text(JP_README, encoding="utf-8")
     return out
 
 
@@ -172,6 +221,7 @@ def main():
     ap.add_argument("--no-zip", action="store_true")
     ap.add_argument("--admin-pw", help="also build HFH-FlyHigh-Admin with Admin Mode and this password")
     ap.add_argument("--server", help="preset server address host[:port] in the normal package")
+    ap.add_argument("--jp", type=Path, help="also build the JP add-on from this out/Install folder")
     args = ap.parse_args()
     data = args.data.resolve()
 
@@ -182,6 +232,8 @@ def main():
     outs = [package(exe_dir, data, server=args.server)]
     if args.admin_pw:
         outs.append(package(exe_dir, data, f"{PACKAGE}-Admin", args.admin_pw))
+    if args.jp:
+        outs.append(package_jp(data, args.jp.resolve()))
     for out in outs:
         print("Ordner:", out)
         if not args.no_zip:
