@@ -172,9 +172,13 @@ class Account:
         self.tokyo_rewards = d.get("tokyo_rewards", [])  # [chapter, star threshold] chests claimed
         # potentials added or changed on top of the baseline (inst_id -> PlayerSpecialty bytes)
         self.specialties = {int(k): bytes.fromhex(v) for k, v in d.get("specialties", {}).items()}
+        self.removed_specialties = set(d.get("removed_specialties", []))  # consumed or dismantled (specialty.py)
+        self.specialty_settings = d.get("specialty_settings", {})  # auto-dismantle / filter schemes (specialty.py)
         self.admin_flags = d.get("admin_flags", {})  # Admin Mode switches, e.g. infinite_stamina
         # memories (PlayerRecalling) added or changed on top of the baseline: inst_id -> bytes
         self.recallings = {int(k): bytes.fromhex(v) for k, v in d.get("recallings", {}).items()}
+        self.removed_recallings = set(d.get("removed_recallings", []))  # consumed or dismantled (recalling.py)
+        self.recalling_auto = d.get("recalling_auto")  # auto-dismantle conf ids (recalling.py), None = baseline
         self.team = bytes.fromhex(d["team"]) if d.get("team") else None  # TeamInfoS2C with saved line-ups
         self.flags = d.get("flags")  # GAMER_FLAGS bit mask (auto skill 1, auto serve 2, speed 4); None = baseline
         # assistant settings changed since the baseline (ShareAssistSet 0x3703): func_type -> [is_open, arg]
@@ -206,8 +210,12 @@ class Account:
             "hangup": self.hangup,
             "tokyo_rewards": self.tokyo_rewards,
             "specialties": {str(k): v.hex() for k, v in self.specialties.items()},
+            "removed_specialties": sorted(self.removed_specialties),
+            "specialty_settings": self.specialty_settings,
             "admin_flags": self.admin_flags,
             "recallings": {str(k): v.hex() for k, v in self.recallings.items()},
+            "removed_recallings": sorted(self.removed_recallings),
+            "recalling_auto": self.recalling_auto,
             "team": self.team.hex() if self.team else None,
             "flags": self.flags,
             "assistant": {str(k): v for k, v in self.assistant.items()},
@@ -394,10 +402,15 @@ class Account:
 
     def all_recallings(self) -> dict[int, bytes]:
         """inst_id -> PlayerRecalling bytes of every memory the account has."""
-        return {**self.b.recallings, **self.recallings}
+        return {k: v for k, v in {**self.b.recallings, **self.recallings}.items() if k not in self.removed_recallings}
 
     def put_recalling(self, raw: bytes):
         self.recallings[wire.get(wire.parse(raw), 1)] = raw
+        self.removed_recallings.discard(wire.get(wire.parse(raw), 1))
+
+    def remove_recalling(self, inst_id: int):
+        self.recallings.pop(inst_id, None)
+        self.removed_recallings.add(inst_id)
 
     def add_recalling(self, conf_id: int, level: int = 1, max_level: int = 20, stage: int = 1) -> bytes:
         inst = self._new_inst()
@@ -453,13 +466,17 @@ class Account:
         self.cards = [c for c in self.cards if wire.get(wire.parse(c), 1) != inst] + [card]
 
     def get_specialty(self, inst_id: int) -> bytes | None:
+        if inst_id in self.removed_specialties:
+            return None
         return self.specialties.get(inst_id) or self.b.specialties.get(inst_id)
 
     def all_specialties(self) -> dict[int, bytes]:
-        return {**self.b.specialties, **self.specialties}
+        return {k: v for k, v in {**self.b.specialties, **self.specialties}.items()
+                if k not in self.removed_specialties}
 
     def put_specialty(self, spec: bytes):
         self.specialties[wire.get(wire.parse(spec), 1)] = spec
+        self.removed_specialties.discard(wire.get(wire.parse(spec), 1))
 
     def owned_conf_ids(self) -> set[int]:
         cards = {**self.b.cards, **{wire.get(wire.parse(c), 1): c for c in self.cards}}
@@ -565,11 +582,13 @@ class Account:
                         + wire.build([(3, 0, 2)])))
         if self.specialties:
             out.append((MSG_SPECIALTY_UPDATE, b"".join(wire.build([(1, 2, s)]) for s in self.specialties.values())))
-        if self.recallings:  # RecallingUpdateS2C: 1 = creates, 2 = updates
+        gone_recs = sorted(i for i in self.removed_recallings if i in self.b.recallings)
+        if self.recallings or gone_recs:  # RecallingUpdateS2C: 1 = creates, 2 = updates, 3 = removes
             new = [r for k, r in self.recallings.items() if k not in self.b.recallings]
             changed = [r for k, r in self.recallings.items() if k in self.b.recallings]
             out.append((MSG_RECALLING_UPDATE, b"".join(wire.build([(1, 2, r)]) for r in new)
-                        + b"".join(wire.build([(2, 2, r)]) for r in changed)))
+                        + b"".join(wire.build([(2, 2, r)]) for r in changed)
+                        + (wire.build([(3, 2, b"".join(wire.varint(i) for i in gone_recs))]) if gone_recs else b"")))
         if self.flags is not None:  # NotifyFlagsS2C{1=flags}: auto play / auto serve / speed switches
             out.append((MSG_FLAGS, wire.build([(1, 0, self.flags)])))
         if self.contest is not None:

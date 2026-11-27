@@ -398,6 +398,7 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
     own_coach(team, acc, gid, form)
     if COACH_STATS:
         switch_coach(team, old if had else None, set(captured))
+        team.power += coach_force(team.formation.coach_card if team.formation.HasField("coach_card") else None)
     import admin  # Admin Mode: per-card power changes (no-op without any)
     admin.apply_power(acc, team)
     return team
@@ -466,6 +467,16 @@ def _table_cached(name: str) -> dict:
     return _TABLES[name]
 
 
+def coach_force(card) -> int:
+    """Team power of a coach's job buffs (client TeamCalculator.CalcPower adds
+    GetCoachActiveBuffPower = coachbuff.ForceNumber of each job buff, besides the coach's stats on the
+    players). With the stats part of switch_coach, account 1940388811 with Ukai level 15: +30 290 here,
+    the client showed +29 560 (its stats part weighs the stats, not modelled)."""
+    if card is None:
+        return 0
+    return sum(_num((_table_cached("coachbuff").get(j.buff_id) or {}).get("ForceNumber")) for j in card.job_buffs)
+
+
 def switch_coach(team: P.PVPTeamInfo, old, captured_ids: set) -> None:
     """The team's coach is now team.formation.coach_card (old = the one whose share the captured cards'
     stats and skill_extras already hold, or None). Stats: every player gets the new coach's values,
@@ -475,6 +486,10 @@ def switch_coach(team: P.PVPTeamInfo, old, captured_ids: set) -> None:
     if old is not None and new is not None and old.SerializeToString() == new.SerializeToString():
         return
     nv, ov = coach_values(new), coach_values(old)
+    # team power: the coach's stats on the 7 court players (see coach_force for the rest)
+    for p in team.formation.players[:7]:
+        base = ov if p.info.inst_id in captured_ids else {}
+        team.power += sum(nv.get(t, 0) - base.get(t, 0) for t in range(7)) // SCALE
     for p in team.formation.players:
         base = ov if p.info.inst_id in captured_ids else {}
         for a in p.attr:

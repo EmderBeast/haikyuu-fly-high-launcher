@@ -109,8 +109,11 @@ async def main():
     c.sent.clear()
     await server.handle_share_assist_do(c, b"")
     got = units(next(p for mid, p in c.sent if mid == server.MSG_ASSIST_DO))
-    check("functions in gamehelperconf Order (3, 19, 17), as in the capture", [f for f, _ in got] == [3, 19, 17],
+    check("functions in gamehelperconf Order (2, 3, 5, 19, 17), as in the capture (1, 2, 3, ..., 19, 17)",
+          [f for f, _ in got] == [2, 3, 5, 19, 17],
           f"{[f for f, _ in got]}")
+    check("function 5 (stamina exchange, arg 2) = Garena's two free exchanges", dict(got).get(5) == [(105, 60), (105, 60)],
+          f"{dict(got).get(5)}")
     check("function 3 (quiz) rewards = Garena's", dict(got).get(3) == GARENA_3, f"{dict(got).get(3)}")
     tickets = [pl for mid, pl in c.sent if mid == 0x1A01]
     check("quiz passed: 0x1A01 freetimes -1 sent", tickets and server.matches.P.ExamTicketsS2C.FromString(tickets[-1]).freetimes == -1)

@@ -142,7 +142,7 @@ def formations(gid: int, acc) -> list[dict]:
 
 
 def team_formation(f: dict) -> P.TeamFormation:
-    return P.TeamFormation(lineup=f["lineup"], inst_ids=f["insts"])
+    return P.TeamFormation(lineup=f["lineup"], inst_ids=f["insts"], coach_card_inst_id=f.get("coach", 0))
 
 
 # --- messages -----------------------------------------------------------------------------------
@@ -215,7 +215,8 @@ def build_room(args_pb: bytes, acc, gid: int, name: str):
     info_.room_args.CopyFrom(args)
     import peak
     prof = pvp.profile(acc, gid, name)
-    info_.home.CopyFrom(peak.build_team(acc, form["insts"] if form else [], gid, name, (prof["icon"], prof["frame"])))
+    info_.home.CopyFrom(peak.build_team(acc, form["insts"] if form else [], gid, name, (prof["icon"], prof["frame"]),
+                                        form.get("coach", 0) if form else 0))
     info_.away.CopyFrom(matches.away_team(info_.away, stage, now))
     info_.preset_match_id = 0
     info_.bo_type = 1
@@ -302,7 +303,8 @@ async def handle_formation_save(client, pb: bytes):
     by_lineup = {f["lineup"]: f for f in forms}
     for f in req.formation:
         insts = [i if acc.get_card(i) else 0 for i in f.inst_ids][:SLOTS]
-        by_lineup[f.lineup] = {"lineup": f.lineup, "insts": insts + [0] * (SLOTS - len(insts))}
+        by_lineup[f.lineup] = {"lineup": f.lineup, "insts": insts + [0] * (SLOTS - len(insts)),
+                               "coach": f.coach_card_inst_id}  # TeamFormation field 12, seen in 0x4004
     entry(client.gid, acc)["formations"] = [by_lineup[k] for k in sorted(by_lineup)]
     pvp.save()
     out = P.TeamCompetitionFormationSaveS2C()

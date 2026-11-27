@@ -24,6 +24,8 @@ import freedom  # noqa: E402
 import starter  # noqa: E402
 import wire  # noqa: E402
 
+# the test's own owner list: a real owners.json next to the server (main checkout) named the real owner account
+starter.OWNERS_FILE = TMP / "owners.json"
 P = matches.P
 
 

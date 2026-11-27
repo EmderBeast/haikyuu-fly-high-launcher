@@ -140,7 +140,8 @@ def formation(gid: int, acc, kind: str) -> P.TeamFormation:
 def team_of(acc, gid: int, name: str, kind: str) -> P.PVPTeamInfo:
     import peak
     prof = pvp.profile(acc, gid, name)
-    return peak.build_team(acc, list(formation(gid, acc, kind).inst_ids), gid, name, (prof["icon"], prof["frame"]))
+    form = formation(gid, acc, kind)  # saved whole (0x1F06), with its coach_card_inst_id
+    return peak.build_team(acc, list(form.inst_ids), gid, name, (prof["icon"], prof["frame"]), form.coach_card_inst_id)
 
 
 def snapshot(acc, gid: int, name: str):

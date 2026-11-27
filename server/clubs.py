@@ -1127,6 +1127,41 @@ async def handle_buffet_donate(client, pb: bytes):
     _buffet_refresh(c)
 
 
+async def assistant_buffet(client) -> list[tuple[int, int]]:
+    """Assistant function 14: donate food until the day's DONATE_PER_DAY donations are made. Capture wcy2711
+    (n 388-391, unit 14): foods 205000001 x1, 205000002 x7 (all of each), 205000003 x2 - in ascending food id,
+    all of a food before the next, until 10; 0x2E1D buffet info, then one 0x0802 per food; unit 14 lists
+    DONOR_REWARD per food times its donations ((128, 10), (129, 30), (130, 15) x1 / x7 / x2).
+    Assumed: the donor rewards are credited without a pop-up after the item changes (their messages in the
+    capture are not separated from function 13's)."""
+    gid, acc = int(client.gid), client.account
+    c = club_of(gid)
+    if c is None:
+        return []
+    b, m = _buffet(c), _buffet_me(c, gid)
+    given = []
+    for food in sorted(FOODS):
+        n = 0
+        while (m["donated"] < DONATE_PER_DAY and b["foods"].get(str(food), 0) < POOL_MAX
+               and acc.item_count(food) - n > 0):
+            b["foods"][str(food)] = b["foods"].get(str(food), 0) + 1
+            m["donated"] += 1
+            n += 1
+        if n:
+            given.append((food, n))
+    if not given:
+        return []
+    pvp.save()
+    await client.send_packet(MSG_BUFFET_INFO, buffet_info(gid))
+    for food, n in given:
+        await _bag_change(client, food, acc.item_count(food) - n)
+    acc.save()
+    shown = [(item, num * n) for food, n in given for item, num in DONOR_REWARD]
+    await pvp.HOOKS["grant_rewards"](client, shown, False)
+    _buffet_refresh(c)
+    return shown
+
+
 async def handle_buffet_buy(client, pb: bytes):
     req = P.AssociationBuffetBuyC2S.FromString(pb)
     acc = client.account

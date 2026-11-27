@@ -391,12 +391,17 @@ async def handle_login(client: GameClient, pb_data: bytes):
         if m["msg_id"].upper() == "0X0B01" and client.account.team:  # line-ups saved since the baseline
             await client.send_packet(0x0B01, client.account.team)
             continue
+        if m["msg_id"].upper() == "0X0407":  # currency sync: this player's exchanges of today (stamina buys)
+            body = wire.body_to_pb(bytes.fromhex(m["body_hex"]), m["flags"])
+            await client.send_packet(0x0407, exchange.patch_sync(int(gid), body), compress=bool(m["flags"] & 2))
+            continue
         if m["msg_id"].upper() == "0X2801":  # local activities: this player's own online time and stages
             onlinereward.login(int(gid), client.account)
             body = wire.body_to_pb(bytes.fromhex(m["body_hex"]), m["flags"])
             info = onlinereward._P().LocalActivityInfoS2C.FromString(
                 onlinereward.patch_info(int(gid), client.account, body))
             limitlogin.patch_info(int(gid), info)  # noon / evening stamina of today
+            trainsupply.patch_info(int(gid), info, client.account.level)  # weekend training supply
             await client.send_packet(0x2801, info.SerializeToString(), compress=bool(m["flags"] & 2))
             continue
         if m["msg_id"].upper() == "0X5501":  # coaches: this player's own coaches (levels, dismantled ones)
@@ -429,8 +434,22 @@ async def handle_login(client: GameClient, pb_data: bytes):
         if m["msg_id"].upper() == "0X3701":  # assistant settings: the baseline's plus this player's changes
             await client.send_packet(MSG_ASSIST_INFO, assistant_info(client.account))
             continue
+        if m["msg_id"].upper() == "0X2D01":  # daily events: this player's own plays left and waiting events
+            await client.send_packet(0x2D01, dailyplay.info(int(gid)))
+            continue
         if m["msg_id"].upper() == "0X2B01":  # mini games: this player's own week score and best scores
             await client.send_packet(0x2B01, minigame.info(int(gid), client.account))
+            continue
+        if m["msg_id"].upper() == "0X3C01" and client.account.recalling_auto is not None:
+            # memories: this player's auto-dismantle list (the memories follow as 0x3C02 updates)
+            await client.send_packet(0x3C01, recalling.info(client.account, client.account.b.pb("0x3C01")),
+                                     compress=bool(m["flags"] & 2))
+            continue
+        if m["msg_id"].upper() == "0X1801" and (client.account.removed_specialties
+                                                or client.account.specialty_settings):
+            # potentials: without the ones this player used up, with their auto-dismantle / filter settings
+            await client.send_packet(0x1801, specialty.info(client.account, client.account.b.pb("0x1801")),
+                                     compress=bool(m["flags"] & 2))
             continue
         if m["msg_id"].upper() == "0X2901":  # Specialty Trial: this player's own state, not the capture
             await client.send_packet(0x2901, trial.info(int(gid), client.account))
@@ -1249,8 +1268,8 @@ async def handle_share_assist_do(client: GameClient, pb_data: bytes):
     """0x3704 ShareAssistDoC2S{}: run every switched-on assistant function in gamehelperconf Order;
     S2C{1=err 2=repeated AssistantRewardUnit{1=func_type 3=repeated Item{2=id 3=count}}}, only functions
     that did something (capture decrypted_1: 9 units, the open but empty 16/18 missing). Implemented:
-    the mini game week rewards (1), the quiz (3), the stored activity stamina (6), club daily welfare (13)
-    and wish (15), the mission functions 16-19; the others (daily events, treasure, exchange, resource stages, club buffet) are
+    the mini game week rewards (1), the daily events (2), the quiz (3), the stored activity stamina (6), club daily welfare (13)
+    and wish (15), the mission functions 16-19; the stamina exchange (5), the club buffet donations (14); the others (treasure, resource stages) are
     skipped (docs/garena-abgleich.md)."""
     settings = assistant_settings(client.account)
     order = sorted(settings, key=lambda f: (gameconfig.ASSISTANT.get(f, {}).get("Order", 999), f))
@@ -1260,6 +1279,13 @@ async def handle_share_assist_do(client: GameClient, pb_data: bytes):
             continue
         if func == 1:
             shown = await minigame.assistant(client)
+        elif func == 2:
+            shown = await dailyplay.assistant(client)
+        elif func == 5:  # exchange stamina up to the function's count
+            shown = await exchange.assistant(client, settings[func][1])
+        elif func == 14:  # club buffet: donate food until the day's donations are made
+            import clubs
+            shown = await clubs.assistant_buffet(client)
         elif func == 6:
             shown = await _assist_physical(client)
         elif func == 3:
@@ -1724,16 +1750,22 @@ import weekly  # noqa: E402  weekly activity "Bonus Training" (0x2F01 / 0x2F02) 
 MESSAGE_HANDLERS.update(weekly.HANDLERS)
 import minigame  # noqa: E402  mini games (Arder 0x2B01 / 0x2B03) per player
 MESSAGE_HANDLERS.update(minigame.HANDLERS)
+import dailyplay  # noqa: E402  daily events in "Freie Zeit" (0x2D01 / 0x2D02) per player
+MESSAGE_HANDLERS.update(dailyplay.HANDLERS)
 import onlinereward  # noqa: E402  Cumulative Online Rewards (local activity type 3)
 import limitlogin  # noqa: E402  limited-time login stamina (local activity type 1)
+import trainsupply  # noqa: E402  weekend training supply (local activity type 8)
+import exchange  # noqa: E402  currency exchange (0x1201: stamina for diamonds) per player and day
+MESSAGE_HANDLERS.update(exchange.HANDLERS)
 
 
 async def handle_local_activity_reward(client: GameClient, pb_data: bytes):
-    """0x2803 LocalActivityRewardC2S{type, data}: Online Rewards (type 3) and the limited-time login stamina
-    (type 1) per player; the other activities
+    """0x2803 LocalActivityRewardC2S{type, data}: Online Rewards (type 3), the limited-time login stamina
+    (type 1) and the training supply (type 8) per player; the other activities
     still get the captured reply (docs/garena-abgleich.md)."""
     req = onlinereward._P().LocalActivityRewardC2S.FromString(pb_data)
-    if await onlinereward.handle_reward(client, req) or await limitlogin.handle_reward(client, req):
+    if (await onlinereward.handle_reward(client, req) or await limitlogin.handle_reward(client, req)
+            or await trainsupply.handle_reward(client, req)):
         return
     await handle_generic(client, pb_data, 0x2803)
 
@@ -1757,6 +1789,10 @@ import monthcard  # noqa: E402  month / quarter card: the daily reward
 MESSAGE_HANDLERS.update(monthcard.HANDLERS)
 import freepack  # noqa: E402  free packs of the shop
 MESSAGE_HANDLERS.update(freepack.HANDLERS)
+import recalling  # noqa: E402  memories: level up / breakthrough, stage, dismantle, auto list (0x3C04/05/08/0A)
+MESSAGE_HANDLERS.update(recalling.HANDLERS)
+import specialty  # noqa: E402  potentials: level up, lock, dismantle, settings (0x1803 / 0x1806 / 0x1808-0x180A)
+MESSAGE_HANDLERS.update(specialty.HANDLERS)
 import honor  # noqa: E402  Path to Honor: stage rewards
 MESSAGE_HANDLERS.update(honor.HANDLERS)
 import exam  # noqa: E402  Quiz: tickets, questions, reward

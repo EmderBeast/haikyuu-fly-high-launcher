@@ -145,7 +145,12 @@ def formations(gid: int, acc, kind: str) -> list[list[int]]:
     return d[kind]
 
 
-def build_team(acc, insts: list[int], gid: int, name: str, icon=(0, 0)) -> P.PVPTeamInfo:
+def build_team(acc, insts: list[int], gid: int, name: str, icon=(0, 0), coach: int = 0) -> P.PVPTeamInfo:
+    """A match team from cards of the account (Triple Clash, Freedom Championship, team competition).
+    coach = the line-up's coach instance (PeakFormation field 7 / TeamFormation.coach_card_inst_id field 12,
+    both seen in Garena's saves 0x4A03 / 0x4004): that coach of the player goes into the team with its stats,
+    skills and power (matches.switch_coach / coach_force, as matches.home_team does); 0 or a coach the player
+    does not have = none."""
     team = P.PVPTeamInfo()
     team.CopyFrom(pvp._template().home)
     team.gamer_id, team.name, team.is_robot = gid, name, False
@@ -161,9 +166,19 @@ def build_team(acc, insts: list[int], gid: int, name: str, icon=(0, 0)) -> P.PVP
         else:
             team.formation.players.add()
     team.power = sum(p.power for p in team.formation.players[:COURT])
+    card, coach_power = None, 0
+    if coach:
+        import coach as coaches
+        card = coaches.cards(int(gid), acc).get(int(coach)) if gid else None
+        if card is not None:
+            team.formation.coach_card.CopyFrom(card)
+            if matches.COACH_STATS:  # cards built here hold no coach share yet: old None, nothing captured
+                before = team.power
+                matches.switch_coach(team, None, set())  # adds the coach's stats to team.power
+                coach_power = team.power - before + matches.coach_force(card)
     import admin  # Admin Mode: per-card power changes (no-op without any)
     admin.apply_power(acc, team)
-    team.power = sum(p.power for p in team.formation.players[:COURT])
+    team.power = sum(p.power for p in team.formation.players[:COURT]) + coach_power
     return team
 
 
@@ -181,10 +196,15 @@ def peak_formation(teams: list[P.PVPTeamInfo], gid: int = 0) -> P.PeakForMation:
     return out
 
 
+def coaches_of(gid: int, acc, kind: str) -> list[int]:
+    """The coach of each of the three line-ups (0 = none), saved with them (0x4A02 / 0x4A03)."""
+    return (list(entry(gid, acc).get(kind + "_coach") or []) + [0] * TEAMS)[:TEAMS]
+
+
 def my_teams(acc, gid: int, name: str, kind: str) -> list[P.PVPTeamInfo]:
     prof = pvp.profile(acc, gid, name)
-    return [build_team(acc, insts, gid, name, (prof["icon"], prof["frame"]))
-            for insts in formations(gid, acc, kind)]
+    return [build_team(acc, insts, gid, name, (prof["icon"], prof["frame"]), coach)
+            for insts, coach in zip(formations(gid, acc, kind), coaches_of(gid, acc, kind))]
 
 
 def snapshot(acc, gid: int, name: str):
@@ -471,12 +491,16 @@ async def handle_info(client, pb: bytes):
 def _save_formations(client, pb: bytes, kind: str) -> list[P.PVPTeamInfo]:
     acc, gid = client.account, client.gid
     req = P.PeakSetDefendFormationC2S.FromString(pb)  # same layout as the attack message
-    teams = []
+    teams, coaches = [], []
+    import coach
+    own = coach.cards(int(gid), acc)
     for pf in req.pf_info[:TEAMS]:
         insts = [i if acc.get_card(i) else 0 for i in pf.card_gid_list][:SLOTS]
         teams.append(insts + [0] * (SLOTS - len(insts)))
+        coaches.append(pf.coach_card_inst_id if pf.coach_card_inst_id in own else 0)
     if len(teams) == TEAMS:
         entry(gid, acc)[kind] = teams
+        entry(gid, acc)[kind + "_coach"] = coaches
     if kind == "defend":
         snapshot(acc, gid, _name(client))
     pvp.save()

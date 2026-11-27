@@ -53,7 +53,13 @@ def main():
     team2 = P.PVPTeamInfo()
     team2.formation.players.add().attr.extend([P.PlayerCardAttr(type=t, val=100, extrval=0) for t in range(7)])
     team2.formation.coach_card.CopyFrom(new)
+    power0 = team2.power
     matches.switch_coach(team2, None, set())
+    gain = team2.power - power0
+    check("team power: the coach's stats on the player", gain == sum(nv.get(t, 0) for t in range(7)) // matches.SCALE, str(gain))
+    new.job_buffs.add(job=1, buff_id=next(i for i, r in matches._table_cached("coachbuff").items()
+                                           if matches._num(r.get("ForceNumber"))))
+    check("job buff power (coachbuff.ForceNumber)", matches.coach_force(new) > 0, str(matches.coach_force(new)))
     got = [a.extrval for a in team2.formation.players[0].attr]
     check("own card: the coach's whole share", got == [nv.get(t, 0) for t in range(7)], str(got))
 
