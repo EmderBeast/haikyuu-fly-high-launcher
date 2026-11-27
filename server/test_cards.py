@@ -79,7 +79,8 @@ async def main():
     check("0x0904: recycle + reslove resources", got == want and want.get(K.EXP_ITEM), (got, want))
     check("0x0904: card gone, its memory free", acc.get_card(card.inst_id) is None
           and P.PlayerRecalling.FromString(acc.all_recallings()[rec.inst_id]).player_inst_id == 0)
-    check("0x0904: REMOVE then reply", [m for m, _ in c.sent][-2:] == [0x0902, K.MSG_DECOMPOSE])
+    check("0x0904: memory off, REMOVE (inst ids only), ..., reply (capture dizzy2711f)", [m for m, _ in c.sent][:2] == [0x3C02, 0x0902] and c.sent[-1][0] == K.MSG_DECOMPOSE
+          and [p.info.inst_id for p in P.PlayerCardChangeS2C.FromString(c.sent[1][1]).players] == [card.inst_id])
 
     busy = next(iter(K.in_lineup(acc)))
     locked = next(i for i, raw in acc.b.cards.items() if P.PlayerCard.FromString(raw).locked and i not in K.in_lineup(acc))

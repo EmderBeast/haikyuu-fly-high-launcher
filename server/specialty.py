@@ -219,8 +219,8 @@ async def handle_up_level(client, pb: bytes, rng=random):
     log.info(f"  SPECIALTY {main.inst_id} +{exp_in} exp -> level {main.level} exp {main.exp}, gold {gold}")
     await _currencies(client, {**({GOLD: acc.get_currency(GOLD) - gold} if gold else {}),
                                **({ESSENCE: acc.get_currency(ESSENCE) - essence} if essence else {})})
-    if eaten:
-        await client.send_packet(MSG_UPDATE, update_msg(eaten, REMOVE))
+    # Garena capture dizzy2711e (A3, essence only): the REMOVE comes even when nothing was consumed
+    await client.send_packet(MSG_UPDATE, update_msg(eaten, REMOVE))
     await client.send_packet(MSG_UPDATE, update_msg([main], UPDATE))
     await client.send_packet(MSG_UP_LEVEL, P.PlayerSpecialtyUpLevelS2C().SerializeToString())
 
@@ -328,3 +328,29 @@ def info(acc, raw: bytes) -> bytes:
 
 HANDLERS = {MSG_UP_LEVEL: handle_up_level, MSG_LOCK: handle_lock, MSG_DECOMP: handle_decomp,
             MSG_DECOMP_SET: handle_decomp_set, MSG_FILTER: handle_filter}
+
+
+# ------------------------------------------------------------------ new potentials
+def roll(group: int, inst: int, rng=random):
+    """A new level-0 potential of a potential item (item.json Itemtype 399, id = suit * 10 + rare, e.g.
+    301014 = set 101 rarity 4): one of the group's specialty rows (its places), the main attribute by
+    Mainweight, as many sub-attributes as ViceattrWeight picks (index = count), from ViceattrPool by Weight
+    without repeats. Garena capture dizzy2711e (A2): 301014 from a selection box became 3010143 with main
+    1027 and 4 sub-attributes."""
+    rows = [r for i, r in sorted(ROWS.items()) if i // 10 == group]
+    if not rows:
+        return None
+    row = rng.choice(rows)
+    mains, mw = _list(row.get("MainattrID")), _list(row.get("Mainweight"))
+    main = rng.choices(mains, weights=mw if len(mw) == len(mains) else None)[0]
+    vw = _list(row.get("ViceattrWeight"))
+    count = rng.choices(range(len(vw)), weights=vw)[0] if vw and sum(vw) else 0
+    spec = P.PlayerSpecialty(inst_id=inst, conf_id=row["ID"], main_attr=P.PlayerSpecialtyAttr(attr_id=main),
+                             create_time=int(time.time()))
+    pool = POOLS.get(row.get("ViceattrPool"), {})
+    cand = list(zip(_list(pool.get("Viceattr")), _list(pool.get("Weight"))))
+    for _ in range(min(count, len(cand))):
+        pick = rng.choices([a for a, _ in cand], weights=[w for _, w in cand])[0]
+        spec.vice_attrs.add(attr_id=pick)
+        cand = [(a, w) for a, w in cand if a != pick]
+    return spec

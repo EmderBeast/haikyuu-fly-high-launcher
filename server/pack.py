@@ -18,8 +18,9 @@ Assumptions (no capture):
     box has weight 1 throughout
   - a request that cannot be served (item missing, too few) is answered with error FAILED
 
-Not served here (replayed as before, see the open points in docs/garena-abgleich.md): boxes to choose
-from (Gifttype 4, the meaning of `chooses` is not in a capture) and the other kinds of usable items.
+Selection boxes (Gifttype 4): `chooses` = indexes into Optionalreward (capture dizzy2711e, see _use_choice);
+served for potential groups (Itemtype 399) and plain items / currencies. Not served here (replayed as before):
+selection boxes with cards, cheers or memories, and the other kinds of usable items.
 """
 import logging
 import random
@@ -96,6 +97,9 @@ async def handle_item_use(client, pb: bytes):
     item_id = acc.item_by_inst(req.inst_id) or req.config_id
     number = max(1, req.number)
     gift = gift_of(item_id)
+    choose = chosen(item_id, list(req.chooses))
+    if gift is None and choose is not None:
+        return await _use_choice(client, item_id, number, choose)
     if gift is None:  # not a box we can open: as before
         log.info(f"  ITEM USE {item_id} x{number}: not served, captured reply")
         await pvp.HOOKS["generic"](client, pb, MSG_ITEM_USE)
@@ -121,6 +125,63 @@ async def handle_item_use(client, pb: bytes):
                              wire.build([(1, 2, wire.build([(2, 0, i), (3, 0, n)])) for i, n in won]))
     await client.send_packet(MSG_ITEM_USE, b"")
     log.info(f"  ITEM USE {item_id} x{number} (gift {gift['ID']}): {won}")
+
+
+POTENTIAL_ITEM = 399  # item.json Itemtype of a potential group (suit * 10 + rarity)
+
+
+def chosen(item_id: int, chooses: list[int]) -> list[tuple[int, int]] | None:
+    """(item, count) a selection box (gift Gifttype 4, Optionalreward) gives for the chosen entries
+    (`chooses` = indexes into Optionalreward, capture dizzy2711e: [0] = the first icon), or None when the box
+    is no such box or a choice is one this module does not serve (only potential groups and plain items /
+    currencies)."""
+    item = ITEMS.get(item_id, {})
+    gift = GIFTS.get(item.get("Itemresult")) if isinstance(item.get("Itemresult"), int) else None
+    if not gift or gift.get("Gifttype") != 4 or item.get("Useway") != USE:
+        return None
+    rows = _pairs(gift.get("Optionalreward"))
+    want = max(1, gift.get("Optionalamount") or 1)
+    picks = [rows[i] for i in chooses if 0 <= i < len(rows) and len(rows[i]) == 2]
+    if len(picks) != want or len(picks) != len(chooses):
+        return None
+    for reward, _ in picks:
+        kind = ITEMS.get(reward, {}).get("Itemtype")
+        if kind != POTENTIAL_ITEM and (kind is None or card_of(reward) or kind in (404, 505, 1001, 1101)):
+            return None
+    return picks
+
+
+async def _use_choice(client, item_id: int, number: int, picks):
+    """Selection box. Garena capture dizzy2711e (A2, Legendary Potential Selection Box 105000036, first
+    entry 301014): PackItemChange of the box (20 -> 19), PlayerSpecialtyUpdateS2C (CREATE) with the new
+    potential, NotifyRewards with {inst_id, conf_id = the potential, number 1}, the empty reply."""
+    import specialty
+    acc = client.account
+    have = acc.item_count(item_id)
+    if have < number:
+        await client.send_packet(MSG_ITEM_USE, P.PackItemUseS2C(error=P.FAILED).SerializeToString())
+        return
+    await client.send_packet(MSG_ITEM_CHANGE, wire.build([(1, 2, acc.set_item(item_id, have - number))]))
+    specs, plain = [], []
+    for reward, count in picks:
+        if ITEMS.get(reward, {}).get("Itemtype") == POTENTIAL_ITEM:
+            for _ in range(count * number):
+                spec = specialty.roll(reward, acc._new_inst())
+                if spec is not None:
+                    specialty.put(acc, spec)
+                    specs.append(spec)
+        else:
+            plain.append((reward, count * number))
+    acc.save()
+    if specs:
+        await client.send_packet(specialty.MSG_UPDATE, specialty.update_msg(specs, specialty.CREATE))
+    if plain:
+        await pvp.HOOKS["grant_rewards"](client, plain, False)
+    shown = [wire.build([(1, 0, s.inst_id), (2, 0, s.conf_id), (3, 0, 1)]) for s in specs]
+    shown += [wire.build([(2, 0, i), (3, 0, n)]) for i, n in plain]
+    await client.send_packet(MSG_NOTIFY_REWARDS, wire.build([(1, 2, e) for e in shown]))
+    await client.send_packet(MSG_ITEM_USE, b"")
+    log.info(f"  ITEM USE {item_id} x{number} (selection {picks}): {[s.conf_id for s in specs]} {plain}")
 
 
 HANDLERS = {MSG_ITEM_USE: handle_item_use}

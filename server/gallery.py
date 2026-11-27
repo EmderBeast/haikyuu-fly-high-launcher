@@ -90,8 +90,11 @@ def _add(acc, name, ids):
 
 
 async def handle_fetter_see(client, pb: bytes):
+    """Garena capture dizzy2711g (bond 1044 viewed): IllustratedInfoS2C{fetter_ids: [1044]} (all false) first,
+    then the empty reply."""
     req = P.IllustratedFetterSeeC2S.FromString(pb)
     _add(client.account, "fetter_ids", list(req.ferrer_id))
+    await client.send_packet(MSG_INFO, P.IllustratedInfoS2C(fetter_ids=list(req.ferrer_id)).SerializeToString())
     await client.send_packet(MSG_FETTER_SEE, P.IllustratedFetterSeeS2C().SerializeToString())
 
 

@@ -118,12 +118,15 @@ async def handle_decompose(client, pb: bytes):
         for i, n in resources(card):
             gain[i] = gain.get(i, 0) + n
     await _free_gear(client, cards)
-    gone = [acc.remove_card(c.inst_id) for c in cards]
+    for c in cards:
+        acc.remove_card(c.inst_id)
     acc.save()
     log.info(f"  CARD dismantle {len(cards)} -> {gain}")
+    # Garena capture dizzy2711f (two Lv1 N cards: +128 EXP 102, +2 Basic Voucher 103): REMOVE with only the
+    # inst ids, the voucher (0x0802), the EXP (0x0405), the pop-up, the reply
+    await client.send_packet(MSG_CARD_CHANGE, removed_msg([c.inst_id for c in cards]))
     import pvp
-    await pvp.HOOKS["grant_rewards"](client, sorted(gain.items()), True)
-    await client.send_packet(MSG_CARD_CHANGE, _cards_msg([g for g in gone if g], REMOVE))
+    await pvp.HOOKS["grant_rewards"](client, sorted(gain.items(), key=lambda e: client.account.is_currency(e[0])), True)
     await client.send_packet(MSG_DECOMPOSE, P.PlayerCardDecomposeS2C().SerializeToString())
 
 
@@ -154,6 +157,37 @@ async def _free_gear(client, cards):
     if specs:  # freed potentials as REMOVE + CREATE, as admin.py does (an UPDATE would keep the old owner)
         await client.send_packet(specialty.MSG_UPDATE, specialty.update_msg(specs, specialty.REMOVE))
         await client.send_packet(specialty.MSG_UPDATE, specialty.update_msg(specs, specialty.CREATE))
+
+
+def removed_msg(insts) -> bytes:
+    m = P.PlayerCardChangeS2C(opt=REMOVE)
+    for i in insts:
+        m.players.add().info.inst_id = i
+    return m.SerializeToString()
+
+
+async def auto_dismantle(client, new_cards: list) -> dict[int, int]:
+    """Cards just drawn that the auto list takes (client: conf in the list, star 2, not locked): REMOVE, then
+    their resources as plain changes (no pop-up). Returns inst id -> conf id of the dismantled ones (the draw's
+    reply names them by conf id). Garena capture dizzy2711f (Superior Recruit x10, N players on the list):
+    CREATE of all 10, the costs, then REMOVE of the 7 N cards, Basic Voucher +7 (0x0802), EXP +448 (0x0405),
+    and the reply with the conf ids of the 7 among card_inst_ids."""
+    acc = client.account
+    on = set(auto_list(acc))
+    gone = [c for c in new_cards if c.conf_id in on and c.star == 2 and not c.locked]
+    if not gone:
+        return {}
+    gain: dict[int, int] = {}
+    for c in gone:
+        for i, n in resources(c):
+            gain[i] = gain.get(i, 0) + n
+        acc.remove_card(c.inst_id)
+    acc.save()
+    await client.send_packet(0x0902, removed_msg([c.inst_id for c in gone]))
+    import pvp
+    await pvp.HOOKS["grant_rewards"](client, sorted(gain.items(), key=lambda e: acc.is_currency(e[0])), False)
+    log.info(f"  CARD auto-dismantle {[c.conf_id for c in gone]} -> {gain}")
+    return {c.inst_id: c.conf_id for c in gone}
 
 
 def auto_list(acc) -> list[int]:

@@ -427,7 +427,7 @@ async def handle_login(client: GameClient, pb_data: bytes):
                                      compress=bool(m["flags"] & 2))
             continue
         if m["msg_id"].upper() == "0X0F0A":  # memory recruit pools: this player's own wishes
-            await client.send_packet(0x0F0A, recallwish.info(int(gid), client.account), compress=True)
+            await client.send_packet(0x0F0A, recallgacha.info(int(gid), client.account), compress=True)
             continue
         if m["msg_id"].upper() == "0X1601":  # shops: this player's own goods counters
             await client.send_packet(0x1601, shop.info(int(gid), client.account), compress=True)
@@ -575,6 +575,9 @@ async def handle_lottery_do(client: GameClient, pb_data: bytes):
     await client.send_packet(MSG_LOTTERY_UPDATE, wire.build([(1, 2, unit)]))
     if is_currency:
         await mission_event(client, missions.SPEND_CURRENCY, need, (cost_item,))
+    # auto-dismantle list (cards.py): taken cards are named by their conf id in the reply (capture dizzy2711f)
+    gone = await cards.auto_dismantle(client, [matches.P.PlayerCard.FromString(acc.get_card(i)) for i in inst_ids])
+    inst_ids = [gone.get(i, i) for i in inst_ids]
     packed = b"".join(wire.varint(i) for i in inst_ids)
     # LotteryDoS2C tags from its WriteTo in hotfix/Config.dll: 1=id 2=isPre 3=cardInstIds(packed) 4=rewards 5=err
     await client.send_packet(0x0F02, wire.build([(1, 0, lottery_id), (3, 2, packed)]))
@@ -705,7 +708,10 @@ async def _card_error(client, msg_id, inst, reason):
 
 
 async def handle_card_level_up(client: GameClient, pb_data: bytes):
-    """0x0905 PlayerCardLevelUpC2S{1=inst_id 2=optype}: spend EXP (102) to raise the card level."""
+    """0x0905 PlayerCardLevelUpC2S{1=inst_id 2=optype}: spend EXP (102) to raise the card level.
+    optype 0 = as far as the level cap and the EXP allow, 1 = +3: the client sends 0 for its "Max" button
+    (PlayerLevelUpViewLogic::OnMaxLevelSelectEvent) and Garena capture dizzy2711g raised SAIYA SUZUKI from
+    Lv1 to the cap 40 with one request without optype, for 155 040 EXP; order: EXP, card, reply."""
     req = wire.parse(pb_data)
     inst, optype = wire.get(req, 1, 0), wire.get(req, 2, 0)
     acc = client.account
@@ -717,7 +723,7 @@ async def handle_card_level_up(client: GameClient, pb_data: bytes):
     cap = gameconfig.level_cap(star)
     exp = acc.get_currency(gameconfig.CARD_EXP)
     steps = 0
-    for want in range(1, (1 if optype == 0 else 3) + 1):  # UI buttons: optype 0 = "+1", otherwise "+3"
+    for want in range(1, (cap - level if optype == 0 else 3) + 1):  # optype 0 = up to the cap, otherwise "+3"
         cost = gameconfig.level_up_cost(conf, level, want)
         if level + want > cap or cost is None or cost > exp:
             break
@@ -919,8 +925,11 @@ async def handle_card_star(client: GameClient, pb_data: bytes):
     gold_entry = acc.set_currency(gameconfig.GOLD, acc.get_currency(gameconfig.GOLD) - gold)
     acc.save()
     log.info(f"  CARD star inst={inst} {star} -> {star + 1}, -{gold} gold, consumed {len(removed)}")
+    # Garena capture dizzy2711g (SAIYA SUZUKI 3 -> 4 stars, 3 copies, 200 000 gold): gold, REMOVE of the copies
+    # with only their inst ids, PlayerSpecialtyUpdateS2C UPDATE (empty: their potentials, none), the card, reply
     await client.send_packet(MSG_CURRENCY_CHANGE, wire.build([(1, 2, gold_entry)]))
-    await client.send_packet(MSG_CARD_CHANGE, wire.build([(1, 2, card_info(c)) for c in removed] + [(2, 0, CARD_REMOVE)]))
+    await client.send_packet(MSG_CARD_CHANGE, cards.removed_msg([wire.get(wire.parse(c), 1) for c in removed if c]))
+    await client.send_packet(0x1802, matches.P.PlayerSpecialtyUpdateS2C(opt=1).SerializeToString())
     await client.send_packet(MSG_CARD_CHANGE, wire.build([(1, 2, card_info(card)), (2, 0, CARD_UPDATE)]))
     await client.send_packet(0x0906, wire.build([(1, 0, inst)]))
     await mission_event(client, missions.PROMOTE_CARD, 1)
@@ -1813,6 +1822,8 @@ import cards  # noqa: E402  cards from fragments (0x0903), dismantling (0x0904),
 MESSAGE_HANDLERS.update(cards.HANDLERS)
 import cheers  # noqa: E402  Team Cheers: star up (0x2504), draw wish (0x0F09) and gifts (0x0F13)
 MESSAGE_HANDLERS.update(cheers.HANDLERS)
+import recallgacha  # noqa: E402  memory draws (0x0F0B), counters per player in the login 0x0F0A
+MESSAGE_HANDLERS.update(recallgacha.HANDLERS)
 import recalling  # noqa: E402  memories: level up / breakthrough, stage, dismantle, auto list (0x3C04/05/08/0A)
 MESSAGE_HANDLERS.update(recalling.HANDLERS)
 import specialty  # noqa: E402  potentials: level up, lock, dismantle, settings (0x1803 / 0x1806 / 0x1808-0x180A)

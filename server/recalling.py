@@ -153,8 +153,10 @@ def _update(creates=(), updates=(), removes=()) -> bytes:
     return m.SerializeToString()
 
 
-async def _pay(client, costs: dict[int, int]) -> bool:
-    """Takes currencies / bag items (absolute counts checked first); sends the changes. False = not enough."""
+async def _pay(client, costs: dict[int, int], currency_first: bool = False) -> bool:
+    """Takes currencies / bag items (absolute counts checked first); sends the changes. False = not enough.
+    Garena capture dizzy2711e: level up sends the gold (0x0405) before the exp books (0x0802), the
+    breakthrough the books before the gold."""
     from accounts import MSG_CURRENCY_CHANGE, MSG_ITEM_CHANGE
     acc = client.account
     have = {i: (acc.get_currency(i) if acc.is_currency(i) else acc.item_count(i)) for i in costs}
@@ -168,10 +170,10 @@ async def _pay(client, costs: dict[int, int]) -> bool:
             cur.append((1, 2, acc.set_currency(i, have[i] - n)))
         else:
             items.append((1, 2, acc.set_item(i, have[i] - n)))
-    if items:
-        await client.send_packet(MSG_ITEM_CHANGE, wire.build(items))
-    if cur:
-        await client.send_packet(MSG_CURRENCY_CHANGE, wire.build(cur))
+    sends = [(MSG_ITEM_CHANGE, items), (MSG_CURRENCY_CHANGE, cur)]
+    for msg, entries in (sends[::-1] if currency_first else sends):
+        if entries:
+            await client.send_packet(msg, wire.build(entries))
     return True
 
 
@@ -212,7 +214,7 @@ async def handle_level(client, pb: bytes):
     exp_in += sum(EXP_ITEM[i] * n for i, n in items.items())
     gold = sum(STAR_GOLD.get(star(e), 0) for e in eaten) + sum(ITEM_GOLD.get(i, 0) * n for i, n in items.items())
     costs = {**items, GOLD: items.get(GOLD, 0) + gold}
-    if not await _pay(client, costs):
+    if not await _pay(client, costs, currency_first=True):
         return await client.send_packet(MSG_LEVEL, fail)
     lost = level_up(rec, exp_in)
     acc.put_recalling(rec.SerializeToString())
@@ -269,10 +271,14 @@ async def handle_decomp(client, pb: bytes):
         acc.remove_recalling(r.inst_id)
     acc.save()
     log.info(f"  RECALLING dismantle {len(recs)} -> {DECOMP_ITEM} x{n}")
+    # Garena capture dizzy2711e (B4): the books (0x0802), the removes (0x3C02), the pop-up (0x0404), the reply
+    from accounts import MSG_ITEM_CHANGE
+    if n:
+        await client.send_packet(MSG_ITEM_CHANGE, wire.build([(1, 2, acc.set_item(DECOMP_ITEM, acc.item_count(DECOMP_ITEM) + n))]))
+        acc.save()
     await client.send_packet(MSG_UPDATE, _update(removes=[r.inst_id for r in recs]))
     if n:
-        import pvp
-        await pvp.HOOKS["grant_rewards"](client, [(DECOMP_ITEM, n)], True)
+        await client.send_packet(0x0404, P.NotifyRewardsS2C(items=[P.Item(conf_id=DECOMP_ITEM, number=n)]).SerializeToString())
     await client.send_packet(MSG_DECOMP, P.RecallingDeComposeS2C().SerializeToString())
 
 
