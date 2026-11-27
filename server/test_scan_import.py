@@ -49,7 +49,10 @@ SCAN = {"hfhscan": 1, "date": "2026-11-26 20:00", "tool": "HFH-Bot",
         "pots": [{"slot": "I", "set": "Morale Surge", "lv": 12, "main": "Power",
                   "rolls": {"PowerPct": 2, "SaveFlat": 3, "SetPct": 1, "AtkTech": 1}}],
         "memoryCopies": [{"id": 231610, "tier": 4, "lv": 60, "n": 1}, {"id": 210002, "tier": 5, "lv": 80, "n": 2}],
-        "coaches": [{"id": 1, "name": "Keishin Ukai", "lv": 3, "level": 15}],
+        "coaches": [{"id": 1, "name": "Keishin Ukai", "lv": 3, "level": 15,
+                     "pas": [{"t": "pServe", "pos": "Li", "v": [5]}, {"t": "r10", "pos": "WS", "v": [10, 12]},
+                             {"t": "o1", "pos": "MB", "v": [16, 2]}, {"t": "r8", "pos": "OP", "v": [30, 90]},
+                             {"t": "bSave", "pos": "S", "v": [35]}]}],
         "bonds": {"1007": 1}}
 
 
@@ -90,7 +93,9 @@ async def main():
     st = acc.admin_flags["scan_import"]
     assert len(st["specs"]) == 7 and len(st["recs"]) == 3 and len(st["coaches"]) == 1
     c = coach.cards(GID, acc)[st["coaches"][0]]
-    assert c.conf_id == 5 and c.level == 15 and len(c.job_buffs) == 5
+    assert c.conf_id == 9 and c.level == 15  # "lv" 3 = Legendary = CoachRare 4
+    got = [(jb.job, coach.BUFFS[jb.buff_id]["BuffNumber"]) for jb in c.job_buffs]
+    assert got == [(4, "5"), (1, "10_12"), (2, "16_2"), (5, "90_30"), (3, "35")], got
     n_specs, n_recs = len(acc.specialties), len(acc.recallings)
     scanimport.apply(acc, SCAN)  # a second import replaces the first
     assert (len(acc.specialties), len(acc.recallings)) == (n_specs, n_recs)

@@ -129,6 +129,36 @@ async def main():
     await server.MESSAGE_HANDLERS[homestead.MSG_COLLECT](c2, b"")
     check("nothing left: only the reply", [m for m, _ in c2.sent] == [homestead.MSG_COLLECT])
 
+    # collecting one running schedule (0x2308) as in garena4: 100404 with 7 earnings (23625 = 7 x 3375)
+    pl = [5601, 5503, 1603, 1604]
+    last = int(time.time()) - 100
+    st2["schedules"] = {"100404": {"players": pl, "first": last - 6 * 900, "last": last, "item": 100,
+                                   "amount": 23625, "running": True},
+                        "100104": {"players": [5401, 5502, 5501, 1216], "first": last, "last": last, "item": 227,
+                                   "amount": 469, "running": True}}
+    st2["players"] = {str(p): {"physical": 192, "reward": False} for p in pl + [5401, 5502, 5501, 1216]}
+    gold = c2.account.get_currency(100)
+    c2.sent.clear()
+    req = P.HomeScheduleRewardC2S(schedule_level_id=100404).SerializeToString()
+    await server.MESSAGE_HANDLERS[homestead.MSG_COLLECT_ONE](c2, req)
+    order = [m for m, _ in c2.sent]
+    check("one schedule: update, change, popup, reply as in garena4",
+          order[0] == homestead.MSG_UPDATE and order[-2:] == [0x0404, homestead.MSG_COLLECT_ONE], str(order))
+    up = P.HomeUpdateS2C.FromString(c2.sent[0][1])
+    s = up.schedules[0] if len(up.schedules) == 1 else None
+    check("update: only that schedule, no rewards, first = next = last + 900, same time and players",
+          not up.players and s is not None and s.schedule_level_id == 100404 and not s.rewards
+          and s.schedule_first_reward_time == s.schedule_next_reward_time == last + 900
+          and s.schedule_time == last and list(s.player_conf_ids) == pl, str(up).replace("\n", " ")[:300])
+    popup = [(i.conf_id, i.number) for i in P.NotifyRewardsS2C.FromString(c2.sent[-2][1]).items]
+    check("100 x23625 credited, reply names the schedule", popup == [(100, 23625)]
+          and c2.account.get_currency(100) - gold == 23625
+          and P.HomeScheduleRewardS2C.FromString(c2.sent[-1][1]).schedule_level_id == 100404)
+    check("the other schedule keeps its stock", st2["schedules"]["100104"]["amount"] == 469)
+    c2.sent.clear()
+    await server.MESSAGE_HANDLERS[homestead.MSG_COLLECT_ONE](c2, req)
+    check("nothing earned: FAILED", P.HomeScheduleRewardS2C.FromString(c2.sent[-1][1]).err == homestead.FAILED)
+
     print(f"\n{sum(checks)}/{len(checks)} checks passed")
     raise SystemExit(0 if all(checks) else 1)
 

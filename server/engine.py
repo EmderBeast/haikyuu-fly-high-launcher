@@ -229,6 +229,13 @@ HAND_SERVE = {1: 0.85, 2: 1.0, 3: 1.2}  # power factor by hand serve result (bad
 # (centre, half width) of the receive point's x per side.
 HAND_AREA_X = {76: (-3.1, 0.2), 77: (0.0, 1.0), 78: (2.6, 0.45)}
 AI_CAST_CHANCE = 0.5
+# Who gets the set (captures, the AI side where no user chooses: 854 spikes): 73 % are spike
+# ultimates - a player whose spike ultimate is ready gets the ball and casts it; with several ready the
+# strongest wins most (75 %), weights attack stat^3 fit best (log-likelihood -279 vs -308 for ^1 and
+# -347 uniform); with none ready the plain spike also leans to the strongest (^3-^4 best, -182 vs -190
+# for ^1). Attack stat = the higher of Power and Quick Attack. Applies to the AI and to auto play.
+SET_RULE = True
+SET_POWER = 3
 
 
 def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, inputs=None, user=HOST,
@@ -317,6 +324,7 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
         side's front row may block and its back row dig with one."""
         if not battle:
             return
+        import skills  # noqa: PLC0415  (engine is imported by skills' users; no cycle at import time)
         chosen.clear()
         atk = team_of(set_step.player)
         dfn = 1 - atk
@@ -330,8 +338,21 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
                 set_step.window = (idx, "spike" if team == atk else "defense", opts)
                 picks = [o for o in inputs.get("ults", {}).get(idx, []) if o in opts]
             else:
-                own = [o for o in opts if o[1] >= 100000] or opts
-                picks = [rng.choice(own)] if own and rng.random() < AI_CAST_CHANCE else []
+                real = [o for o in opts if skills.AVAILABLE and skills._num(skills.SKILLS.get(o[1], {}).get("Type")) == 6]
+                if SET_RULE and real:
+                    # attack: a spike ultimate is ready, the set goes to its holder. Defence: the AI
+                    # casts its block / dig ultimate whenever it is ready (captures, AI side: 455 of
+                    # 468 blocks and 335 of 338 digs with one ready); one per gate, the stronger first
+                    picks = []
+                    for gate_ in (("spike",) if team == atk else ("block", "catch")):
+                        mine = [o for o in real if team == atk
+                                or (o[0] in court.front(team)) == (gate_ == "block")]
+                        if mine:
+                            w = [max(battle.attr(p, 0), battle.attr(p, 1), 1.0) ** SET_POWER for p, _ in mine]
+                            picks.append(rng.choices(mine, weights=w)[0])
+                else:
+                    own = [o for o in opts if o[1] >= 100000] or opts
+                    picks = [rng.choice(own)] if own and rng.random() < AI_CAST_CHANCE else []
             for pid, sid in picks:
                 gate = "spike" if team == atk else ("block" if pid in court.front(team) else "catch")
                 chosen[(team, gate)] = (pid, sid)
@@ -373,7 +394,10 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
             # Garena lets the back row attack as well: 67 of 121 captured spikes came from players
             # outside the front row (check_match.py), so everyone but the setter and the libero may spike
             pool = [p for p in ids if p != setter] or ids
-            weights_ = [stats.get(p, {}).get(ATTR[SPIKE], 1) + 1 for p in pool]
+            if SET_RULE:  # see SET_POWER: the strongest attacker is set most
+                weights_ = [max(stats.get(p, {}).get(0, 1), stats.get(p, {}).get(1, 1), 1) ** SET_POWER for p in pool]
+            else:
+                weights_ = [stats.get(p, {}).get(ATTR[SPIKE], 1) + 1 for p in pool]
             return rng.choices(pool, weights=weights_)[0]
         if formula == BLOCK:
             return rng.choice(court.front(team))

@@ -53,6 +53,7 @@ TYPE_REMOVAL = True  # RemoveRandomTypeBuff / RemoveAllTypeBuff take debuffs (bu
 COME_ON_NOW = True  # ComeOnPlayer = stands on the court right now (False: or was on it earlier in the set)
 POSITION_ARGS = True  # ToPosition 1-4 and PlayerPosition 7 / 8 / none read by their number (rows, leaving, bench)
 BENCH_CD_FREEZE = False  # experiment: cooldowns of players who are not on the court stand still
+SEL6_ALL = True  # cooldown buffs with selector 6 act on every Ultimate (False: Block Ultimates only)
 STAMINA_FORMS = True  # stamina buffs with a duration or with ArgsType 3 / 9 / 10 change stamina too (once)
 STAMINA_COUNTERS = True  # AddBuffByTeamEnergyCost / AddBuffByPropertyCostByLevel count stamina spent / regained
 LOSE_DEBUFF_EVENT = True  # ILoseDeBuff: checked for the holder for every stack of a debuff he loses
@@ -659,8 +660,8 @@ class Battle:
 
     def _cd_skills(self, pid: int, row) -> list[int] | None:
         """Skill ids of pid a cooldown buff (Type 5) acts on. ModifyTarget = [mode, selector, ...]:
-        selector 2 = the listed skills, 5 = ultimate-type skills with a listed tag, 6 = Block Ultimates
-        (skill text of card 5702: "Block Ultimate cooldown duration decreases by 4" is [1, 6] -4),
+        selector 2 = the listed skills, 5 = ultimate-type skills with a listed tag, 6 = every Ultimate
+        (see SEL6_ALL; was read as Block Ultimates only),
         3 = every skill. None = a selector we cannot read."""
         tg = _flat(row.get("ModifyTarget"))
         sel, rest = (tg[1] if len(tg) > 1 else 2), tg[2:]
@@ -669,6 +670,12 @@ class Battle:
             return list(rest)
         if sel == 3:
             return [sk["ID"] for sk in own]
+        if sel == 6 and SEL6_ALL:
+            # every Ultimate of the player: skill texts 5505203 "the Ultimate cooldowns for players on
+            # both sides decrease", 6002303 "reduces your players' Ultimate maximum cooldown"; Garena's
+            # cooldowns (record_cd_info_skills) under 5702's [1, 6] -4 shortened Hoshiumi's spike and dig
+            # Ultimates by 4 too (251 + 124 casts), not only Block Ultimates
+            return [sk["ID"] for sk in own if _num(sk.get("Type")) & DRIVING]
         if sel in (5, 6):
             tags = set(rest) if sel == 5 else {2}
             return [sk["ID"] for sk in own if _num(sk.get("Type")) & DRIVING and _stag(sk) in tags]

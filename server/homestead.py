@@ -26,8 +26,8 @@ Assumptions (no capture):
     is the last 15-minute step before the first login on this server
 
 Collecting everything (0x2317) and the daily comfort reward (0x2315) are further down.
-Not served here (docs/garena-abgleich.md): planning players (0x2318), collecting one schedule (0x2308)
-or one player's reward (0x2316).
+Collecting one schedule (0x2308) is further down too. Not served here (docs/garena-abgleich.md): planning
+players (0x2318) or one player's reward (0x2316).
 """
 import logging
 import time
@@ -190,6 +190,45 @@ async def handle_collect(client, pb: bytes):
         await client.send_packet(0x0404, popup.SerializeToString())
     await client.send_packet(MSG_COLLECT, b"")
     log.info(f"  HOME collect: {rewards}")
+
+
+# 0x2308 HomeScheduleRewardC2S{schedule_level_id}: take what one schedule earned. Garena capture garena4
+# (26.11., schedule 100404, still running): HomeUpdateS2C with only that schedule - schedule_time and the
+# players unchanged, no rewards, schedule_first_reward_time = schedule_next_reward_time = last earning + 900 s -,
+# then the currency change, NotifyRewardsS2C {100 x23625} (the stock the room showed) and
+# HomeScheduleRewardS2C{schedule_level_id}.
+# Assumptions: a stopped schedule gets no first / next reward time (as with 0x2317); an unknown schedule
+# or one with nothing earned is answered FAILED.
+MSG_COLLECT_ONE = 0x2308
+
+
+async def handle_collect_one(client, pb: bytes):
+    level = P.HomeScheduleRewardC2S.FromString(pb).schedule_level_id
+    d = entry(client)
+    advance(d)
+    s = d["schedules"].get(str(level))
+    if not s or not s["amount"]:
+        log.info(f"  HOME collect {level}: nothing")
+        await client.send_packet(MSG_COLLECT_ONE, P.HomeScheduleRewardS2C(
+            err=FAILED, schedule_level_id=level).SerializeToString())
+        return
+    item, amount = s["item"], s["amount"]
+    s["amount"] = 0
+    step, _ = step_of(level)
+    s["first"] = s["last"] + step if s["running"] else 0
+    pvp.save()
+    up = update(d)
+    del up.players[:]
+    keep = [x for x in up.schedules if x.schedule_level_id == level]
+    del up.schedules[:]
+    up.schedules.extend(keep)
+    await client.send_packet(MSG_UPDATE, up.SerializeToString())
+    await pvp.HOOKS["grant_rewards"](client, [(item, amount)], False)
+    popup = P.NotifyRewardsS2C()
+    popup.items.add(conf_id=item, number=amount)
+    await client.send_packet(0x0404, popup.SerializeToString())
+    await client.send_packet(MSG_COLLECT_ONE, P.HomeScheduleRewardS2C(schedule_level_id=level).SerializeToString())
+    log.info(f"  HOME collect {level}: {item} x{amount}")
 
 
 # --- comfort: the daily reward ----------------------------------------------------------------------
@@ -810,4 +849,5 @@ def on_login(client) -> list[tuple[int, bytes]]:
 
 
 HANDLERS = {MSG_REFRESH: handle_refresh, MSG_COMFORT: handle_comfort_reward, MSG_COLLECT: handle_collect,
+            MSG_COLLECT_ONE: handle_collect_one,
             MSG_LAND_WEED: handle_land_weed, MSG_REPAIR: handle_repair, MSG_ORDER: handle_order}

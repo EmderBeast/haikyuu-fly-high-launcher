@@ -291,6 +291,11 @@ class GameClient:
                 freedom.on_disconnect(self)  # leaving a running real-time match = a loss
             except Exception as e:
                 log.error(f"freedom.on_disconnect: {e}")
+            if getattr(self, "gid", None) is not None:
+                try:
+                    onlinereward.logout(int(self.gid))  # the session's online time (Online Rewards)
+                except Exception as e:
+                    log.error(f"onlinereward.logout: {e}")
             self.writer.close()
 
     async def handle_message(self, msg_id: int, pb_data: bytes):
@@ -385,6 +390,14 @@ async def handle_login(client: GameClient, pb_data: bytes):
             continue
         if m["msg_id"].upper() == "0X0B01" and client.account.team:  # line-ups saved since the baseline
             await client.send_packet(0x0B01, client.account.team)
+            continue
+        if m["msg_id"].upper() == "0X2801":  # local activities: this player's own online time and stages
+            onlinereward.login(int(gid), client.account)
+            body = wire.body_to_pb(bytes.fromhex(m["body_hex"]), m["flags"])
+            info = onlinereward._P().LocalActivityInfoS2C.FromString(
+                onlinereward.patch_info(int(gid), client.account, body))
+            limitlogin.patch_info(int(gid), info)  # noon / evening stamina of today
+            await client.send_packet(0x2801, info.SerializeToString(), compress=bool(m["flags"] & 2))
             continue
         if m["msg_id"].upper() == "0X5501":  # coaches: this player's own coaches (levels, dismantled ones)
             await client.send_packet(0x5501, coach.info(int(gid), client.account))
@@ -1235,8 +1248,8 @@ async def handle_share_assist_do(client: GameClient, pb_data: bytes):
     """0x3704 ShareAssistDoC2S{}: run every switched-on assistant function in gamehelperconf Order;
     S2C{1=err 2=repeated AssistantRewardUnit{1=func_type 3=repeated Item{2=id 3=count}}}, only functions
     that did something (capture decrypted_1: 9 units, the open but empty 16/18 missing). Implemented:
-    the quiz (3), the stored activity stamina (6), club daily welfare (13) and wish (15), the mission
-    functions 16-19; the others (mini game, daily events, treasure, exchange, resource stages, club buffet) are
+    the mini game week rewards (1), the quiz (3), the stored activity stamina (6), club daily welfare (13)
+    and wish (15), the mission functions 16-19; the others (daily events, treasure, exchange, resource stages, club buffet) are
     skipped (docs/garena-abgleich.md)."""
     settings = assistant_settings(client.account)
     order = sorted(settings, key=lambda f: (gameconfig.ASSISTANT.get(f, {}).get("Order", 999), f))
@@ -1244,7 +1257,9 @@ async def handle_share_assist_do(client: GameClient, pb_data: bytes):
     for func in order:
         if not settings[func][0]:
             continue
-        if func == 6:
+        if func == 1:
+            shown = await minigame.assistant(client)
+        elif func == 6:
             shown = await _assist_physical(client)
         elif func == 3:
             shown = await _assist_quiz(client)
@@ -1708,6 +1723,21 @@ import weekly  # noqa: E402  weekly activity "Bonus Training" (0x2F01 / 0x2F02) 
 MESSAGE_HANDLERS.update(weekly.HANDLERS)
 import minigame  # noqa: E402  mini games (Arder 0x2B01 / 0x2B03) per player
 MESSAGE_HANDLERS.update(minigame.HANDLERS)
+import onlinereward  # noqa: E402  Cumulative Online Rewards (local activity type 3)
+import limitlogin  # noqa: E402  limited-time login stamina (local activity type 1)
+
+
+async def handle_local_activity_reward(client: GameClient, pb_data: bytes):
+    """0x2803 LocalActivityRewardC2S{type, data}: Online Rewards (type 3) and the limited-time login stamina
+    (type 1) per player; the other activities
+    still get the captured reply (docs/garena-abgleich.md)."""
+    req = onlinereward._P().LocalActivityRewardC2S.FromString(pb_data)
+    if await onlinereward.handle_reward(client, req) or await limitlogin.handle_reward(client, req):
+        return
+    await handle_generic(client, pb_data, 0x2803)
+
+
+MESSAGE_HANDLERS[0x2803] = handle_local_activity_reward
 import unlockall  # noqa: E402  Admin Mode "unlock everything": cheers (0x2501) and profile items (0x2101)
 import coach  # noqa: E402  coaches per player: level up (0x5503), dismantle (0x5505)
 MESSAGE_HANDLERS.update(coach.HANDLERS)

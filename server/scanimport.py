@@ -17,8 +17,11 @@ What the file holds (HFH-Bot README, scans in HFH-Bot/scans) and how it is mappe
     Block 3, Receive 4, Serve 5, Save 6, Awareness 9, Strength 10, AtkTech 11, Reflex 12, Spirit 13, DefTech 14;
     for the seven skills the percent value where the place offers it); sub stats "<Stat>Flat" / "<Stat>Pct" /
     plain name, level = count - 1.
-Not imported (the server has no such state): bonds, collections, cheers, the gallery value; the coaches'
-Positional Advantages ("pas") - imported coaches draw them like a level-up does.
+  - coaches [{lv, level, pas [{t, pos, v}]}]: "lv" is the rarity as the bot counts it (CoachRare - 1); each
+    Positional Advantage (bot name t -> text, PA_TEXTS) becomes the coachbuff of the coach's pool with that text
+    and the value nearest to v, on job pos (WS 1, MB 2, S 3, Li 4, OP 5); a coach whose advantages do not all
+    fit keeps the ones drawn by the level-ups.
+Not imported (the server has no such state): bonds, collections, cheers, the gallery value.
 A second import replaces the potentials, memories and coaches of the first one (admin_flags "scan_import").
 """
 import json
@@ -69,9 +72,81 @@ def memory_conf(scan_id) -> int | None:
 
 
 def coach_conf(name, rare) -> int | None:
+    """The scan's "lv" is the coach's rarity as the bot counts it (1 Rare, 2 Epic, 3 Legendary) = CoachRare - 1."""
     if "coaches" not in _cache:
         _cache["coaches"] = {(_norm(_english(r.get("CoachName"))), r.get("CoachRare")): r["ID"] for r in _cfg("coachlist")}
-    return _cache["coaches"].get((_norm(name), int(rare or 0)))
+    return _cache["coaches"].get((_norm(name), int(rare or 0) + 1))
+
+
+PA_TEXTS = {  # the HFH-Bot's names of the Positional Advantages (its gamedata.json coachPA) -> their text
+    'r1': 'When performing Block, increases DEF Technique by {0}%, lasting for {1} net crossings; when Block result is PERFECT, removes all debuffs from self',
+    'r2': "When Block result is BAD, increases your side's back row players' Receive power by {0}% of their Receive stat, lasting for {1} net crossings",
+    'r3': "When performing Set, increases your side's next spiking player's ATK Technique by {0}% and Power/Quick ATK stat by {1}%",
+    'r4': 'When casting skills, recovers {0} Stamina',
+    'r5': "When performing Receive, increases your side's next spiking player's ATK Technique by {0}% and Strength by {1}%",
+    'r6': 'When performing Receive or Set, increases Basic Stats by {0}%, lasting for {1} net crossings, and increases your Team Morale by {2}',
+    'r7': 'Increases Basic Stats by {0}%; when your side is behind, additionally increases Basic Stats by {1}%',
+    'r8': 'When stamina is above {1} points, increases Spike power by {0}% of Power/Quick ATK stat',
+    'r9': 'When the ball crosses the net, increases Power/Quick ATK stat by {0}%, up to {1} stacks, lasting {2} rounds',
+    'r10': 'Increases ATK Technique by {0}%; when scoring with Spike or Setter Dump, recovers {1} Stamina',
+    'o1': 'When performing Block, increases DEF Technique by {0}%, lasting for {1} net crossings',
+    'o2': "When Block result is BAD, increases your side's back row players' Receive power by {0}% of their Receive stat, lasting for {1} net crossings",
+    'o3': "When performing Set, increases your side's next spiking player's ATK Technique by {0}%",
+    'o4': 'When casting Ultimate skills, recovers {0} Stamina',
+    'o5': "When performing Receive, increases your side's next spiking player's ATK Technique by {0}%",
+    'o6': 'When performing Receive or Set, increases Basic Stats by {0}%, lasting for {1} net crossings',
+    'o7': 'When your side is behind, increases Basic Stats by {0}%',
+    'o8': 'When stamina is above {1} points, increases Spike power by {0}% of Power/Quick ATK stat',
+    'o9': 'When the ball crosses the net, increases Power/Quick ATK stat by {0}%, up to {1} stacks, lasting {2} rounds',
+    'o10': 'Increases Attack Technique by {0}%',
+    'pSave': 'Increases Save stat by {0}%',
+    'pBlock': 'Increases Block stat by {0}%',
+    'pSet': 'Increases Set stat by {0}%',
+    'pServe': 'Increases Serve stat by {0}%',
+    'pReceive': 'Increases Receive stat by {0}%',
+    'pPowerQuick': 'Increases Power/Quick Attack stat by {0}%',
+    'bSave': 'Increases Save stat by {0}',
+    'bBlock': 'Increases Block stat by {0}',
+    'bSet': 'Increases Set stat by {0}',
+    'bServe': 'Increases Serve stat by {0}',
+    'bReceive': 'Increases Receive stat by {0}',
+    'bPowerQuick': 'Increases Power/Quick Attack stat by {0}',
+}
+PA_JOBS = {"WS": 1, "MB": 2, "S": 3, "Li": 4, "OP": 5}  # coach.py: job 1-5
+
+
+def _pa_key(text: str) -> str:
+    t = re.sub(r"\(s\)", "s", str(text or "").lower())
+    return re.sub(r"[^a-z#%]", "", re.sub(r"\{\d\}", "#", t))
+
+
+def _in_text_order(text: str, values: list) -> list:
+    """Values by placeholder number -> in the order the placeholders stand in the text."""
+    return [values[int(i)] for i in re.findall(r"\{(\d)\}", str(text or "")) if int(i) < len(values)]
+
+
+def coach_buff(conf: int, pa: dict):
+    """A scanned Positional Advantage {t, pos, v} -> (job, coachbuff id) from the coach's pool: same text,
+    the value nearest to the scanned one."""
+    import coach
+    text, job = PA_TEXTS.get(pa.get("t")), PA_JOBS.get(pa.get("pos"))
+    if not text or not job:
+        return None
+    if "buffkeys" not in _cache:
+        _cache["buffkeys"] = {b: (_pa_key(_english(r.get("BuffName"))), _english(r.get("BuffName")))
+                              for b, r in coach.BUFFS.items()}
+    want = [float(x) for x in _in_text_order(text, list(pa.get("v") or []))]
+    best = None
+    for b in coach.COACHES.get(conf, {}).get("CoachBuffId") or []:
+        key, gtext = _cache["buffkeys"].get(b, ("", ""))
+        if key != _pa_key(text):
+            continue
+        nums = [float(x) for x in str(coach.BUFFS[b].get("BuffNumber") or "").split("_") if x]
+        have = _in_text_order(gtext, nums) or nums
+        d = sum(abs(x - y) for x, y in zip(want, have)) if want else 0
+        if best is None or d < best[0]:
+            best = (d, b)
+    return (job, best[1]) if best else None
 
 
 def _attr_of(key: str, main_id: dict, vice_id: dict, vice: bool):
@@ -275,7 +350,7 @@ def apply(acc, scan: dict) -> list[str]:
         st = coach._store(acc.gid)
         have = coach.cards(acc.gid, acc)
         nxt = max(list(have) + [1559926981427148799]) + 1
-        n = 0
+        n = exact = 0
         for c in scan["coaches"]:
             conf = coach_conf(c.get("name"), c.get("lv"))
             if conf is None:
@@ -287,10 +362,17 @@ def apply(acc, scan: dict) -> list[str]:
                 cost = coach.LEVELS.get((coach._rare(card), card.level), {}).get("Experience") or 0
                 if not coach.level_up(card, cost):
                     break
+            # the Positional Advantages as scanned; the drawn ones stay only where the scan has none that fits
+            pas = [coach_buff(conf, pa) for pa in c.get("pas") or []]
+            if pas and all(pas):
+                del card.job_buffs[:]
+                for job, buff in pas[:coach.buff_slots(card.level)]:
+                    card.job_buffs.add(job=job, buff_id=buff)
+                exact += 1
             st["cards"][str(card.inst_id)] = card.SerializeToString().hex()
             new_state["coaches"].append(card.inst_id)
             n += 1
-        report.append(f"Scan: {n} Coaches")
+        report.append(f"Scan: {n} Coaches ({exact} mit den gescannten Positional Advantages)")
     skipped = [k for k in ("bonds", "collections", "cheers", "gallery") if k in scan]
     if skipped:
         report.append("Scan: nicht übernommen (gibt es auf dem Server nicht): " + ", ".join(skipped))
