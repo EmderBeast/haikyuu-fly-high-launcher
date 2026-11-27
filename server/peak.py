@@ -159,10 +159,12 @@ def build_team(acc, insts: list[int], gid: int, name: str, icon=(0, 0), coach: i
     del team.skill_extras[:]
     team.formation.ClearField("coach_card")
     del team.formation.fetter_id_levels[:]
+    import power
+    ctx = power.account_context(acc)  # records / gallery rows: collection bond and gallery shares
     for inst in (insts + [0] * SLOTS)[:SLOTS]:
         raw = acc.get_card(inst) if inst else None
         if raw:
-            team.formation.players.append(matches.card_entry(P.PlayerCard.FromString(raw)))
+            team.formation.players.append(matches.card_entry(P.PlayerCard.FromString(raw), context=ctx))
         else:
             team.formation.players.add()
     team.power = sum(p.power for p in team.formation.players[:COURT])
@@ -176,6 +178,8 @@ def build_team(acc, insts: list[int], gid: int, name: str, icon=(0, 0), coach: i
                 before = team.power
                 matches.switch_coach(team, None, set())  # adds the coach's stats to team.power
                 coach_power = team.power - before + matches.coach_force(card)
+    import bondlevels  # bonds and their levels from the cards (as Garena's rooms)
+    bondlevels.set_team(team)
     import admin  # Admin Mode: per-card power changes (no-op without any)
     admin.apply_power(acc, team)
     team.power = sum(p.power for p in team.formation.players[:COURT]) + coach_power

@@ -222,3 +222,22 @@ def team_morale(team, acc, form):
 
 
 HANDLERS = {MSG_STAR: handle_star, MSG_WISH: handle_wish, MSG_GIFT: handle_gift}
+
+
+def stat_share(acc, supports) -> dict[int, int]:
+    """Stats every player of the team gets from the cheers (client TeamCalculator.AddSupportActiveAttr /
+    AddSupportLineUpAttrAndSkill): Attribute of every owned cheer + SupportAttribute (keys 0-6) of the
+    line-up's cheers, at this account's stars. Captured rooms: with the coach's 210 per stat this is the
+    whole team share on every card (e.g. 3 760 000 + 2 100 000 = 5 860 000 on Set)."""
+    have = owned(acc)
+    out: dict[int, int] = {}
+    for sid in have.values():
+        for k, v in kv(STARUP.get(sid, {}).get("Attribute")).items():
+            if k < 7:
+                out[k] = out.get(k, 0) + v
+    for cheer in supports:
+        if cheer in have:
+            for k, v in kv(STARUP.get(have[cheer], {}).get("SupportAttribute")).items():
+                if k < 7:
+                    out[k] = out.get(k, 0) + v
+    return out

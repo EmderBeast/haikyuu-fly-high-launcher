@@ -29,6 +29,7 @@ from accounts import CAPTURED
 P = matches.P
 
 MSG_INFO, MSG_UPDATE, MSG_TAKE_REWARD, MSG_FORMATION_SAVE = 0x4001, 0x4002, 0x4003, 0x4004
+COACH_CHANGED = 1 << 8  # LineupSaveType 8 (coach) in TeamCompetitionFormationSaveC2S.module
 SLOTS = 13
 COURT = 7
 TEAMS = 3
@@ -301,10 +302,16 @@ async def handle_formation_save(client, pb: bytes):
     req = P.TeamCompetitionFormationSaveC2S.FromString(pb)
     forms = formations(client.gid, acc)
     by_lineup = {f["lineup"]: f for f in forms}
-    for f in req.formation:
+    modules = list(req.module)
+    for n, f in enumerate(req.formation):
         insts = [i if acc.get_card(i) else 0 for i in f.inst_ids][:SLOTS]
-        by_lineup[f.lineup] = {"lineup": f.lineup, "insts": insts + [0] * (SLOTS - len(insts)),
-                               "coach": f.coach_card_inst_id}  # TeamFormation field 12, seen in 0x4004
+        # module[n] = what changed in formation n (LineupSaveType bits, client TeamCompetitionUtils.RequestSaveFormation;
+        # HasSaveType(t) = mask & 1 << t). The client fills coach_card_inst_id (field 12, seen in 0x4004) only with bit 8
+        # (coach changed): the save sent when a Match Streak starts carries [1, 9] and no coach - keep the stored one then.
+        # Without a module list (Garena's captured saves) the field counts as sent.
+        coach_sent = n >= len(modules) or bool(modules[n] & COACH_CHANGED) or f.coach_card_inst_id != 0
+        coach = f.coach_card_inst_id if coach_sent else by_lineup.get(f.lineup, {}).get("coach", 0)
+        by_lineup[f.lineup] = {"lineup": f.lineup, "insts": insts + [0] * (SLOTS - len(insts)), "coach": coach}
     entry(client.gid, acc)["formations"] = [by_lineup[k] for k in sorted(by_lineup)]
     pvp.save()
     out = P.TeamCompetitionFormationSaveS2C()

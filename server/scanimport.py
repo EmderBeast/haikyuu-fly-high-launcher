@@ -6,7 +6,8 @@ memories and coaches. Queued like every Admin Mode change ({"scan": <file>}) and
 What the file holds (HFH-Bot README, scans in HFH-Bot/scans) and how it is mapped (game tables):
   - players [{id (playerlist id), lv, stars, skills {S1..S4: level}, memory {id, tier}, pots [...]}]:
     the account's card of that character (the one with the highest level, else a new card) gets level, stars,
-    skill levels (skilllist id = card*1000 + slot*100 + level, from the card's skilltemplate ids), the memory
+    skill levels (skilllist id = card*1000 + slot*100 + level, from the card's skilltemplate ids), the skill
+    resonance at the highest tier the skill sum ("total") reaches, the memory
     and its 6 potentials; the potentials it wore before come off;
   - pots: potentials in the inventory, created free;
   - memoryCopies [{id, tier, lv, n}] (or memories {id: tier}): owned memories; the scan's memory id is the
@@ -353,7 +354,10 @@ def apply(acc, scan: dict) -> list[str]:
             by_conf[conf] = (inst, 1)
         f = wire.parse(card)
         if int(x.get("stars") or 0) > 0:
-            f = wire.set_varint(f, 6, max(1, min(7, int(x["stars"]))))
+            # the game's top star is the last row of upgradestar (6); the bot reports 7 for some players, and a
+            # card above the table makes the client's bond setup (PlayerAllFetterData) throw at the login
+            top = max(gameconfig.STAR_LIMITS) if gameconfig.AVAILABLE and gameconfig.STAR_LIMITS else 6
+            f = wire.set_varint(f, 6, max(1, min(top, int(x["stars"]))))
         if int(x.get("lv") or 0) > 0:
             star = wire.get(f, 6, 1)
             f = wire.set_varint(f, 4, max(1, min(int(x["lv"]), gameconfig.level_cap(star))))
@@ -361,6 +365,11 @@ def apply(acc, scan: dict) -> list[str]:
         sk = _skills(conf, x.get("skills") or {}) if x.get("skills") else None
         if sk:
             f = [y for y in f if y[0] != 8] + [(8, 2, b"".join(wire.varint(s) for s in sk))]
+            # skill resonance: the highest tier the skills reach (the scan's "total" is the game's skill sum,
+            # where a skill that still needs training counts 0); the bot does not read the resonance itself
+            total = int(x.get("total") or 0) or gameconfig.skill_level_sum(sk)
+            tiers = [t for t in gameconfig.resonance_tiers(conf) if t <= total]
+            f = wire.set_varint(f, gameconfig.RESONANCE_FIELD, tiers[-1]) if tiers else                 [y for y in f if y[0] != gameconfig.RESONANCE_FIELD]
         card = wire.build(sorted(f, key=lambda y: y[0]))
         mem = x.get("memory")
         if isinstance(mem, dict) and mem.get("id"):

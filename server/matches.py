@@ -276,15 +276,24 @@ def memory_stats(base: dict, conf_id: int, memory) -> dict:
 
 
 def card_entry(card: P.PlayerCard, stage: dict | None = None, recalling: bytes | None = None,
-               specialties: list | None = None) -> P.PlayerCardInfo:
+               specialties: list | None = None, context: tuple | None = None) -> P.PlayerCardInfo:
     """A card's PlayerCardInfo as Garena builds it: val = star / level, extrval = training, skill resonance
-    (percent of val), memory and potentials (`specialties`: the equipped PlayerSpecialty bytes)."""
+    (percent of val), memory and potentials (`specialties`: the equipped PlayerSpecialty bytes); with
+    `context` (power.account_context: records, gallery rows) also collection bonds and gallery shares.
+    power = the client's formula (power.py)."""
+    import power
     attrs = card_attrs(card.conf_id, card.level, card.star, 0, stage)
     base = {a.type: a.val for a in attrs}
-    extra = dict(_train_bonus(card.conf_id, card.train)) if card.train else {}
-    power_extra = 0
-    if card.skill_resonance_unlock_level:  # skill resonance: +x % basic stats, extra power
-        pct, power_extra = gameconfig.resonance_bonus(card.conf_id, card.skill_resonance_unlock_level)
+    extra = {}
+    for t, v in (_train_bonus(card.conf_id, card.train) if card.train else {}).items():
+        power.add_ext(extra, base, t, v)  # "205:650" = +6.5 % of Serve (AddExtAttr), not a flat bonus
+    if context is not None:
+        for share in (power.collection_bonds(card.conf_id, base, context[0]),
+                      power.gallery_shares(card.conf_id, base, context[1])):
+            for t, v in share.items():
+                extra[t] = extra.get(t, 0) + v
+    if card.skill_resonance_unlock_level:  # skill resonance: +x % basic stats (its power: power.skill_part)
+        pct, _ = gameconfig.resonance_bonus(card.conf_id, card.skill_resonance_unlock_level)
         for t, v in pct.items():
             extra[t] = extra.get(t, 0) + base.get(t, 0) * v // SCALE
     rec = None
@@ -298,11 +307,12 @@ def card_entry(card: P.PlayerCard, stage: dict | None = None, recalling: bytes |
         extra[t] = extra.get(t, 0) + v
     for a in attrs:
         a.extrval = extra.get(a.type, 0)
-    entry = P.PlayerCardInfo(info=card, attr=attrs, power=card_power(attrs) + power_extra)
+    entry = P.PlayerCardInfo(info=card, attr=attrs)
     entry.specialtys_entity.extend(specs)
     if rec is not None:  # equipped memory: its entity and skills (plus resonance skills, as the client expects)
         entry.recalling_entity.CopyFrom(rec)
         entry.skill_extras.extend(_extras(card, recalling))
+    entry.power = power.card_power(entry)
     return entry
 
 
@@ -359,6 +369,7 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
     team.formation.ClearField("coach_card")
     del team.formation.fetter_id_levels[:]
     captured = {p.info.inst_id: p for p in template.formation.players}
+    ctx = None  # the account's records / gallery rows for the cards' power (power.account_context)
     form = _formation(acc, fight_type, lineup)
     if form:  # "Preset Sub Position": who the libero replaces (none = he stays on the bench)
         team.formation.libero_replace_type = form.libero_replace_type
@@ -385,12 +396,14 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
             team.formation.players.append(entry)
         else:
             rec = acc.all_recallings().get(card.recalling) if card.recalling else None
-            team.formation.players.append(card_entry(card, recalling=rec, specialties=specs))
+            if ctx is None:
+                import power
+                ctx = power.account_context(acc)
+            team.formation.players.append(card_entry(card, recalling=rec, specialties=specs, context=ctx))
     team.power = sum(p.power for p in team.formation.players[:7])
     if any(p.info.inst_id in captured for p in team.formation.players):
         # the captured room's team-wide extras (coach, bonds) belong to these cards
         team.formation.coach_card.CopyFrom(template.formation.coach_card)
-        team.formation.fetter_id_levels.extend(template.formation.fetter_id_levels)
         team.skill_extras.extend(template.skill_extras)
     old = P.CoachCard()
     old.CopyFrom(team.formation.coach_card) if team.formation.HasField("coach_card") else None
@@ -399,8 +412,22 @@ def home_team(template: P.PVPTeamInfo, acc, gid: int, name: str, fight_type: int
     if COACH_STATS:
         switch_coach(team, old if had else None, set(captured))
         team.power += coach_force(team.formation.coach_card if team.formation.HasField("coach_card") else None)
+    import bondlevels  # bonds and their levels from the line-up's cards (as Garena's rooms)
+    bondlevels.set_team(team)
     import cheers  # the line-up's cheers: one morale entry each, at this account's stars
     cheers.team_morale(team, acc, form)
+    # the cheers' stats on every player (captured cards already hold them) and the team power as the
+    # client counts it (power.team_power: cards + weighted team shares + battle bonds + coach)
+    share = cheers.stat_share(acc, list(team.formation.player_supports))
+    for p in team.formation.players:
+        if p.info.inst_id not in captured:
+            for a in p.attr:
+                a.extrval += share.get(a.type, 0)
+    import power
+    coach = team.formation.coach_card if team.formation.HasField("coach_card") else None
+    for k, v in coach_values(coach).items():
+        share[k] = share.get(k, 0) + v
+    team.power = power.team_power(team, share)
     import admin  # Admin Mode: per-card power changes (no-op without any)
     admin.apply_power(acc, team)
     return team

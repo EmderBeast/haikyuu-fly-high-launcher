@@ -99,6 +99,20 @@ async def main():
           any(x.coach_card_inst_id == ukai.inst_id for x in P.TeamCompetitionInfoS2C.FromString(
               teamcomp.info(GID, acc)).formations))
 
+    # the save sent when a Match Streak starts: module [1, 9] (no coach bit 8), no field 12 - the coach stays
+    # (seen on the emulator 27.11.2026: module [1, 9], both line-ups without field 12, after editor saves [329, 8] / [321])
+    req = P.TeamCompetitionFormationSaveC2S(module=[1, 9])
+    req.formation.add(lineup=1, inst_ids=insts)
+    req.formation.add(lineup=2, inst_ids=insts)
+    await server.MESSAGE_HANDLERS[teamcomp.MSG_FORMATION_SAVE](c, req.SerializeToString())
+    f = next(x for x in teamcomp.formations(GID, acc) if x["lineup"] == 1)
+    check("team competition: a save without the coach bit keeps the coach", f.get("coach") == ukai.inst_id)
+    req = P.TeamCompetitionFormationSaveC2S(module=[1 | 1 << 8])  # coach removed in the editor
+    req.formation.add(lineup=1, inst_ids=insts)
+    await server.MESSAGE_HANDLERS[teamcomp.MSG_FORMATION_SAVE](c, req.SerializeToString())
+    f = next(x for x in teamcomp.formations(GID, acc) if x["lineup"] == 1)
+    check("team competition: the coach bit with no coach removes it", f.get("coach") == 0)
+
     # Freedom Championship: the whole TeamFormation is stored, team_of passes its coach on
     req = P.FightFreedomPlayerLineupSaveC2S(is_attack=True)
     req.formation.inst_ids.extend(insts)

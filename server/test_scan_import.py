@@ -44,7 +44,8 @@ PIECES = [
     {"slot": "VI", "set": "Setter Dump", "lv": 12, "main": "Set", "rolls": {"PowerPct": 2, "SaveFlat": 3, "SetPct": 1, "AtkTech": 1}},
 ]
 SCAN = {"hfhscan": 1, "date": "2026-11-26 20:00", "tool": "HFH-Bot",
-        "players": [{"id": 1102, "lv": 70, "stars": 5, "skills": {"S1": 3, "S2": 2, "S3": 1, "S4": 2},
+        "players": [{"id": 1101, "lv": 80, "stars": 7},  # the bot reports 7 stars for some players; the game has 6
+                    {"id": 1102, "lv": 70, "stars": 5, "skills": {"S1": 3, "S2": 2, "S3": 1, "S4": 2},
                      "memory": {"id": 231610, "tier": 4}, "pots": PIECES}],
         "pots": [{"slot": "I", "set": "Morale Surge", "lv": 12, "main": "Power",
                   "rolls": {"PowerPct": 2, "SaveFlat": 3, "SetPct": 1, "AtkTech": 1}}],
@@ -74,6 +75,9 @@ async def main():
     assert inst2 == inst
     f = wire.parse(card)
     assert (wire.get(f, 4), wire.get(f, 6)) == (70, 5)
+    assert wire.get(wire.parse(card_of(acc, 1101)[1]), 6) == 6
+    reach = [t for t in gameconfig.resonance_tiers(1102) if t <= 8]  # skills 3 + 2 + 1 + 2
+    assert wire.get(f, gameconfig.RESONANCE_FIELD, 0) == (reach[-1] if reach else 0)
     from accounts import _packed
     base = [gameconfig.SKILLS[1102][k] for k in ("Skill1", "Skill2", "Skill3", "Skill4")]
     assert _packed(wire.get(f, 8, b"")) == [base[0] + 2, base[1] + 1, base[2], base[3] + 1]
@@ -130,7 +134,7 @@ async def main():
     sup = [p for m, p in cl.sent if m == 0x2501]
     assert sup and [d.star_id for d in _pvp.P.PlayerSupportInfoS2C.FromString(sup[-1]).datas] == [560, 440, 1120], sup
     done = json.loads((admin.DONE / f"{GID + 1}.json").read_text(encoding="utf-8"))["done"]
-    assert any("1 Spieler" in d for d in done) and any("bonds" in d for d in done), done
+    assert any("2 Spieler" in d for d in done) and any("bonds" in d for d in done), done
     print("OK", TMP)
 
 

@@ -384,6 +384,7 @@ async def handle_login(client: GameClient, pb_data: bytes):
     })
     await client.send_packet(0x0101, response)
 
+    luckydraw.new_day(int(gid), client.account)  # Daily Lucky Draw: the free spin of today, before the currency sync
     for m in client.account.b.sync:
         if m["msg_id"].upper() == "0X0408":  # the characters this account has had (bonds hang on it)
             await client.send_packet(0x0408, client.account.statistics(), compress=bool(m["flags"] & 2))
@@ -401,6 +402,7 @@ async def handle_login(client: GameClient, pb_data: bytes):
             info = onlinereward._P().LocalActivityInfoS2C.FromString(
                 onlinereward.patch_info(int(gid), client.account, body))
             limitlogin.patch_info(int(gid), info)  # noon / evening stamina of today
+            luckydraw.patch_info(int(gid), client.account, info)  # Daily Lucky Draw: own counts and milestones
             trainsupply.patch_info(int(gid), info, client.account.level)  # weekend training supply
             await client.send_packet(0x2801, info.SerializeToString(), compress=bool(m["flags"] & 2))
             continue
@@ -444,6 +446,10 @@ async def handle_login(client: GameClient, pb_data: bytes):
             continue
         if m["msg_id"].upper() == "0X2B01":  # mini games: this player's own week score and best scores
             await client.send_packet(0x2B01, minigame.info(int(gid), client.account))
+            continue
+        if m["msg_id"].upper() == "0X1D01" and client.account.gallery:  # gallery: seen / claimed by this player
+            await client.send_packet(0x1D01, gallery.info(client.account, client.account.b.pb("0x1D01")),
+                                     compress=bool(m["flags"] & 2))
             continue
         if m["msg_id"].upper() == "0X0901" and client.account.card_auto is not None:
             # cards: this player's auto-dismantle list (the cards follow as 0x0902 updates)
@@ -1767,6 +1773,8 @@ import limitlogin  # noqa: E402  limited-time login stamina (local activity type
 import trainsupply  # noqa: E402  weekend training supply (local activity type 8)
 import exchange  # noqa: E402  currency exchange (0x1201: stamina for diamonds) per player and day
 MESSAGE_HANDLERS.update(exchange.HANDLERS)
+import luckydraw  # noqa: E402  Daily Lucky Draw (local activity type 11: 0x2809 spin, 0x280A milestones)
+MESSAGE_HANDLERS.update(luckydraw.HANDLERS)
 
 
 async def handle_local_activity_reward(client: GameClient, pb_data: bytes):
@@ -1799,6 +1807,8 @@ import monthcard  # noqa: E402  month / quarter card: the daily reward
 MESSAGE_HANDLERS.update(monthcard.HANDLERS)
 import freepack  # noqa: E402  free packs of the shop
 MESSAGE_HANDLERS.update(freepack.HANDLERS)
+import gallery  # noqa: E402  gallery: bonds / CGs seen (0x1D03 / 0x1D04), collection rewards (0x1D05)
+MESSAGE_HANDLERS.update(gallery.HANDLERS)
 import cards  # noqa: E402  cards from fragments (0x0903), dismantling (0x0904), auto list (0x090D)
 MESSAGE_HANDLERS.update(cards.HANDLERS)
 import cheers  # noqa: E402  Team Cheers: star up (0x2504), draw wish (0x0F09) and gifts (0x0F13)
