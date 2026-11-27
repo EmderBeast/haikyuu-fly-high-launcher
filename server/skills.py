@@ -246,10 +246,11 @@ class Battle:
             team_has_extras = any(extras.get(p) for p in self.cards if self.team_of(p) == team)
             if not team_has_extras:  # rooms we built ourselves: coach position buffs from the tables
                 for jb in t.formation.coach_card.job_buffs:  # coachbuff row -> skill for that position
-                    sid = _num(COACHBUFF.get(jb.buff_id, {}).get("CoachBuffId"))
+                    # CoachBuffId is one skill or a list (80 of 330 rows, e.g. 4071 [6113008, 6113018]:
+                    # ATK Technique and stamina on scoring): every listed skill goes to the position
+                    sids = _flat(COACHBUFF.get(jb.buff_id, {}).get("CoachBuffId"))
                     for pid in [p for p in self.cards if self.team_of(p) == team and self.jobs.get(p) == jb.job]:
-                        if sid in SKILLS:
-                            self.skills[pid].append((SKILLS[sid], 1))
+                        self.skills[pid] += [(SKILLS[sid], 1) for sid in sids if sid in SKILLS]
             if lead is not None and TEAM_BUFF_EVENT:  # the game's own marker rules (ids under 1000)
                 self.skills[lead] += [(sk, 1) for sid, sk in SKILLS.items() if 0 < sid < 1000 and any(
                     t.get("Key") == "TeamBuffNumberChange" for t in sk.get("Trigger") or [])]
