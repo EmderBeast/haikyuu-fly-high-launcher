@@ -33,9 +33,12 @@ assert c.account.task_state(tid) == accounts.TASK_FINISH
 asyncio.run(server.MESSAGE_HANDLERS[0x210E](c, P.PersonalTouchC2S(item_ids=[2001, 2002]).SerializeToString()))
 r = P.PersonalTouchS2C.FromString(next(b for m, b in c.sent if m == 0x210E))
 assert list(r.touched_item_ids) == [2001, 2002]
+asyncio.run(server.MESSAGE_HANDLERS[0x1C07](c, P.FavorChangeStandSignC2S(conf_id=1101).SerializeToString()))
+r = P.FavorChangeStandSignS2C.FromString(next(b for m, b in c.sent if m == 0x1C07))
+assert r.conf_id == 1101 and r.err == 0, r
 c2 = login(950001)
 fav = P.FavorInfoS2C.FromString(next(b for m, b in c2.sent if m == 0x1C01))
-assert 1101 in [b.conf_id for b in fav.base], fav
+assert 1101 in [b.conf_id for b in fav.base] and fav.stand_sign_id == 1101, fav
 info = P.PersonalInfoS2C.FromString(next(b for m, b in c2.sent if m == 0x2101))
 assert {2001, 2002} <= set(info.touched_item_id)
 tasks = P.TaskChangeS2C.FromString(next(b for m, b in reversed(c2.sent) if m == 0x0E02))
@@ -45,4 +48,8 @@ g = P.UserGuideInfoS2C.FromString(next(b for m, b in c2.sent if m == 0x1F01))
 assert set(guide.all_groups()) <= set(g.done_group_ids), "tutorial not off"
 tok = P.FightTokyoInfoS2C.FromString(next(b for m, b in reversed(c2.sent) if m == 0x1101))
 assert 10203 in tok.stages_pass, tok
+admin._apply(c2.account, {"max_cards": True})
+card = next(P.PlayerCard.FromString(x) for x in c2.account.cards if P.PlayerCard.FromString(x).conf_id == 3101)
+assert card.train == 7 and sorted(card.skills) == [3101102, 3101202, 3101302, 3101403], card
+assert card.skill_resonance_unlock_level == gameconfig.resonance_tiers(3101)[-1], card
 print("ok")

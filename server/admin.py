@@ -28,6 +28,7 @@ In-game commands for admins: the gift code field takes "/command [value] [@playe
   /perfect on|off  (every card wears its potential guide's perfect set, see sync_perfect)
   /unlockall  (everything collectable: cards, memories, max, items, currencies, coaches, potentials, cheers,
       cosmetics)   /unlock <kind> ... [off]  (single kinds, "off" takes cheers / cosmetics back; unlockall.py)
+  /bestteams jp|global [receive|power|quick|block] | off  (the Fly High Hub's 4 best teams, bestteams.py)
   /coaches  (list of the coaches)   /coachbuffs <coach> [word | all]  (the buffs that coach can have)
   /coach <name or id> [level] <job:buff> ...   build a coach with exactly these job buffs, e.g.
       /coach ukai 15 ws:4071 mb:4072 s:4078 l:4079 op:4073   (job: 1-5 or ws mb s l op; see coach.py)
@@ -44,6 +45,7 @@ Queue entries (list, applied in order):
   {"max_cards": true}                           every card to the top star and level 80
   {"items": 999}                                every bag item kind (as in the captured account) to this count
   {"scan": {"hfhscan": 1, ...}}                 a scan file of the HFH-Bot (scanimport.py)
+  {"best_teams": {"edition": "jp", "focus": "receive"}}   the Fly High Hub's 4 best teams 1:1 (bestteams.py)
   {"flags": {"infinite_stamina": true}}         also "perfect_potentials": guide sets on every card
   {"specialties": [{"conf": 3051045, "level": 12, "main": 1023,
                     "vices": [[2010, 2], [2023, 1], ...], "count": 1}]}
@@ -179,6 +181,24 @@ def make_specialty(inst: int, conf: int, level: int, main: int, vices) -> bytes:
     return wire.build(f)
 
 
+def _max_train_skills(f: list) -> list:
+    """A card's fields with every training step done (train = last step of table train) and every skill at its
+    top level (skilllist ids <card><skill><level>, e.g. 3101101 -> 3101103), training skills included, so the
+    four skill levels add up for the highest resonance tier (Emre 28.11.: max training and resonance)."""
+    conf = wire.get(f, 3, 0)
+    steps = [k % 10 for k in gameconfig.TRAIN if k // 10 == conf]
+    if steps:
+        f = wire.set_varint(f, 7, max(steps))
+    top = {}
+    for sid in gameconfig.SKILL_LIST:
+        if sid // 1000 == conf:
+            top[sid // 100] = max(top.get(sid // 100, 0), sid)
+    if top:
+        f = [x for x in f if x[0] != 8] + [(8, 0, sid) for _, sid in sorted(top.items())]
+        f.sort(key=lambda x: x[0])
+    return f
+
+
 def _apply(acc, action: dict) -> list[str]:
     done = []
     if "level" in action:
@@ -282,6 +302,7 @@ def _apply(acc, action: dict) -> list[str]:
             f = wire.parse(card)
             f = wire.set_varint(f, 6, MAX_STAR)
             f = wire.set_varint(f, 4, gameconfig.level_cap(MAX_STAR))
+            f = _max_train_skills(f)
             maxed.append(wire.build(f))
         # full skill resonance (highest tier) on every maxed card
         for i, raw in enumerate(maxed):
@@ -328,6 +349,9 @@ def _apply(acc, action: dict) -> list[str]:
     if action.get("scan"):  # a scan file of the HFH-Bot (players, potentials, memories, coaches)
         import scanimport
         done += scanimport.apply(acc, action["scan"])
+    if action.get("best_teams"):  # the Fly High Hub's four best teams 1:1 (bestteams.py)
+        import bestteams
+        done += bestteams.apply(acc, action["best_teams"])
     if action.get("unlock_all") or action.get("unlock"):
         import unlockall
         done += unlockall.apply(acc, unlockall.KINDS if action.get("unlock_all") else action["unlock"], _apply)
@@ -416,7 +440,7 @@ def _swap_twins_in_team(acc, conf: dict) -> int:
 
 # Creative mode (own server only, every account): at the first login everything at max, at every
 # login currencies and items topped up again ("infinite"). Raise the version to run the full set again.
-CREATIVE_VERSION = 1
+CREATIVE_VERSION = 2  # 2: max training and skill levels (28.11.)
 CREATIVE_FULL = [{"level": gameconfig.MAX_PLAYER_LEVEL}, {"unlock_all": True}, {"resonance": {"*": "max"}}, {"challenges": True}, {"functions": True},
                  {"flags": {"infinite_stamina": True}}]
 CREATIVE_TOPUP = [{"unlock": ["currency", "items"]}, {"challenges": True}, {"functions": True}]
@@ -884,7 +908,7 @@ def _put_cards(acc, new_cards: dict[int, bytes]):
 
 HELP = ("Befehle: /gold N, /diamonds N, /exp N, /stamina N (kommen sofort als Post), /level N, "
         "/items N, /allcards, /maxcards, /card <Name>, /potential <Set>, /perfect on|off, /infinite on|off, "
-        "/power N|off, /coach (eigenen Trainer bauen, Hilfe: /coach), /unlockall (alles freischalten), /unlock <Art> (Hilfe: /unlock) – mit @Name für einen anderen Spieler.")
+        "/power N|off, /bestteams jp|global (4 Bestteams des Fly High Hub), /coach (eigenen Trainer bauen, Hilfe: /coach), /unlockall (alles freischalten), /unlock <Art> (Hilfe: /unlock) – mit @Name für einen anderen Spieler.")
 
 
 def notify(gid, text: str, items: list | None = None) -> bool:
@@ -1020,6 +1044,15 @@ def command(gid, code: str) -> tuple[str, str | None, str | None, str | None]:
         action = {"coach": spec}
     elif cmd == "/maxcards":
         action = {"max_cards": True}
+    elif cmd == "/bestteams":
+        import bestteams
+        value = bestteams.parse_args(args)
+        if value is None:
+            text = ("Aufruf: /bestteams jp|global [receive|power|quick|block] – lädt die 4 Bestteams des Fly High Hub "
+                    "(Aufstellungen 0-3); das zweite Wort wählt, wessen Builds gelten, wenn ein Spieler in mehreren "
+                    "Teams verschieden gebaut ist. /bestteams off holt die alten Aufstellungen zurück.")
+            return f"/bestteams: bad arguments {args!r}", text, None, None
+        action = {"best_teams": value}
     elif cmd == "/perfect" and args and args[0].lower() in ("on", "an", "off", "aus"):
         action = {"flags": {PERFECT: args[0].lower() in ("on", "an")}}
     elif cmd == "/infinite" and args and args[0].lower() in ("on", "an", "off", "aus"):

@@ -621,10 +621,34 @@ LUCKY_COIN = 250  # item 250 (tszm_icon_xyb): one per pull of the standard recru
 MSG_FAVOR_INFO, MSG_FAVOR_UPDATE = 0x1C01, 0x1C02
 
 
+MSG_FAVOR_STAND = 0x1C07
+
+
+def _stand_store() -> dict:
+    return pvp.state().setdefault("stand_sign", {})
+
+
+async def handle_favor_stand(client: GameClient, pb_data: bytes):
+    """0x1C07 FavorChangeStandSignC2S{conf_id}: the character on the home screen ("Switch Player"). The client
+    (FavoritilyMessageHandler) takes conf_id of the reply as the new home character; before, the server sent an
+    empty reply (conf_id 0), so the background kept the old one. Assumption (no capture): a card the account
+    does not own is refused with err 1."""
+    conf = matches.P.FavorChangeStandSignC2S.FromString(pb_data).conf_id
+    if conf not in client.account.owned_conf_ids():
+        await client.send_packet(MSG_FAVOR_STAND, matches.P.FavorChangeStandSignS2C(err=1).SerializeToString())
+        return
+    _stand_store()[str(client.gid)] = conf
+    pvp.save()
+    await client.send_packet(MSG_FAVOR_STAND, matches.P.FavorChangeStandSignS2C(conf_id=conf).SerializeToString())
+
+
 def favor_info(acc, body: bytes) -> bytes:
     """Login FavorInfoS2C: the baseline's characters plus every one the account owns (cards from the admin mode
-    or the creative mode count like drawn ones)."""
+    or the creative mode count like drawn ones), and the home screen character the player chose."""
     info = matches.P.FavorInfoS2C.FromString(body)
+    stand = _stand_store().get(str(acc.gid))
+    if stand:
+        info.stand_sign_id = stand
     have = [b.conf_id for b in info.base]
     for conf in sorted(acc.owned_conf_ids() - set(have)):
         info.base.add(conf_id=conf)
@@ -1888,6 +1912,7 @@ MESSAGE_HANDLERS = {
     0x0D02: handle_sign_save,
     0x0D03: handle_sign_reward,
     0x0E03: handle_task_receive,
+    MSG_FAVOR_STAND: handle_favor_stand,
     0x0E05: handle_task_one_key,
     MSG_LOTTERY_WISH: handle_lottery_wish,
     0x0E07: handle_extract_physical,
@@ -1964,6 +1989,26 @@ import exchange  # noqa: E402  currency exchange (0x1201: stamina for diamonds) 
 MESSAGE_HANDLERS.update(exchange.HANDLERS)
 import luckydraw  # noqa: E402  Daily Lucky Draw (local activity type 11: 0x2809 spin, 0x280A milestones)
 MESSAGE_HANDLERS.update(luckydraw.HANDLERS)
+
+
+async def _source_spend(client: GameClient, amount: int) -> bool:
+    """Stamina of a Practice Match quick clear: refused without enough, else 0x0405 and the mission."""
+    acc = client.account
+    if acc.get_currency(STAMINA) < amount:
+        return False
+    entry = acc.spend_stamina(amount)
+    acc.save()
+    await client.send_packet(MSG_CURRENCY_CHANGE, wire.build([(1, 2, entry)]))
+    await mission_event(client, missions.CONSUME_CURRENCY, amount, (STAMINA,))
+    return True
+
+
+async def _source_mission(client: GameClient, count: int, stage: int):
+    await mission_event(client, missions.FINISH_MATCH, count, (PVP_TYPE_PRACTICE, stage))
+
+
+pvp.HOOKS["source_quick"] = {"spend": _source_spend, "mission": _source_mission, "name": player_name,
+                             "grant_rewards": lambda c, r, popup: grant_rewards(c, r, popup=popup)}
 
 
 async def handle_local_activity_reward(client: GameClient, pb_data: bytes):

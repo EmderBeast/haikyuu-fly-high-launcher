@@ -725,6 +725,10 @@ async def handle_quick(client, pb: bytes):
         import clubs
         await clubs.handle_boss_quick(client, req)
         return
+    if req.args.pvp_type == P.FIGHT_SOURCE:  # Practice Match quick clear (sweep)
+        import sourcequick
+        await sourcequick.handle(client, req, HOOKS["source_quick"])
+        return
     if req.args.pvp_type != P.FIGHT_ARENA:
         await HOOKS["generic"](client, pb, MSG_QUICK)
         return

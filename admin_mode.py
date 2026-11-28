@@ -104,6 +104,8 @@ class TrVar(tk.StringVar):
         super().set(i18n.tr(value))
 
 
+BEST_CHOICES = {"nicht laden": None, "JP-Bestteams": "jp", "Global-Bestteams": "global",
+                "alte Aufstellungen zurück": "off"}
 RESO_CHOICES = {"unverändert": None, "aus": 0, "1. Stufe": "t1", "2. Stufe": "t2", "3. Stufe": "t3",
                 "4. Stufe": "t4", "5. Stufe": "t5", "max": "max"}  # skill resonance tiers of a card
 ALL = "*"  # target "all my accounts"
@@ -353,6 +355,24 @@ class AdminWindow:
                  justify="left").pack(anchor="w", padx=36)
         tk.Label(f, text="Übernimmt Spieler (Level, Sterne, Skills, Memory, Potentials), Potentials und Memories im "
                          "Inventar und Coaches aus der Scan-Datei (HFH-Bot → scans). Ein neuer Scan ersetzt den alten.",
+                 bg=PANEL, fg="#aaaaaa", font=("Segoe UI", 9), wraplength=680, justify="left").pack(anchor="w", padx=36)
+
+        # the Fly High Hub's four best teams 1:1 (server/bestteams.py, data/best_teams.json)
+        r = tk.Frame(f, bg=PANEL)
+        r.pack(anchor="w", padx=12, pady=(18, 2))
+        tk.Label(r, text="Bestteams aus dem Fly High Hub:", bg=PANEL, fg=GOLD,
+                 font=("Segoe UI", 10, "bold")).pack(side="left")
+        self.best_teams = TrVar(value=i18n.tr("nicht laden"))
+        ttk.Combobox(r, textvariable=self.best_teams, values=[i18n.tr(k) for k in BEST_CHOICES], state="readonly",
+                     width=24).pack(side="left", padx=6)
+        tk.Label(r, text="Builds wie gegen:", bg=PANEL, fg=FG).pack(side="left", padx=(10, 0))
+        self.best_focus = tk.StringVar(value="Receive")
+        ttk.Combobox(r, textvariable=self.best_focus, values=["Receive", "Power", "Quick", "Block"], state="readonly",
+                     width=9).pack(side="left", padx=6)
+        tk.Label(f, text="Lädt die 4 Bestteams (gegen Receive, Power, Quick, Block) 1:1 wie im Hub: Spieler mit Skills, "
+                         "Memories und Potentials, je Team ein Coach mit den Positional Advantages, Aufstellungen 0-3 "
+                         "mit Libero, Bank und Cheers. Ist ein Spieler in mehreren Teams verschieden gebaut, gilt der "
+                         "Build aus dem Team rechts. „Alte Aufstellungen zurück“ stellt deine vorigen Aufstellungen her.",
                  bg=PANEL, fg="#aaaaaa", font=("Segoe UI", 9), wraplength=680, justify="left").pack(anchor="w", padx=36)
         return f
 
@@ -854,6 +874,11 @@ class AdminWindow:
             actions.append({"items": int(self.items.get())})
         if self.pending_scan:
             actions.append({"scan": self.pending_scan})
+        best = next((v for k, v in BEST_CHOICES.items() if i18n.tr(k) == self.best_teams.get()), None)
+        if best == "off":
+            actions.append({"best_teams": {"off": True}})
+        elif best:
+            actions.append({"best_teams": {"edition": best, "focus": self.best_focus.get().lower()}})
         if self.pending_power:
             actions.append({"power": dict(self.pending_power)})
         reso = dict(self.pending_reso)
