@@ -222,7 +222,10 @@ DEFAULT_SKILL = {SERVE: 10020, DIG_SERVE: 10100, SAVE: 10800, SET: 10200, SPIKE:
 
 
 GATE = {SPIKE: "spike", BLOCK: "block", DIG_SPIKE: "catch"}
-HAND_SERVE = {1: 0.85, 2: 1.0, 3: 1.2}  # power factor by hand serve result (bad / normal / good)
+# Power factor (the serve's 倍率 in power_des) by hand serve result. Garena capture dizzy2711 (27.11.2026, the
+# same server with the default serve skill 10020, rate 1 without input): Bad 0.8, Good 1.2, Nor 1 (the 1.4 of
+# a Nor serve there came from a character serve skill, 55032121, that the hand serve triggered).
+HAND_SERVE = {1: 0.8, 2: 1.0, 3: 1.2}
 # Hand serve side (EHandServeArea 76 left / 77 mid / 78 right) = where the serve comes down on the other
 # half: in the 10 captured hand serves (garena2, garena3) the receive was at x -2.95..-3.21 for left,
 # -0.69 / 1.0 for mid and 2.15..3.01 for right, whoever stood there took it.

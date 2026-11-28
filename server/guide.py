@@ -30,8 +30,19 @@ def done(gid: int, acc) -> list[int]:
     return sorted(set(SKIPPED) | set(_store().get(str(gid), [])))
 
 
+def _creative(acc) -> bool:
+    """Accounts in creative mode (own server, admin mode for everyone) skip the whole tutorial (Emre 28.11.)."""
+    flags = getattr(acc, "admin_flags", None) or {}
+    return bool(flags.get("creative") or flags.get("creative_jp"))
+
+
+def all_groups() -> list[int]:
+    return sorted(r.get("ID", 0) for r in pvp._cfg("guidegroupconfig"))
+
+
 def info(gid: int, acc) -> bytes:
-    return P.UserGuideInfoS2C(done_group_ids=done(gid, acc)).SerializeToString()
+    ids = all_groups() if _creative(acc) else done(gid, acc)
+    return P.UserGuideInfoS2C(done_group_ids=ids).SerializeToString()
 
 
 async def handle_done(client, pb: bytes):

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import gameconfig
 import matches
+import edition  # noqa: E402  global / jp tables
 import missions
 import wire
 from missions import Missions
@@ -415,6 +416,19 @@ async def handle_login(client: GameClient, pb_data: bytes):
         if m["msg_id"].upper() == "0X1701":  # Extreme Training: this player's idle rewards, not the capture
             await client.send_packet(0x1701, hangup.info(client.account))
             continue
+        if m["msg_id"].upper() == "0X040C" and edition.NAME == "jp":  # JP: every character open (OpenBitIndex
+            # up to 166 in the JP tables; Garena's bits leave the newest ones closed, the client then hides them)
+            await client.send_packet(0x040C, matches.P.NotifyOpenPlayersS2C(
+                player_bits=[(1 << 64) - 1] * 4).SerializeToString())
+            continue
+        if m["msg_id"].upper() == "0X1C01":  # favor: every owned character (Switch Player)
+            body = wire.body_to_pb(bytes.fromhex(m["body_hex"]), m["flags"])
+            await client.send_packet(MSG_FAVOR_INFO, favor_info(client.account, body), compress=bool(m["flags"] & 2))
+            continue
+        if m["msg_id"].upper() == "0X2301":  # home: this player's room levels
+            body = wire.body_to_pb(bytes.fromhex(m["body_hex"]), m["flags"])
+            await client.send_packet(0x2301, homestead.patch_info(client, body), compress=bool(m["flags"] & 2))
+            continue
         if m["msg_id"].upper() == "0X1F01":  # tutorial: the groups this player has done (new players: none)
             await client.send_packet(0x1F01, guide.info(int(gid), client.account))
             continue
@@ -604,6 +618,19 @@ async def handle_lottery_do(client: GameClient, pb_data: bytes):
 LUCKY_COIN = 250  # item 250 (tszm_icon_xyb): one per pull of the standard recruit (capture neu2811)
 
 
+MSG_FAVOR_INFO, MSG_FAVOR_UPDATE = 0x1C01, 0x1C02
+
+
+def favor_info(acc, body: bytes) -> bytes:
+    """Login FavorInfoS2C: the baseline's characters plus every one the account owns (cards from the admin mode
+    or the creative mode count like drawn ones)."""
+    info = matches.P.FavorInfoS2C.FromString(body)
+    have = [b.conf_id for b in info.base]
+    for conf in sorted(acc.owned_conf_ids() - set(have)):
+        info.base.add(conf_id=conf)
+    return info.SerializeToString()
+
+
 async def _give_drawn(client: GameClient, confs: list[int]) -> list[int]:
     """Create drawn cards: profile items of new characters (0x2102) first, then the cards (0x0902), SR+ locked."""
     acc = client.account
@@ -611,6 +638,10 @@ async def _give_drawn(client: GameClient, confs: list[int]) -> list[int]:
     unlock = personal.unlock_cards(int(client.gid), acc, new_chars)
     if unlock:
         await client.send_packet(personal.MSG_UPDATE, unlock)
+    if new_chars:  # the characters' favor entries (Garena neu2811: 0x1C02 with the new conf ids before the cards);
+        # the home screen's "Switch Player" offers only characters in this list
+        await client.send_packet(MSG_FAVOR_UPDATE, matches.P.FavorInfoUpdateS2C(
+            base=[matches.P.FavorBase(conf_id=c) for c in new_chars]).SerializeToString())
     infos, inst_ids = [], []
     for conf in confs:
         inst, card = acc.add_card(conf)
@@ -718,17 +749,23 @@ async def grant_rewards(client: GameClient, rewards: list[tuple[int, int]], popu
             continue
         updates.setdefault(credited[0], []).append((1, 2, credited[1]))
         shown.append((1, 2, wire.build([(2, 0, conf_id), (3, 0, number)])))
+    # Level-up rewards go into the same item / currency updates without a pop-up of their own, and the
+    # level change comes first (Garena neu2811, claim of task 1002000: 0x0406 level 6, 0x0802, 0x0405 with
+    # the level's gold, 0x0404 with the task rewards only). A second pop-up broke tutorial group 8.
+    for level in levels:
+        log.info(f"  LEVEL UP -> {level}")
+        for conf_id, number in gameconfig.player_level_reward(level):
+            credited = acc.add_reward(conf_id, number)
+            if credited is not None:
+                updates.setdefault(credited[0], []).append((1, 2, credited[1]))
     acc.save()
+    if any(c in gameconfig.MANAGER_EXP for c, _ in rewards):
+        await client.send_packet(MSG_LEVEL_CHANGE, wire.build([(1, 0, acc.level), (2, 0, acc.exp)]))
     for mid, entries in updates.items():
         if entries:
             await client.send_packet(mid, wire.build(entries + ([(2, 0, CARD_UPDATE)] if mid == MSG_CARD_CHANGE else [])))
     if popup and shown:
         await client.send_packet(MSG_NOTIFY_REWARDS, wire.build(shown))
-    if any(c in gameconfig.MANAGER_EXP for c, _ in rewards):
-        await client.send_packet(MSG_LEVEL_CHANGE, wire.build([(1, 0, acc.level), (2, 0, acc.exp)]))
-    for level in levels:
-        log.info(f"  LEVEL UP -> {level}")
-        await grant_rewards(client, gameconfig.player_level_reward(level))
 
 
 async def handle_sign_save(client: GameClient, pb_data: bytes):

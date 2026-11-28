@@ -46,12 +46,12 @@ async def main():
     c = await login(920001)
     acc = c.account
     assert acc.level == gameconfig.MAX_PLAYER_LEVEL, acc.level
-    assert acc.admin_flags.get("creative") == admin.CREATIVE_VERSION and acc.admin_flags.get("infinite_stamina")
+    assert acc.admin_flags.get(admin._creative_key()) == admin.CREATIVE_VERSION and acc.admin_flags.get("infinite_stamina")
     assert len(acc.owned_conf_ids()) > 100, len(acc.owned_conf_ids())
     assert admin.creative(acc) == admin.CREATIVE_TOPUP
     os.environ["HFH_MULTIPLAYER"] = "1"
     m = await login(920002)
-    assert m.account.level < gameconfig.MAX_PLAYER_LEVEL and not m.account.admin_flags.get("creative")
+    assert m.account.level < gameconfig.MAX_PLAYER_LEVEL and not m.account.admin_flags.get(admin._creative_key())
     print("test_creative: OK")
 
 

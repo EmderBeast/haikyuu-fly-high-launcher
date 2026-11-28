@@ -12,7 +12,8 @@ Rooms are built from the captured room as a template:
 
 Card stats: attribute row (playerlist.Attribute // 10 * 10 + star) gives base and
 per-level growth: base + growth * level, times the stage ratio (x/10000) and the stage
-LevelDown (x/10000) for monsters. This reproduces the captured opponent's stats.
+LevelDown (x/10000) for monsters in practice matches (not in the Training Camp).
+This reproduces the captured opponents' stats.
 Own cards add their training steps (train.Trainattribute); specialties, coach, bonds
 and other bonuses are not modelled.
 """
@@ -567,8 +568,10 @@ def _same_card(a: P.PlayerCard, b: P.PlayerCard) -> bool:
             == (b.conf_id, b.level, b.star, b.train, list(b.skills), b.skill_resonance_unlock_level, b.recalling))
 
 
-def away_team(template: P.PVPTeamInfo, stage_id: int, now: int) -> P.PVPTeamInfo:
+def away_team(template: P.PVPTeamInfo, stage_id: int, now: int, pvp_type: int | None = None) -> P.PVPTeamInfo:
     row = stage_row(stage_id)
+    if pvp_type == P.FIGHT_TOKYO:  # Garena applies LevelDown only in practice matches: the Training Camp
+        row = {k: v for k, v in row.items() if k != "LevelDown"}  # opponents of 1-1..1-3 have the full stats
     team = P.PVPTeamInfo()
     team.CopyFrom(template)
     del team.formation.players[:]
@@ -700,7 +703,7 @@ def build_room(args_pb: bytes, acc, gid: int, name: str) -> tuple[bytes, Match] 
     info = create.info
     info.room_args.CopyFrom(args)
     info.home.CopyFrom(home_team(info.home, acc, gid, name, args.pvp_type, request_lineup(args)))
-    info.away.CopyFrom(away_team(info.away, stage_id, now))
+    info.away.CopyFrom(away_team(info.away, stage_id, now, args.pvp_type))
     add_assist(info.home, acc, args, row, now)
     info.bo_type = _num(row.get("BoType"), info.bo_type)
     info.bo_score = _num(row.get("BoScore"), info.bo_score)

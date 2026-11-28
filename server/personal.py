@@ -294,6 +294,9 @@ def info_message(gid: int, acc, body: bytes) -> bytes:
     import wire
     body = unlockall.personal_info(acc, body)  # Admin Mode "unlock everything": every profile item
     fields = [x for x in wire.parse(body) if x[0] != 15] + [(15, 2, w)]
+    touched = _choices(gid).get("touched") or []
+    if touched:  # profile items the player has looked at (0x210E): their red dot stays away
+        fields += [(14, 0, i) for i in touched]
     own = pvp.state().get("profile", {}).get(str(gid), {}).get("2104")
     if own:  # the name the player chose (0x2104)
         fields = [x for x in fields if x[0] not in (3, 12)] + [(3, 2, own["name"].encode()), (12, 0, own["times"])]
@@ -367,7 +370,24 @@ async def handle_name(client, pb: bytes):
         err=err, name=name_of(client.gid, name) if err else name, name_set_times=times).SerializeToString())
 
 
+# 0x210E PersonalTouchC2S{item_ids}: the player looked at new profile items (portrait, frame, title ...), the
+# client clears their red dot when the reply lists them (PersonalInformationMessageHandler::OnPersonalTouch)
+# and knows them at login from PersonalInfoS2C.touched_item_id (14). Before, the server sent an empty reply
+# (Auto-ACK), so the red dots stayed. Assumption (no capture): the reply lists the ids of the request.
+MSG_TOUCH = 0x210E
+
+
+async def handle_touch(client, pb: bytes):
+    ids = list(P.PersonalTouchC2S.FromString(pb).item_ids)
+    c = _choices(client.gid)
+    have = c.setdefault("touched", [])
+    have += [i for i in ids if i not in have]
+    pvp.save()
+    await client.send_packet(MSG_TOUCH, P.PersonalTouchS2C(touched_item_ids=ids).SerializeToString())
+
+
 HANDLERS = {m: _handler(m) for m in SETTINGS}
+HANDLERS[MSG_TOUCH] = handle_touch
 HANDLERS[MSG_WALLPAPER_SET] = handle_wallpaper_set
 HANDLERS[MSG_WALLPAPER_EQUIP] = handle_wallpaper_equip
 HANDLERS[MSG_OTHER] = handle_other

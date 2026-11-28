@@ -188,6 +188,34 @@ def _apply(acc, action: dict) -> list[str]:
     for cid, amount in action.get("currency", {}).items():
         acc.set_currency(int(cid), max(0, int(amount)))
         done.append(f"Währung {cid} = {amount}")
+    if action.get("functions") and gameconfig.AVAILABLE:
+        # every function a level-60 player has: functionunlockconfig Type 3 opens a function with a cleared
+        # Training Camp stage (up to 10203); those stages and the ones before them are cleared with 3 stars
+        import accounts
+        need = max((r.get("TypeValue") or 0 for r in gameconfig._cached("functionunlockconfig").values()
+                    if r.get("Type") == 3), default=0)
+        n = 0
+        for sid in sorted(gameconfig.STAGES):
+            row = gameconfig.STAGES[sid]
+            if 10000 < sid <= need and (row.get("Chapter") or 0) > 0 and sid not in acc.stages:
+                acc.clear_stage(accounts.FIGHT_TOKYO, sid, 7)
+                n += 1
+        if n:
+            done.append(f"{n} Trainingslager-Stufen geschafft (Funktionen frei)")
+    if action.get("challenges") and gameconfig.AVAILABLE:
+        # the players' achievements (playerlist.PlayerChallengeTask, TaskType 20, Honor Info > Achievements)
+        # of every owned character finished, so they can be claimed like earned ones (Emre 28.11.)
+        import accounts
+        n = 0
+        for conf in sorted(acc.owned_conf_ids()):
+            for tid in gameconfig.PLAYERS.get(conf, {}).get("PlayerChallengeTask") or []:
+                if acc.task_state(tid) in (accounts.TASK_FINISH, accounts.TASK_OVER):
+                    continue
+                goal = (gameconfig.TASKS.get(tid) or {}).get("Value") or 1
+                acc.tasks[tid] = wire.build([(1, 0, tid), (2, 0, accounts.TASK_FINISH), (3, 0, goal)])
+                n += 1
+        if n:
+            done.append(f"{n} Spieler-Erfolge erfüllt")
     if action.get("all_cards") and gameconfig.AVAILABLE:
         owned = acc.owned_conf_ids()
         # 5xxxx: copies of the real characters (opponent/special versions), not obtainable in game
@@ -389,18 +417,25 @@ def _swap_twins_in_team(acc, conf: dict) -> int:
 # Creative mode (own server only, every account): at the first login everything at max, at every
 # login currencies and items topped up again ("infinite"). Raise the version to run the full set again.
 CREATIVE_VERSION = 1
-CREATIVE_FULL = [{"level": gameconfig.MAX_PLAYER_LEVEL}, {"unlock_all": True}, {"resonance": {"*": "max"}},
+CREATIVE_FULL = [{"level": gameconfig.MAX_PLAYER_LEVEL}, {"unlock_all": True}, {"resonance": {"*": "max"}}, {"challenges": True}, {"functions": True},
                  {"flags": {"infinite_stamina": True}}]
-CREATIVE_TOPUP = [{"unlock": ["currency", "items"]}]
+CREATIVE_TOPUP = [{"unlock": ["currency", "items"]}, {"challenges": True}, {"functions": True}]
 
 
 LIVE = False  # set by the running server (server.main); offline tests keep the plain new-player state
 
 
+def _creative_key() -> str:
+    """Admin flag of the full creative set: once per edition, so the JP tables' extra cards, memories and
+    profile items come the first time an account logs in under "jp" (Emre: "bei JP soll alles drin sein")."""
+    import edition
+    return "creative_jp" if edition.NAME == "jp" else "creative"
+
+
 def creative(acc) -> list:
     if multiplayer() or not LIVE:
         return []
-    if int(acc.admin_flags.get("creative", 0)) < CREATIVE_VERSION:
+    if int(acc.admin_flags.get(_creative_key(), 0)) < CREATIVE_VERSION:
         return list(CREATIVE_FULL)
     return list(CREATIVE_TOPUP)
 
@@ -441,7 +476,7 @@ def apply_pending(acc):
             report.append(f"Fehler: {e}")
     acc.admin_flags["all_seen"] = seen
     if not multiplayer() and LIVE:
-        acc.admin_flags["creative"] = CREATIVE_VERSION
+        acc.admin_flags[_creative_key()] = CREATIVE_VERSION
     path.unlink(missing_ok=True)
     DONE.mkdir(parents=True, exist_ok=True)
     (DONE / f"{acc.gid}.json").write_text(json.dumps({"time": time.time(), "done": report},

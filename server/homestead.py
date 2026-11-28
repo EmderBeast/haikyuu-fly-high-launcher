@@ -848,6 +848,75 @@ def on_login(client) -> list[tuple[int, bytes]]:
     return out
 
 
+# --- rooms: upgrading an indoor area --------------------------------------------------------------------
+# 0x2306 HomeIndoorAreaLevelUpC2S{1=area_id 2=deletes} (HomesteadMessageHandler::RequestIndoorAreaUpgrade).
+# The client (OnReceivedAreaUpgrade) removes the furniture in `deletes`, sets the area to level_id, takes
+# `comfort` as the new comfort and opens HomesteadUpgradeSuccessView for level_id. Before, the server only
+# sent an empty reply (level_id 0): the success banner stayed on screen (Emre, new account, lobby Lv.1 -> 2).
+# Rule (homesteadindoorlevel): the next row of the area (Level + 1) needs base level >= HomesteadLevel and
+# costs UnlockSource [8, item, 16, number]. Assumptions (no capture): comfort does not change, an area
+# without a row in the HomeInfo starts at level 0 (unlocking = level 1), refused -> err FAILED.
+MSG_AREA_UP = 0x2306
+AREA_LEVELS = {(r["AreaID"], r["Level"]): r for r in pvp._cfg("homesteadindoorlevel")}
+
+
+def _base_info(client) -> "P.HomeInfoS2C":
+    info = P.HomeInfoS2C()
+    try:
+        info.ParseFromString(client.account.b.pb("0x2301"))
+    except Exception:
+        pass
+    return info
+
+
+def areas(client) -> dict:
+    """{area_id: level_id} of this player's rooms (from the baseline HomeInfoS2C, then the upgrades)."""
+    d = entry(client)
+    if "areas" not in d:
+        d["areas"] = {str(a.level_id // 100): a.level_id for a in _base_info(client).areas_in}
+    return d["areas"]
+
+
+def patch_info(client, body: bytes) -> bytes:
+    """The login HomeInfoS2C with this player's room levels."""
+    d = entry(client)
+    if "areas" not in d:
+        return body
+    info = P.HomeInfoS2C.FromString(body)
+    del info.areas_in[:]
+    for level_id in sorted(d["areas"].values()):
+        info.areas_in.add(level_id=level_id)
+    return info.SerializeToString()
+
+
+async def handle_area_level_up(client, pb: bytes):
+    import wire
+    req = P.HomeIndoorAreaLevelUpC2S.FromString(pb)
+    info = _base_info(client)
+    have = areas(client)
+    cur = have.get(str(req.area_id), 0) % 100
+    row = AREA_LEVELS.get((req.area_id, cur + 1))
+    cost = row.get("UnlockSource") or [] if row else []
+    item, number = (cost[1], cost[3]) if len(cost) >= 4 else (0, 0)
+    acc = client.account
+    if row is None or info.base_info.level < (row.get("HomesteadLevel") or 0) \
+            or (item and acc.get_currency(item) < number):
+        log.info(f"  HOME area {req.area_id} level {cur} -> {cur + 1}: refused")
+        await client.send_packet(MSG_AREA_UP, P.HomeIndoorAreaLevelUpS2C(err=FAILED).SerializeToString())
+        return
+    if item:
+        entry_ = acc.set_currency(item, acc.get_currency(item) - number)
+        await client.send_packet(0x0405, wire.build([(1, 2, entry_)]))
+    have[str(req.area_id)] = row["ID"]
+    acc.save()
+    pvp.save()
+    out = P.HomeIndoorAreaLevelUpS2C(deletes=list(req.deletes), level_id=row["ID"])
+    out.comfort.CopyFrom(info.base_info.comfort)
+    await client.send_packet(MSG_AREA_UP, out.SerializeToString())
+    log.info(f"  HOME area {req.area_id} -> level {cur + 1} ({row['ID']}) for {number} x {item}")
+
+
 HANDLERS = {MSG_REFRESH: handle_refresh, MSG_COMFORT: handle_comfort_reward, MSG_COLLECT: handle_collect,
             MSG_COLLECT_ONE: handle_collect_one,
-            MSG_LAND_WEED: handle_land_weed, MSG_REPAIR: handle_repair, MSG_ORDER: handle_order}
+            MSG_LAND_WEED: handle_land_weed, MSG_REPAIR: handle_repair, MSG_ORDER: handle_order,
+            MSG_AREA_UP: handle_area_level_up}
