@@ -71,6 +71,15 @@ def _stag(skill: dict) -> int:
     return v if isinstance(v, int) and v != NONE else (0 if v is None else -1)
 
 
+# Skills that also count with a second tag. Skill text of 5701's ultimate [SCORING MACHINE] (57014111): "When your
+# Lineup Specialty is Block or Quick ATK, ... [SCORING MACHINE] is also treated as a Quick Spike skill" (the only
+# such text in the game). Club boss capture (match_msgs.json, home Lineup Specialty Quick ATK): with every
+# 57014111 spike Korai's [Well-Rounded] (57013151) rose by 3 = 57013121 (+2, own player uses a tag-1 skill) +
+# 57013152 (+1, his own tag-1 spike), so Garena counts the ultimate as tag 1 there.
+# skill id -> (TeamSpecificGroup of the owner's team that switches it on, the extra tag)
+EXTRA_TAGS = {57014111: (0, 1)}
+
+
 def _tag(row: dict):
     """Tag of a buff row (0 morale skill, 3 stamina recovery, 7 Attack Tempo, ...) or None."""
     v = row.get("Tag")
@@ -914,6 +923,16 @@ class Battle:
                 return h
         return None
 
+    def _tags_used(self, ctx: Ctx) -> set[int]:
+        """Tags of the skill a touch is played with (_stag), plus the extra tag of EXTRA_TAGS."""
+        tags = {_stag(SKILLS.get(ctx.skill_id, {}))}
+        extra = EXTRA_TAGS.get(ctx.skill_id)
+        if extra and ctx.actor is not None:
+            team = self.team_of(ctx.actor)
+            if {0: 1, 3: 1, 1: 0, 2: 0}.get(self.genre[team], -1) == extra[0]:
+                tags.add(extra[1])
+        return tags
+
     def _value(self, key: str, arg: int, owner: int, ctx: Ctx):
         team = self.team_of(owner)
         me = ctx.actor == owner
@@ -1023,12 +1042,12 @@ class Battle:
         if key in ("SelfTouchBallMan", "MyTouchBallSkillTagType", "OwnPlayerTouchBallSkillTagType"):
             if ctx.event not in ("touch", "after", "crit") or ctx.actor is None:
                 return False
-            used = _stag(SKILLS.get(ctx.skill_id, {}))  # tag of the skill the touch is played with
+            used = self._tags_used(ctx)  # tags of the skill the touch is played with
             if key == "OwnPlayerTouchBallSkillTagType":  # one of our players touches with a skill of that tag
-                return self.team_of(ctx.actor) == team and (used == arg if SKILL_TAG_ZERO else True)
+                return self.team_of(ctx.actor) == team and (arg in used if SKILL_TAG_ZERO else True)
             if key == "SelfTouchBallMan":
                 return me
-            return me and (used == arg if SKILL_TAG_ZERO else (not arg or used == arg))
+            return me and (arg in used if SKILL_TAG_ZERO else (not arg or arg in used))
         if key == "TouchBallTeam":
             return ctx.actor is not None and self.team_of(ctx.actor) == team
         if key == "BuffNumber":
@@ -1132,8 +1151,8 @@ class Battle:
             if key == "OwnPlayerUniqueSkillTagType" and (self.team_of(ctx.actor) != team
                                                          or _num(sk.get("SkillUniqueType")) != 1):
                 return False
-            tag = _stag(sk)
-            return tag == arg if SKILL_TAG_ZERO else (tag == arg if arg else tag > 0)
+            tags = self._tags_used(ctx)
+            return arg in tags if SKILL_TAG_ZERO else (arg in tags if arg else max(tags) > 0)
         if key == "BattleEnergy":
             return self.energy.get(owner, ENERGY_MAX)
         if key == "BattleEnergyRatio":
