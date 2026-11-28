@@ -332,9 +332,9 @@ class Launcher:
                                      activebackground="#3d6a55",
                                      command=self.restart_game_clicked, **btn)
         self.restart_btn.pack(side="left", padx=6)
-        # Admin Mode: only in the admin build (server/admin.json) and only after the
-        # admin password was entered in game (Settings -> gift code)
-        self.admin_available = (base / "server" / "admin.json").exists() and not self.remote()
+        # Admin Mode: on the own (local) server every account is admin (creative mode); the button
+        # appears once an account logged in (server/admin.py notes it in admin_unlocked.json)
+        self.admin_available = not self.remote()
         self.admin_btn = tk.Button(mode_frame, text="Admin Mode", bg="#7d5a00",
                                    activebackground="#a07400", command=self.open_admin, **btn)
         self.admin_window = None
@@ -600,7 +600,7 @@ class Launcher:
         self.log(f"Server: {text} (Multiplayer)" if text else "Server: lokal")
         self.show_mode()
         # Admin Mode is for the local server only (a multiplayer server disables it anyway)
-        self.admin_available = (self.base / "server" / "admin.json").exists() and not text
+        self.admin_available = not text
         self.job(self.switch_server_job)
 
     def switch_server_job(self):
@@ -657,20 +657,18 @@ class Launcher:
         except OSError as e:
             self.log(f"server/edition.json nicht geschrieben: {e}")
         self.show_edition()
-        note = " – die Fassung des Online-Servers bestimmt dessen Betreiber" if self.remote() else ""
+        note = " – Online-Server: JP läuft dort auf Port +1" if self.remote() else ""
         self.log(f"Inhalte: {EDITIONS[name]}{note}")
         self.job(self.switch_edition_job)
 
     def switch_edition_job(self):
         """Replace our server (local only) and proxy, then restart the game."""
-        remote = self.remote()
         self.stop_proc(self.mitm_proc)
         self.mitm_proc = None
-        if not remote:
-            self.stop_proc(self.server_proc)
-            self.server_proc = None
+        self.stop_proc(self.server_proc)  # own server, or the relay (online: JP is another port)
+        self.server_proc = None
         for _ in range(20):
-            if not port_in_use(PROXY_PORT) and (remote or not port_in_use(GAME_PORT)):
+            if not port_in_use(PROXY_PORT) and not port_in_use(GAME_PORT):
                 break
             time.sleep(0.25)
         self.start_processes()
@@ -708,6 +706,8 @@ class Launcher:
             self.set_status("server", "läuft (extern)", WARN if remote else OK)
         elif remote:
             host, port = remote
+            if self.settings.get("edition") == "jp":  # online: the JP server runs on the next port
+                port += 1
             if reachable(host, port):
                 self.log(f"Online-Server {host}:{port} erreichbar.")
             else:

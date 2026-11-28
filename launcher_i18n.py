@@ -1,14 +1,14 @@
 """
 English texts for the launcher window (the code writes German; tr() translates for display).
 
-Language: settings "lang" ("de"/"en"), else the Windows UI language (German -> de, else en).
+Language: settings "lang" ("de"/"en", DE / EN button), else the Windows UI language (German -> de, else en).
 tr() replaces known German phrases (longest first, whole words for single words) and leaves
 values such as ports, names and file names untouched. Lines starting with "[" (output of the
 server/proxy child processes) and tracebacks are not translated.
 """
 import re
 
-LANG = "de"
+LANG = "en"
 
 # (German, English) - phrases; order does not matter, longer ones are applied first
 PHRASES = [
@@ -19,6 +19,7 @@ PHRASES = [
     ("Inhalte:", "Content:"),
     ("JP geht noch nicht, es fehlt:", "JP is not possible yet, missing:"),
     ("die Fassung des Online-Servers bestimmt dessen Betreiber", "the online server's operator decides its content"),
+    ("Online-Server: JP läuft dort auf Port +1", "online server: JP runs on port +1"),
     ("Proxy mit JP-Client-Dateien aus", "Proxy with JP client files from"),
     ("JP: Proxy-Zusatz oder Client-Dateien fehlen – Proxy ohne JP-Dateien.",
      "JP: proxy add-on or client files missing – proxy without JP files."),
@@ -317,7 +318,7 @@ def detect(settings: dict) -> str:
         lang = ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF
         return "de" if lang == 0x07 else "en"
     except Exception:
-        return "de"
+        return "en"  # unknown: English
 
 
 def tr(text: str) -> str:

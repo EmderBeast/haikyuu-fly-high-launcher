@@ -1,12 +1,13 @@
 """
 Admin Mode: give yourself characters, currencies, items and potentials.
 
-Only active when server/admin.json exists ({"pw_sha256": "<sha256 of the password>"}),
-i.e. in the admin build of the launcher package.
+Always active on an own (local) server; on a shared server only when server/admin.json exists
+({"pw_sha256": "<sha256 of the password>"}).
 
 Who is admin:
-- own (local) server: whoever enters the admin password in game (Settings -> gift code,
-  0x2403 SettingGiftCodeC2S); kept in accounts/admin_unlocked.json.
+- own (local) server: every account ("creative mode", the PC belongs to the player); each account
+  is noted in accounts/admin_unlocked.json at login, so the launcher shows its Admin Mode button.
+  The admin password (gift code) still works there but is no longer needed.
 - shared multiplayer server (server/multiplayer.json or HFH_MULTIPLAYER=1): only the OWNER and
   the players the owner made admin (accounts/admins.json). The first player who enters the
   password becomes the owner; after that the password does nothing. Everybody else is a normal
@@ -94,8 +95,8 @@ def multiplayer() -> bool:
 
 
 def enabled() -> bool:
-    """Admin Mode exists on this server (admin build: server/admin.json)."""
-    return CONFIG.exists()
+    """Admin Mode exists on this server: always on an own server, on a shared one with server/admin.json."""
+    return CONFIG.exists() or not multiplayer()
 
 
 def admins_state() -> dict:
@@ -121,8 +122,8 @@ def is_admin(gid) -> bool:
     if multiplayer():
         st = admins_state()
         return str(gid) == str(st.get("owner")) or str(gid) in st["admins"]
-    # own server: every account on it belongs to the PC's owner - unlocked once = all accounts
-    return bool(unlocked())
+    # own server: every account on it belongs to the PC's owner - everyone is admin (creative mode)
+    return True
 
 
 def is_own(gid) -> bool:
@@ -392,6 +393,10 @@ def apply_pending(acc):
     try:
         ACCOUNTS.mkdir(exist_ok=True)
         LAST_LOGIN.write_text(json.dumps({"gid": str(acc.gid), "time": time.time()}), encoding="utf-8")
+        if not multiplayer() and str(acc.gid) not in unlocked():  # own server: everyone is admin
+            state = unlocked()
+            state[str(acc.gid)] = time.time()
+            UNLOCKED.write_text(json.dumps(state, indent=1), encoding="utf-8")
     except OSError:
         pass
     path = QUEUE / f"{acc.gid}.json"
