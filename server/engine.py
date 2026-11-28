@@ -309,11 +309,16 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
                            and len(steps) >= inputs["morale"] and battle.cast_morale(user))
         ai_morale = bool(battle and team != user and battle.cast_morale(team))  # the AI releases it at once
         ready_before = bool(battle and battle.morale_ready(user))
-        ctx = battle.before_touch(pid, formula, link, DEFAULT_SKILL[formula]) if battle else None
         pick_ = chosen.pop((team, GATE.get(formula)), None)
-        if battle and pick_ and pick_[0] == pid:
+        mine = bool(battle and pick_ and pick_[0] == pid)
+        # the touch is played with the chosen ultimate: the skills that look at the touch's skill (tag checks
+        # such as 57013121 "your players use a skill of your Lineup Specialty's type") see it, as in Garena's
+        # frames, where the touch already carries the ultimate's id (calibrate.py replays it that way)
+        ctx = battle.before_touch(pid, formula, link, pick_[1] if mine else DEFAULT_SKILL[formula]) if battle else None
+        if mine:
             ctx.gate = GATE[formula]
-            battle.cast_driving(ctx, pick_[1])
+            if not battle.cast_driving(ctx, pick_[1]):
+                ctx.skill_id = DEFAULT_SKILL[formula]
         mult = 1.0
         if formula == SERVE and team == user and inputs.get("hand"):
             mult = HAND_SERVE.get(inputs["hand"], 1.0)
