@@ -643,6 +643,41 @@ def decide(home_power: int, away_power: int) -> tuple[bool, int]:
     return won, stars if won else 0
 
 
+def add_assist(team: P.PVPTeamInfo, acc, args: P.PVPRoomArgs, row: dict, now: int) -> int | None:
+    """Story stages with an AssistBattleID lend the player a character for the match (stage 10101:
+    Sugawara 1102, star 2 level 1; shown with "Assist" in the line-up). The client notes where it plays
+    in the line-up's assist_position (AssistBattle: inst_id, position, old_inst_id = the card it stands
+    in for); without one (AutoAssist) it takes the place of the first court player with its position
+    (Job). Returns the index it took, None for stages without one."""
+    a = _table_cached("assistbattle").get(_num(row.get("AssistBattleID")))
+    if not a or not a.get("AssistMonster"):
+        return None
+    conf = a["AssistMonster"]
+    form = _formation(acc, args.pvp_type, request_lineup(args))
+    ap = form.assist_position if form is not None and form.HasField("assist_position") else None
+    players = team.formation.players
+    court = min(7, len(players))
+    idx = None
+    if ap is not None and ap.old_inst_id:
+        idx = next((i for i in range(court) if players[i].info.inst_id == ap.old_inst_id), None)
+    if idx is None and ap is not None and 1 <= ap.position <= court:
+        idx = ap.position - 1
+    if idx is None:
+        job = gameconfig.PLAYERS.get(conf, {}).get("Job")
+        idx = next((i for i in range(court)
+                    if gameconfig.PLAYERS.get(players[i].info.conf_id, {}).get("Job") == job), 0)
+    if idx >= len(players):
+        return None
+    skills = gameconfig.new_card_fields(conf)[1] if gameconfig.new_card_fields(conf) else []
+    card = P.PlayerCard(inst_id=(ap.inst_id if ap is not None and ap.inst_id else now * 1000 + 99),
+                        create_time=now // 1000, conf_id=conf, level=_num(a.get("AssistLevel"), 1),
+                        star=_num(a.get("AssistStar"), 2), skills=skills)
+    old = players[idx].power
+    players[idx].CopyFrom(card_entry(card))
+    team.power += players[idx].power - old
+    return idx
+
+
 def build_room(args_pb: bytes, acc, gid: int, name: str) -> tuple[bytes, Match] | None:
     """PVPCreateS2C for a PvE stage, or None for modes still answered from the capture."""
     import livematch  # imports this module
@@ -658,6 +693,7 @@ def build_room(args_pb: bytes, acc, gid: int, name: str) -> tuple[bytes, Match] 
     info.room_args.CopyFrom(args)
     info.home.CopyFrom(home_team(info.home, acc, gid, name, args.pvp_type, request_lineup(args)))
     info.away.CopyFrom(away_team(info.away, stage_id, now))
+    add_assist(info.home, acc, args, row, now)
     info.bo_type = _num(row.get("BoType"), info.bo_type)
     info.bo_score = _num(row.get("BoScore"), info.bo_score)
     preset = preset_for(stage_id)

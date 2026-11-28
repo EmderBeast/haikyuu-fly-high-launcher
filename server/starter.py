@@ -48,6 +48,24 @@ PEAK_KEEP = {1, 2, 5, 6, 7, 8, 9, 10, 11}
 INST_BASE = 1 << 60  # starter instance ids, far from captured ones
 
 
+def default_look() -> dict[int, int]:
+    """PersonalInfoS2C field -> item a new player wears: 4 icon, 5 frame (playerinfoitemconfig: IsDefalt
+    and Iswear; ItemType 1 = icon, 2 = frame). Falls back to the captured ones without game data."""
+    try:
+        rows = json.loads((gameconfig.CFG / "playerinfoitemconfig.json").read_text(encoding="utf-8"))
+    except Exception:
+        rows = []
+    out = {}
+    for field, kind in ((4, 1), (5, 2)):
+        worn = sorted((r.get("Priority", 0), r["ID"]) for r in rows
+                      if r.get("ItemType") == kind and r.get("IsDefalt") == 1 and r.get("Iswear") == 1)
+        if worn:
+            out[field] = worn[0][1]
+        else:
+            out[field] = wire.get(wire.parse(CAPTURED.pb("0x2101")), field, 0)
+    return out
+
+
 def owner_gids() -> set[int]:
     try:
         return set(json.loads(OWNERS_FILE.read_text(encoding="utf-8")))
@@ -59,8 +77,11 @@ def baseline_for(gid: int) -> Baseline:
     return CAPTURED if gid in owner_gids() else Baseline(starter_sync(gid))
 
 
+START_SCHOOL = 31  # Yukigaoka Middle School
+
+
 def _starter_roster() -> list[int]:
-    """R cards: the first 7 match the positions (Job) of the captured main line-up."""
+    """Yukigaoka with Hinata, then R cards: the first 7 match the positions (Job) of the captured main line-up."""
     team = wire.parse(CAPTURED.pb("0x0B01"))
     lineup0 = wire.parse(next(v for n, _, v in team if n == 1))
     court = []
@@ -70,9 +91,12 @@ def _starter_roster() -> list[int]:
     jobs = [gameconfig.PLAYERS.get(wire.get(wire.parse(CAPTURED.cards.get(i, b"")), 3, 0), {}).get("Job")
             for i in court[:7]]
     # 5xxxx: copies of the real characters (opponent/special versions), not obtainable in game
+    # Hinata's middle school team first (Yukigaoka, the game's first story chapter; Hinata 3101 is its
+    # only SR), then the other R cards
     r_cards = [cid for cid, p in sorted(gameconfig.PLAYERS.items())
-               if cid < 50000 and p.get("Rare") == 1 and gameconfig.new_card_fields(cid)
-               and gameconfig.new_card_fields(cid)[1]]
+               if cid < 50000 and (p.get("Rare") == 1 or p.get("SchoolID") == START_SCHOOL)
+               and gameconfig.new_card_fields(cid) and gameconfig.new_card_fields(cid)[1]]
+    r_cards.sort(key=lambda c: gameconfig.PLAYERS[c].get("SchoolID") != START_SCHOOL)
     roster = []
     for job in jobs:
         pick = next((c for c in r_cards if gameconfig.PLAYERS[c].get("Job") == job and c not in roster), None)
@@ -112,9 +136,11 @@ def starter_sync(gid: int) -> list[dict]:
 
     def personal_pb():
         # PersonalInfoS2C: 2 sex, 3 name, 4 icon, 5 frame, 7 shown players (packed), 15 wallpaper
-        keep = {2, 4, 5, 15, 17}
+        # Icon and frame: the game's defaults (IsDefalt + Iswear), not the captured account's event ones.
+        keep = {2, 15, 17}
         f = [(n, wt, v) for n, wt, v in wire.parse(CAPTURED.pb("0x2101")) if n in keep]
         f += [(3, 2, f"Player{gid % 100000:05d}".encode()), (7, 2, b"".join(wire.varint(i) for i in insts[:3]))]
+        f += [(n, 0, v) for n, v in default_look().items()]
         return wire.build(sorted(f, key=lambda x: x[0]))
 
     def tasks_pb():

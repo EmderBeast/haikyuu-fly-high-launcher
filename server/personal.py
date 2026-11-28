@@ -255,7 +255,11 @@ def info_message(gid: int, acc, body: bytes) -> bytes:
     import unlockall
     import wire
     body = unlockall.personal_info(acc, body)  # Admin Mode "unlock everything": every profile item
-    return wire.build([x for x in wire.parse(body) if x[0] != 15] + [(15, 2, w)])
+    fields = [x for x in wire.parse(body) if x[0] != 15] + [(15, 2, w)]
+    own = pvp.state().get("profile", {}).get(str(gid), {}).get("2104")
+    if own:  # the name the player chose (0x2104)
+        fields = [x for x in fields if x[0] not in (3, 12)] + [(3, 2, own["name"].encode()), (12, 0, own["times"])]
+    return wire.build(sorted(fields, key=lambda x: x[0]))
 
 
 async def handle_wallpaper_set(client, pb: bytes):
@@ -285,11 +289,52 @@ async def handle_wallpaper_equip(client, pb: bytes):
     await client.send_packet(MSG_WALLPAPER_EQUIP, P.PersonalWallpaperEquipS2C(item_id=item).SerializeToString())
 
 
+# 0x2104 PersonalNameSetC2S{name}: the player's own name (was answered empty before, the name became
+# invisible). Names are unique on the server (case-insensitive), a taken one gets ROLE_NAME_REPEATED.
+MSG_NAME = 0x2104
+MAX_NAME = 16
+
+
+def name_of(gid: int, default: str = "") -> str:
+    """The name this player chose, else the snapshot's / baseline's."""
+    v = pvp.state().get("profile", {}).get(str(gid), {}).get("2104")
+    if v:
+        return v["name"]
+    return pvp.state().get("snapshots", {}).get(str(gid), {}).get("name") or default
+
+
+def name_taken(gid: int, name: str) -> bool:
+    st = pvp.state()
+    gids = set(st.get("profile", {})) | set(st.get("snapshots", {}))
+    return any(name_of(int(g)).strip().lower() == name.lower() for g in gids if g != str(gid))
+
+
+async def handle_name(client, pb: bytes):
+    name = P.PersonalNameSetC2S.FromString(pb).name.strip()
+    old = _choices(client.gid).get("2104") or {}
+    times = int(old.get("times", 0))
+    if not name or len(name) > MAX_NAME or any(ord(c) < 32 for c in name):
+        err = P.HAS_BAD_CHAR
+    elif name_taken(client.gid, name):
+        err = P.ROLE_NAME_REPEATED
+    else:
+        err = 0
+        times += 1
+        _choices(client.gid)["2104"] = {"name": name, "times": times}
+        snap = pvp.state().get("snapshots", {}).get(str(client.gid))
+        if snap is not None:
+            snap["name"] = name
+        pvp.save()
+    await client.send_packet(MSG_NAME, P.PersonalNameSetS2C(
+        err=err, name=name_of(client.gid, name) if err else name, name_set_times=times).SerializeToString())
+
+
 HANDLERS = {m: _handler(m) for m in SETTINGS}
 HANDLERS[MSG_WALLPAPER_SET] = handle_wallpaper_set
 HANDLERS[MSG_WALLPAPER_EQUIP] = handle_wallpaper_equip
 HANDLERS[MSG_OTHER] = handle_other
 HANDLERS[MSG_SETTING] = handle_setting
+HANDLERS[MSG_NAME] = handle_name
 
 
 def on_login(client) -> list[tuple[int, bytes]]:

@@ -8,6 +8,9 @@ Who is admin:
 - own (local) server: every account ("creative mode", the PC belongs to the player); each account
   is noted in accounts/admin_unlocked.json at login, so the launcher shows its Admin Mode button.
   The admin password (gift code) still works there but is no longer needed.
+  Creative mode on top (creative()): the first login brings level max, everything unlocked and at max
+  (cards, memories, potentials, coaches, cheers, cosmetics, resonance) and infinite stamina; every
+  later login tops currencies and items up again.
 - shared multiplayer server (server/multiplayer.json or HFH_MULTIPLAYER=1): only the OWNER and
   the players the owner made admin (accounts/admins.json). The first player who enters the
   password becomes the owner; after that the password does nothing. Everybody else is a normal
@@ -383,6 +386,22 @@ def _swap_twins_in_team(acc, conf: dict) -> int:
     return swapped
 
 
+# Creative mode (own server only, every account): at the first login everything at max, at every
+# login currencies and items topped up again ("infinite"). Raise the version to run the full set again.
+CREATIVE_VERSION = 1
+CREATIVE_FULL = [{"level": gameconfig.MAX_PLAYER_LEVEL}, {"unlock_all": True}, {"resonance": {"*": "max"}},
+                 {"flags": {"infinite_stamina": True}}]
+CREATIVE_TOPUP = [{"unlock": ["currency", "items"]}]
+
+
+def creative(acc) -> list:
+    if multiplayer():
+        return []
+    if int(acc.admin_flags.get("creative", 0)) < CREATIVE_VERSION:
+        return list(CREATIVE_FULL)
+    return list(CREATIVE_TOPUP)
+
+
 def apply_pending(acc):
     """Apply the queued Admin Mode changes for this account (called at login).
 
@@ -401,7 +420,7 @@ def apply_pending(acc):
         pass
     path = QUEUE / f"{acc.gid}.json"
     actions = _json(path, None)
-    batch = []
+    batch = creative(acc)
     seen = int(acc.admin_flags.get("all_seen", 0))
     if is_own(acc.gid):  # "all my accounts": each batch once per account
         for entry in _json(ALL_QUEUE, []):
@@ -417,8 +436,9 @@ def apply_pending(acc):
         except Exception as e:  # a bad entry must never block the login
             log.error(f"  ADMIN change failed {action}: {e!r}")
             report.append(f"Fehler: {e}")
-    if batch:
-        acc.admin_flags["all_seen"] = seen
+    acc.admin_flags["all_seen"] = seen
+    if not multiplayer():
+        acc.admin_flags["creative"] = CREATIVE_VERSION
     path.unlink(missing_ok=True)
     DONE.mkdir(parents=True, exist_ok=True)
     (DONE / f"{acc.gid}.json").write_text(json.dumps({"time": time.time(), "done": report},

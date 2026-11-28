@@ -412,6 +412,9 @@ async def handle_login(client: GameClient, pb_data: bytes):
         if m["msg_id"].upper() == "0X1701":  # Extreme Training: this player's idle rewards, not the capture
             await client.send_packet(0x1701, hangup.info(client.account))
             continue
+        if m["msg_id"].upper() == "0X1F01":  # tutorial: the groups this player has done (new players: none)
+            await client.send_packet(0x1F01, guide.info(int(gid), client.account))
+            continue
         if m["msg_id"].upper() == "0X2101":  # profile: this player's own wallpapers (rest as the baseline)
             await client.send_packet(0x2101, personal.info_message(int(gid), client.account,
                                                                    client.account.b.pb("0x2101")))
@@ -559,7 +562,10 @@ async def handle_lottery_do(client: GameClient, pb_data: bytes):
         return
 
     infos, inst_ids = [], []
-    for conf in acc.draw_cards(lottery_id, count):
+    drawn = acc.draw_cards(lottery_id, count)
+    forced = guide.forced_draw(int(client.gid), acc, count)  # tutorial: the guided first pull gives its card
+    drawn = (forced + drawn)[:max(count, len(forced))]
+    for conf in drawn:
         inst, card = acc.add_card(conf)
         inst_ids.append(inst)
         infos.append((1, 2, card_info(card)))
@@ -1410,7 +1416,9 @@ def _packed(data: bytes) -> list[int]:
 def player_name(client: GameClient) -> str:
     """Name from the account's PersonalInfoS2C (field 3)."""
     name = wire.get(wire.parse(client.account.b.pb("0x2101")), 3, b"")
-    return name.decode("utf-8", "replace") if isinstance(name, bytes) else str(name)
+    name = name.decode("utf-8", "replace") if isinstance(name, bytes) else str(name)
+    own = pvp.state().get("profile", {}).get(str(client.gid), {}).get("2104")  # chosen in game (0x2104)
+    return own["name"] if own else name
 
 
 async def before_result(client: GameClient, result: bytes, room):
@@ -1744,6 +1752,7 @@ MESSAGE_HANDLERS = {
 import admin  # noqa: E402  Admin Mode (gift code) and putting potentials on/off
 MESSAGE_HANDLERS.update(admin.HANDLERS)
 
+import guide  # noqa: E402  tutorial for new players
 import pvp  # noqa: E402  asynchronous PvP (arena) against the other players on this server
 MESSAGE_HANDLERS.update(pvp.HANDLERS)
 import peak  # noqa: E402  Triple Clash (three teams, best of three) against the other players
@@ -1758,6 +1767,7 @@ import mail  # noqa: E402  mailbox (season / daily rank rewards)
 import seasons  # noqa: E402  season ends and daily arena rewards, sent as mail
 import personal  # noqa: E402  time-limited frames / chat bubbles / titles (season rewards)
 MESSAGE_HANDLERS.update(mail.HANDLERS)
+MESSAGE_HANDLERS.update(guide.HANDLERS)  # tutorial groups done (0x1F02)
 MESSAGE_HANDLERS.update(personal.HANDLERS)  # profile choices (title, frame, chat frame ...)
 import chat  # noqa: E402  world chat and private messages between the players of this server
 MESSAGE_HANDLERS.update(chat.HANDLERS)
