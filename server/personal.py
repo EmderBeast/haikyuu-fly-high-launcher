@@ -64,6 +64,43 @@ def grant(gid: int, ids: list[int], until: int):
             pass
 
 
+FOREVER = 4102444800  # 2100-01-01: unlocks that never expire (sent without a time limit)
+
+
+def card_items(conf_id: int) -> list[int]:
+    """Profile items that come with a character (playerinfoitemconfig ItemType 8, PlayerItemID <card>01xx)."""
+    import gameconfig
+    rows = gameconfig._cached("playerinfoitemconfig") if gameconfig.AVAILABLE else {}
+    rows = rows.values() if isinstance(rows, dict) else rows
+    mine = sorted(((str(r.get("PlayerItemID", "")), r) for r in rows if r.get("ItemType") == 8
+                   and str(r.get("PlayerItemID", "")).startswith(f"{conf_id}01") and len(str(r["PlayerItemID"])) == 8),
+                  key=lambda x: x[0])
+    if not mine:
+        return []
+    how = mine[0][1].get("HowToGet")  # the ones of the card itself; later ones come another way (bond, star)
+    return sorted(r["ID"] for _, r in mine if r.get("HowToGet") == how)
+
+
+def unlock_cards(gid: int, acc, conf_ids) -> bytes | None:
+    """New characters: their profile items, kept for good. Returns the PersonalUpdateS2C with only the new ids
+    (Garena capture neu2811: Hinata 1140 recruited -> 0x2102 item_ids 8114001-8114004 before the card)."""
+    try:
+        have = set(P.PersonalInfoS2C.FromString(acc.b.pb("0x2101")).item_ids)
+    except Exception:
+        have = set()
+    have |= set(unlocks(gid))
+    new = []
+    for c in conf_ids:
+        new += [i for i in card_items(c) if i not in have and i not in new]
+    if not new:
+        return None
+    mine = _store().setdefault(str(gid), {})
+    for i in new:
+        mine[str(i)] = FOREVER
+    pvp.save()
+    return P.PersonalUpdateS2C(item_ids=new).SerializeToString()
+
+
 def update(gid: int, acc) -> bytes:
     base = []
     try:
@@ -76,7 +113,8 @@ def update(gid: int, acc) -> bytes:
     out = P.PersonalUpdateS2C()
     out.item_ids.extend(base + [i for i in extra if i not in base])
     for i, t in sorted(extra.items()):
-        out.time_limit.add(item_id=i, times=t)
+        if t < FOREVER:
+            out.time_limit.add(item_id=i, times=t)
     return out.SerializeToString()
 
 

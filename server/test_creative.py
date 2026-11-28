@@ -41,6 +41,7 @@ async def login(gid):
 
 
 async def main():
+    admin.LIVE = True  # as the running server
     os.environ.pop("HFH_MULTIPLAYER", None)
     c = await login(920001)
     acc = c.account

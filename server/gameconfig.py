@@ -257,6 +257,22 @@ def new_card_fields(conf_id: int) -> tuple[int, list[int]] | None:
     return START_STAR.get(PLAYERS[conf_id].get("Rare"), 2), skills
 
 
+def train_skills(conf_id: int) -> dict[int, int]:
+    """Skills a card only gets through training: {skill id: training step} (skilllist.Unlockcondition
+    "2,<step>"; "1,<star>" skills come with the card). Garena capture neu2811 (new account): Hinata 3101
+    and the recruited 1140 start without their third skill (Unlockcondition 2,7), 3102 etc. with it."""
+    if not AVAILABLE:
+        return {}
+    s = SKILLS.get(conf_id, {})
+    out = {}
+    for k in ("Skill1", "Skill2", "Skill3", "Skill4"):
+        sid = s.get(k)
+        cond = str(SKILL_LIST.get(sid, {}).get("Unlockcondition", "")).split(",") if isinstance(sid, int) else []
+        if len(cond) == 2 and cond[0].strip() == "2" and cond[1].strip().isdigit():
+            out[sid] = int(cond[1])
+    return out
+
+
 def milestones(lottery_id: int) -> dict[int, list[tuple[int, int]]]:
     """{pulls: [(item, amount)]} from entries 'pulls-item-amount[-...]'."""
     row = LOTTERIES.get(lottery_id) if AVAILABLE else None

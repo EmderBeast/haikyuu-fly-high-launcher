@@ -703,6 +703,8 @@ def make_card(inst: int, conf_id: int) -> bytes:
     fresh = gameconfig.new_card_fields(conf_id)
     if fresh:
         star, skills = fresh
+        locked = gameconfig.train_skills(conf_id)  # these come with training (step 7), not with the card
+        skills = [x for x in skills if x not in locked]
         # PlayerCard: 1=inst_id 2=create_time 3=conf_id 4=level 6=star 8=skills (packed)
         return wire.build([(1, 0, inst), (2, 0, int(time.time())), (3, 0, conf_id), (4, 0, 1),
                            (6, 0, star), (8, 2, b"".join(wire.varint(s) for s in skills))])

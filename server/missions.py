@@ -17,6 +17,7 @@ import wire
 from accounts import TASK_FINISH
 
 DAILY, WEEKLY = 1, 6
+MAIN = 5  # main-line tasks, e.g. 1002000 "clear stage 10103" (Garena capture neu2811: TASK_FINISH after 1-3)
 CARD = 20  # missions of one card (taskdepotconfig TaskType 20), e.g. "Win 120 matches of any type"
 CARD_WIN = 61001  # TastConditionTow [fight type (0 = any), card conf id]
 RESET_HOUR = 6  # "Resets Daily at 6:00 AM"
@@ -133,8 +134,8 @@ class Missions:
         return changed
 
     def event(self, code: int, amount: int = 1, params: tuple = ()):
-        """Advance open daily/weekly missions with this condition code."""
-        for task_type in (DAILY, WEEKLY):
+        """Advance open daily/weekly missions and main-line tasks with this condition code."""
+        for task_type in (DAILY, WEEKLY, MAIN):
             for tid in self._tasks_of(task_type):
                 cfg = _cfg(tid)
                 if cfg.get("TaskSubTargetType") != code or self.acc.task_state(tid) != 0:

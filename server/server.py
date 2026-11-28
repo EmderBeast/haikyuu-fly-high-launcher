@@ -555,6 +555,9 @@ async def handle_lottery_do(client: GameClient, pb_data: bytes):
     req = wire.parse(pb_data)
     lottery_id, count = wire.get(req, 1, 0), wire.get(req, 2, 1) or 1
     acc = client.account
+    row = gameconfig.LOTTERIES.get(lottery_id, {}) if gameconfig.AVAILABLE else {}
+    if (row.get("SingleResultResetTimes") or 0) > 0:  # preview draw (beginner 10-pull): see lottery_preview
+        return await lottery_preview(client, lottery_id, count, bool(wire.get(req, 3, 0)))
     cost_item, per_pull = gameconfig.lottery_cost(lottery_id) or (RECRUIT_TICKET, 1)
     is_currency = acc.is_currency(cost_item)
     have = acc.get_currency(cost_item) if is_currency else acc.item_count(cost_item)
@@ -564,23 +567,25 @@ async def handle_lottery_do(client: GameClient, pb_data: bytes):
         await client.send_packet(0x0F02, wire.build([(1, 0, lottery_id)]))
         return
 
-    infos, inst_ids = [], []
     drawn = acc.draw_cards(lottery_id, count)
     forced = guide.forced_draw(int(client.gid), acc, count)  # tutorial: the guided first pull gives its card
     drawn = (forced + drawn)[:max(count, len(forced))]
-    for conf in drawn:
-        inst, card = acc.add_card(conf)
-        inst_ids.append(inst)
-        infos.append((1, 2, card_info(card)))
     if is_currency:
         cost_msg, cost_entry = MSG_CURRENCY_CHANGE, acc.set_currency(cost_item, have - need)
     else:
         cost_msg, cost_entry = MSG_ITEM_CHANGE, acc.set_item(cost_item, have - need)
+    # Garena capture neu2811 (first recruit, lottery 1): the ticket, the new character's profile items, the
+    # card, the lucky coin (250, one per pull of banners with ExchangeRule 1), the banner counters, the reply
+    await client.send_packet(cost_msg, wire.build([(1, 2, cost_entry)]))
+    inst_ids = await _give_drawn(client, drawn)
+    rewards = []
+    if row.get("ExchangeRule") == 1:
+        credited = acc.add_reward(LUCKY_COIN, count)
+        if credited:
+            await client.send_packet(credited[0], wire.build([(1, 2, credited[1])]))
+            rewards.append((LUCKY_COIN, count))
     unit = acc.count_pulls(lottery_id, count)
     acc.save()
-
-    await client.send_packet(MSG_CARD_CHANGE, wire.build(infos))
-    await client.send_packet(cost_msg, wire.build([(1, 2, cost_entry)]))
     await client.send_packet(MSG_LOTTERY_UPDATE, wire.build([(1, 2, unit)]))
     if is_currency:
         await mission_event(client, missions.SPEND_CURRENCY, need, (cost_item,))
@@ -589,8 +594,95 @@ async def handle_lottery_do(client: GameClient, pb_data: bytes):
     inst_ids = [gone.get(i, i) for i in inst_ids]
     packed = b"".join(wire.varint(i) for i in inst_ids)
     # LotteryDoS2C tags from its WriteTo in hotfix/Config.dll: 1=id 2=isPre 3=cardInstIds(packed) 4=rewards 5=err
-    await client.send_packet(0x0F02, wire.build([(1, 0, lottery_id), (3, 2, packed)]))
+    reply = [(1, 0, lottery_id), (3, 2, packed)]
+    if rewards:
+        reply.append((4, 2, wire.build([(1, 2, wire.build([(2, 0, c), (3, 0, n)])) for c, n in rewards])))
+    await client.send_packet(0x0F02, wire.build(reply))
     log.info(f"  RECRUIT gave {len(inst_ids)} cards, tickets left {have - count}")
+
+
+LUCKY_COIN = 250  # item 250 (tszm_icon_xyb): one per pull of the standard recruit (capture neu2811)
+
+
+async def _give_drawn(client: GameClient, confs: list[int]) -> list[int]:
+    """Create drawn cards: profile items of new characters (0x2102) first, then the cards (0x0902), SR+ locked."""
+    acc = client.account
+    new_chars = [c for c in dict.fromkeys(confs) if c not in acc.owned_conf_ids()]
+    unlock = personal.unlock_cards(int(client.gid), acc, new_chars)
+    if unlock:
+        await client.send_packet(personal.MSG_UPDATE, unlock)
+    infos, inst_ids = [], []
+    for conf in confs:
+        inst, card = acc.add_card(conf)
+        if (gameconfig.PLAYERS.get(conf, {}).get("Rare") or 0) >= 3:
+            # drawn SR and better arrive locked (Garena neu2811: 1140, 2204, 1311 locked; N / R not)
+            card = wire.build(wire.set_varint(wire.parse(card), 10, 1))
+            acc.put_card(card)
+        inst_ids.append(inst)
+        infos.append((1, 2, card_info(card)))
+    await client.send_packet(MSG_CARD_CHANGE, wire.build(infos))
+    return inst_ids
+
+
+def _previews() -> dict:
+    return pvp.state().setdefault("lottery_pre", {})
+
+
+async def lottery_preview(client: GameClient, lottery_id: int, count: int, again: bool):
+    """Banners with a preview (cardlotteryconfig SingleResultResetTimes, e.g. the beginner 10-pull 4): the pull
+    shows the characters first (LotteryDoS2C is_pre, card_inst_ids = their conf ids), ResetTimes re-rolls are
+    free (is_again), 0x0F06 LotteryPreConfirm takes the last result. Garena capture neu2811: 10x item 133 ->
+    preview, one re-roll (LotteryUnit pre_num 1), confirm -> the cards, counters (ten_num 1, reset_num 1)."""
+    acc, gid = client.account, str(client.gid)
+    row = gameconfig.LOTTERIES.get(lottery_id, {})
+    cur = _previews().get(gid)
+    now = int(time.time())
+    if again:
+        if not cur or cur["id"] != lottery_id or cur["rerolls"] >= (row.get("ResetTimes") or 0):
+            log.info(f"  RECRUIT preview {lottery_id}: no re-roll left")
+            return await client.send_packet(0x0F02, wire.build([(1, 0, lottery_id), (5, 0, 1)]))
+        cur["rerolls"] += 1
+    else:
+        if cur:  # an unconfirmed preview: show it again
+            confs = cur["confs"]
+            return await client.send_packet(0x0F02, matches.P.LotteryDoS2C(
+                id=cur["id"], is_pre=True, card_inst_ids=confs).SerializeToString())
+        cost_item, per_pull = gameconfig.lottery_cost(lottery_id) or (RECRUIT_TICKET, 1)
+        is_currency = acc.is_currency(cost_item)
+        have = acc.get_currency(cost_item) if is_currency else acc.item_count(cost_item)
+        if have < per_pull * count:
+            return await client.send_packet(0x0F02, wire.build([(1, 0, lottery_id)]))
+        if is_currency:
+            await client.send_packet(MSG_CURRENCY_CHANGE, wire.build([(1, 2, acc.set_currency(cost_item, have - per_pull * count))]))
+        else:
+            await client.send_packet(MSG_ITEM_CHANGE, wire.build([(1, 2, acc.set_item(cost_item, have - per_pull * count))]))
+        cur = _previews()[gid] = {"id": lottery_id, "count": count, "rerolls": 0}
+    cur["confs"] = acc.draw_cards(lottery_id, cur["count"])
+    acc.save()
+    pvp.save()
+    unit = matches.P.LotteryUnit(id=lottery_id, pre_num=cur["rerolls"], unlock_time=now)
+    await client.send_packet(MSG_LOTTERY_UPDATE, matches.P.LotteryUpdateS2C(lotterys=[unit]).SerializeToString())
+    log.info(f"  RECRUIT preview {lottery_id} (re-roll {cur['rerolls']}): {cur['confs']}")
+    await client.send_packet(0x0F02, matches.P.LotteryDoS2C(
+        id=lottery_id, is_pre=True, card_inst_ids=cur["confs"]).SerializeToString())
+
+
+async def handle_lottery_pre_confirm(client: GameClient, pb_data: bytes):
+    """0x0F06 LotteryPreConfirmC2S (empty): take the shown preview -> cards, banner counters, S2C{id}."""
+    cur = _previews().pop(str(client.gid), None)
+    if not cur:
+        return await client.send_packet(0x0F06, b"")
+    acc = client.account
+    await _give_drawn(client, cur["confs"])
+    f = wire.parse(acc.count_pulls(cur["id"], cur["count"]))
+    f = wire.set_varint(f, 9, cur["rerolls"])  # reset_num
+    f = wire.set_varint(f, 10, int(time.time()))
+    unit = acc.lotteries[cur["id"]] = wire.build(f)
+    acc.save()
+    pvp.save()
+    await client.send_packet(MSG_LOTTERY_UPDATE, wire.build([(1, 2, unit)]))
+    log.info(f"  RECRUIT preview {cur['id']} confirmed: {cur['confs']}")
+    await client.send_packet(0x0F06, matches.P.LotteryPreConfirmS2C(id=cur["id"]).SerializeToString())
 
 
 MSG_NOTIFY_REWARDS = 0x0404  # NotifyRewardsS2C{1=repeated Item{2=conf_id 3=number}}: reward popup
@@ -890,7 +982,13 @@ async def handle_card_train(client: GameClient, pb_data: bytes):
         return await _card_error(client, 0x0908, inst, f"missing {lacking} or gold {gold}")
     item_entries = [(1, 2, acc.set_item(i, acc.item_count(i) - n)) for i, n in items]
     gold_entry = acc.set_currency(gameconfig.GOLD, acc.get_currency(gameconfig.GOLD) - gold)
-    card = wire.build(wire.set_varint(f, 7, train + 1))
+    f = wire.set_varint(f, 7, train + 1)
+    have = _packed(wire.get(f, 8, b""))
+    due = [sid for sid, at in gameconfig.train_skills(conf).items()
+           if at <= train + 1 and not any(h // 100 == sid // 100 for h in have)]
+    if due:  # skilllist Unlockcondition "2,<step>": the skill comes with this training step
+        f = wire.replace(f, 8, b"".join(wire.varint(x) for x in have + due))
+    card = wire.build(f)
     acc.put_card(card)
     acc.save()
     log.info(f"  CARD train inst={inst} conf={conf} step {train + 1}: -{items} -{gold} gold")
@@ -1489,7 +1587,10 @@ async def handle_tokyo_reward(client: GameClient, pb_data: bytes):
     for need in ready:
         acc.tokyo_rewards.append([chapter, need])
         rewards += gameconfig.open_rewards(chests[need])
-    await grant_rewards(client, rewards)
+    merged: dict[int, int] = {}  # Garena neu2811: chests 3/6/9 of chapter 1 (2+3+5 of item 133) as one 133 x10
+    for item, n in rewards:
+        merged[item] = merged.get(item, 0) + n
+    await grant_rewards(client, list(merged.items()))
     await client.send_packet(0x1103, wire.build(
         [(2, 2, wire.build([(1, 0, chapter), (2, 0, need)])) for need in ready]))
 
@@ -1745,6 +1846,7 @@ MESSAGE_HANDLERS = {
     0x0101: handle_login,
     0x0301: handle_heartbeat,
     0x0F02: handle_lottery_do,
+    0x0F06: handle_lottery_pre_confirm,
     0x0F04: handle_lottery_gift,
     0x0D02: handle_sign_save,
     0x0D03: handle_sign_reward,
@@ -1883,6 +1985,7 @@ async def on_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
 
 
 async def main():
+    admin.LIVE = True  # creative mode on an own server (offline tests leave it off)
     server = await asyncio.start_server(on_client, "0.0.0.0", PORT)
     import edition
     log.info(f"Edition {edition.NAME}, tables {edition.CFG}"

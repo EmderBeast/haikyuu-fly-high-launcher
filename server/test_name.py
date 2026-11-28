@@ -80,8 +80,9 @@ async def main():
     assert list(g.done_group_ids) == sorted(guide.SKIPPED + [1]), g
     # guided first recruit (group 3): the pull gives Hinata 1140, the next one is random again
     import gameconfig
-    lot = next(i for i in sorted(accounts.CAPTURED.lotteries) if (gameconfig.lottery_cost(i) or (0,))[0] == 318)
+    lot = 1  # standard recruit, one ticket 111 per pull (Garena: the ticket comes from stage 1-2)
     b2 = await login(910003)
+    b2.account.set_item(111, 1)
     assert guide.RECRUIT_CARD not in b2.account.owned_conf_ids()
     b2.sent.clear()
     await server.MESSAGE_HANDLERS[0x0F02](b2, wire.build([(1, 0, lot), (2, 0, 1)]))
@@ -96,7 +97,7 @@ async def main():
     room = matches.build_room(args.SerializeToString(), b2.account, 910003, "x")
     home = [p.info.conf_id for p in P.PVPCreateS2C.FromString(room[0]).info.home.formation.players[:7]]
     lineup = [P.PlayerCard.FromString(b2.account.get_card(i)).conf_id for i in matches._lineup(b2.account, P.FIGHT_TOKYO)[:7]]
-    assert home[0] == 1105 and home[1:6] == lineup[1:6], (home, lineup)  # line-up order kept, Tanaka on the serve place
+    assert home[1] == 1105 and home[0] == lineup[0] and home[2:6] == lineup[2:6], (home, lineup)  # Tanaka for Mori (place 2)
     # after the match the lent character leaves the line-up (next stage lends another one)
     form = P.TeamInfoS2C.FromString(b2.account.team_info()).formations[0]
     form.assist_position.CopyFrom(P.AssistBattle(conf_id=1102, position=0))

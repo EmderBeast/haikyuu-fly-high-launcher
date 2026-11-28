@@ -3,6 +3,7 @@ against the Garena capture decrypted_1 (0048 ShareAssistDoS2C). Temporary accoun
   python test_assistant.py
 """
 import asyncio
+import json
 import struct
 import tempfile
 from pathlib import Path
@@ -77,6 +78,10 @@ def info(c):
 
 async def main():
     gid = 990701
+    # the captured account's assistant settings (a new player starts without any, as on Garena)
+    import starter
+    starter.OWNERS_FILE = TMP / "owners.json"
+    starter.OWNERS_FILE.write_text(json.dumps([gid]), encoding="utf-8")
     c = await login(gid)
     acc, m = c.account, c.missions
     base = info(c)

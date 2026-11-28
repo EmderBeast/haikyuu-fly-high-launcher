@@ -394,8 +394,11 @@ CREATIVE_FULL = [{"level": gameconfig.MAX_PLAYER_LEVEL}, {"unlock_all": True}, {
 CREATIVE_TOPUP = [{"unlock": ["currency", "items"]}]
 
 
+LIVE = False  # set by the running server (server.main); offline tests keep the plain new-player state
+
+
 def creative(acc) -> list:
-    if multiplayer():
+    if multiplayer() or not LIVE:
         return []
     if int(acc.admin_flags.get("creative", 0)) < CREATIVE_VERSION:
         return list(CREATIVE_FULL)
@@ -422,7 +425,7 @@ def apply_pending(acc):
     actions = _json(path, None)
     batch = creative(acc)
     seen = int(acc.admin_flags.get("all_seen", 0))
-    if is_own(acc.gid):  # "all my accounts": each batch once per account
+    if is_own(acc.gid) and (LIVE or multiplayer()):  # "all my accounts": each batch once per account
         for entry in _json(ALL_QUEUE, []):
             if int(entry.get("id", 0)) > seen:
                 batch += entry.get("actions", [])
@@ -437,7 +440,7 @@ def apply_pending(acc):
             log.error(f"  ADMIN change failed {action}: {e!r}")
             report.append(f"Fehler: {e}")
     acc.admin_flags["all_seen"] = seen
-    if not multiplayer():
+    if not multiplayer() and LIVE:
         acc.admin_flags["creative"] = CREATIVE_VERSION
     path.unlink(missing_ok=True)
     DONE.mkdir(parents=True, exist_ok=True)

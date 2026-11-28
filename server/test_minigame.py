@@ -12,6 +12,11 @@ from pathlib import Path
 import accounts
 
 TMP = Path(tempfile.mkdtemp(prefix="hfh-minigame-"))
+# these accounts play with the captured account's state (cards, diamonds, progress), not a new player's
+import json as _json  # noqa: E402
+import starter  # noqa: E402
+starter.OWNERS_FILE = TMP / "owners.json"
+starter.OWNERS_FILE.write_text(_json.dumps([990701, 990702, 990703, 990704]), encoding="utf-8")
 accounts.ACCOUNTS = TMP
 import pvp  # noqa: E402
 pvp.ACCOUNTS, pvp.STORE = TMP, TMP / "pvp.json"

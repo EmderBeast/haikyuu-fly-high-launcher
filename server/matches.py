@@ -650,7 +650,8 @@ SETTER = 3  # playerlist Job
 def add_assist(team: P.PVPTeamInfo, acc, args: P.PVPRoomArgs, row: dict, now: int) -> int | None:
     """Story stages with an AssistBattleID lend the player a character for the match (1-1 Sugawara,
     1-2 Tanaka, 1-3 Kageyama; shown with "Assist" in the line-up). It plays on the place the line-up
-    shows (assist_position: the card it stands in for, or its slot; none = slot 0, the serve place);
+    shows (assist_position: the card it stands in for; else, as on Garena, the first one with its
+    position: 1-1 Sugawara for the setter on place 1, 1-2 Tanaka for the wing spiker on place 2);
     every other player starts where the line-up has him. Returns the slot, None without one."""
     a = _table_cached("assistbattle").get(_num(row.get("AssistBattleID")))
     if not a or not a.get("AssistMonster"):
@@ -665,6 +666,10 @@ def add_assist(team: P.PVPTeamInfo, acc, args: P.PVPRoomArgs, row: dict, now: in
     idx = None
     if ap is not None and ap.old_inst_id:
         idx = next((i for i in range(court) if players[i].info.inst_id == ap.old_inst_id), None)
+    if idx is None:  # as Garena's line-up shows it: in place of the first one with its position (Job)
+        job = gameconfig.PLAYERS.get(conf, {}).get("Job")
+        idx = next((i for i in range(court)
+                    if gameconfig.PLAYERS.get(players[i].info.conf_id, {}).get("Job") == job), None)
     if idx is None:
         idx = ap.position if ap is not None and 0 <= ap.position < court else 0
     logging.getLogger("hfh").info(f"  ASSIST {conf} on slot {idx} (assist_position: "

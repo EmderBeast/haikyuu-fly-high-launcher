@@ -75,7 +75,9 @@ async def main():
     c.sent.clear()
     await server.before_result(c, result(2), room(2, [5502, 5501, 5302, 5702, 5701, CARD, 2513]))  # lost arena
     await server.before_result(c, result(1), room(3, [5502, 5501, 5302, 5702, 5701, 5503, 5101]))  # no card
-    assert not c.sent and progress(acc) == 36
+    # other cards' missions may move (a new player has Garena's card missions of every character), 5104's not
+    assert all(t.id != TASK for m, pb in c.sent if m == server.MSG_TASK_CHANGE
+               for t in P.TaskChangeS2C.FromString(pb).tasks) and progress(acc) == 36
     bench = room(9, [5701, 1109, 5702, 2711, 5802, 1207, 1203] + [CARD])  # 5104 only on the bench (8th place)
     await server.before_result(c, result(1), bench)
     assert progress(acc) == 36

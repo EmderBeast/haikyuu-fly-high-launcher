@@ -14,6 +14,11 @@ os.environ["HFH_REALTIME"] = "1"
 import accounts  # noqa: E402
 
 TMP = Path(tempfile.mkdtemp(prefix="hfh-rt-"))
+# these accounts play with the captured account's state (cards, diamonds, progress), not a new player's
+import json as _json  # noqa: E402
+import starter  # noqa: E402
+starter.OWNERS_FILE = TMP / "owners.json"
+starter.OWNERS_FILE.write_text(_json.dumps([9401, 9402]), encoding="utf-8")
 accounts.ACCOUNTS = TMP
 import pvp  # noqa: E402
 pvp.ACCOUNTS, pvp.STORE = TMP, TMP / "pvp.json"
