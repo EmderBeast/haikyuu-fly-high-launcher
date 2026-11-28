@@ -384,6 +384,9 @@ async def handle_login(client: GameClient, pb_data: bytes):
     })
     await client.send_packet(0x0101, response)
 
+    strip_assist(client.account)  # a story stage's lent character never stays over a new login
+    if guide.repair(int(gid), client.account):  # tutorial: the guided recruit's card, if it never came
+        log.info(f"  GUIDE card {guide.RECRUIT_CARD} added (guided recruit done without it)")
     luckydraw.new_day(int(gid), client.account)  # Daily Lucky Draw: the free spin of today, before the currency sync
     for m in client.account.b.sync:
         if m["msg_id"].upper() == "0X0408":  # the characters this account has had (bonds hang on it)
@@ -1609,6 +1612,33 @@ async def handle_formation_change(client: GameClient, pb_data: bytes):
     await client.send_packet(0x0309, reply)
 
 
+def strip_assist(acc) -> list[bytes]:
+    """Removes the lent character from the saved line-ups; returns the changed ones."""
+    if not acc.team:
+        return []
+    out, changed = [], []
+    for num, wt, v in wire.parse(acc.team_info()):
+        if num == 1 and wire.get(wire.parse(v), 9, None) is not None:
+            v = wire.build([x for x in wire.parse(v) if x[0] != 9])
+            changed.append(v)
+        out.append((num, wt, v))
+    if changed:
+        acc.team = wire.build(out)
+        acc.save()
+    return changed
+
+
+async def clear_assist(client: GameClient):
+    """A story stage's lent character (TeamFormation.assist_position) plays that one match only: after
+    the result it leaves the saved line-ups, and the client gets them again (0x0B03), so the next
+    stage's lent character takes its place (Emre 28.11.: Tanaka announced for 1-2, Sugawara still shown)."""
+    changed = strip_assist(client.account)
+    if not changed:
+        return
+    await client.send_packet(0x0B03, wire.build([(1, 2, f) for f in changed]))
+    log.info(f"  ASSIST left {len(changed)} line-up(s) after the match")
+
+
 async def handle_pvp_result(client: GameClient, pb_data: bytes):
     """0x0304: built result for our own rooms; otherwise replay the captured result and credit its rewards."""
     room = getattr(client, "room", None)
@@ -1640,6 +1670,7 @@ async def handle_pvp_result(client: GameClient, pb_data: bytes):
                 await mission_event(client, missions.PEAK_MATCH, 1)
             return
         await handle_preset_result(client, room)
+        await clear_assist(client)
         if room.info.room_args.pvp_type == matches.P.FIGHT_ASSOC_BOSS:  # club boss: score for the club
             log.info(f"  CLUB BOSS score {clubs.boss_result(int(client.gid), room)}")
         return

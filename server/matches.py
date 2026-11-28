@@ -17,6 +17,7 @@ Own cards add their training steps (train.Trainattribute); specialties, coach, b
 and other bonuses are not modelled.
 """
 import json
+import logging
 import random
 import sys
 import time
@@ -643,12 +644,14 @@ def decide(home_power: int, away_power: int) -> tuple[bool, int]:
     return won, stars if won else 0
 
 
+SETTER = 3  # playerlist Job
+
+
 def add_assist(team: P.PVPTeamInfo, acc, args: P.PVPRoomArgs, row: dict, now: int) -> int | None:
-    """Story stages with an AssistBattleID lend the player a character for the match (stage 10101:
-    Sugawara 1102, star 2 level 1; shown with "Assist" in the line-up). The client notes where it plays
-    in the line-up's assist_position (AssistBattle: inst_id, position, old_inst_id = the card it stands
-    in for); without one (AutoAssist) it takes the place of the first court player with its position
-    (Job). Returns the index it took, None for stages without one."""
+    """Story stages with an AssistBattleID lend the player a character for the match (1-1 Sugawara,
+    1-2 Tanaka, 1-3 Kageyama; shown with "Assist" in the line-up). It plays on the place the line-up
+    shows (assist_position: the card it stands in for, or its slot; none = slot 0, the serve place);
+    every other player starts where the line-up has him. Returns the slot, None without one."""
     a = _table_cached("assistbattle").get(_num(row.get("AssistBattleID")))
     if not a or not a.get("AssistMonster"):
         return None
@@ -657,15 +660,15 @@ def add_assist(team: P.PVPTeamInfo, acc, args: P.PVPRoomArgs, row: dict, now: in
     ap = form.assist_position if form is not None and form.HasField("assist_position") else None
     players = team.formation.players
     court = min(7, len(players))
+    # where the line-up shows it (Emre 28.11.: everyone starts where the line-up has him): the card it
+    # stands in for, else the slot the client names, else slot 0 (the client shows it on the serve place)
     idx = None
     if ap is not None and ap.old_inst_id:
         idx = next((i for i in range(court) if players[i].info.inst_id == ap.old_inst_id), None)
-    if idx is None and ap is not None and 1 <= ap.position <= court:
-        idx = ap.position - 1
     if idx is None:
-        job = gameconfig.PLAYERS.get(conf, {}).get("Job")
-        idx = next((i for i in range(court)
-                    if gameconfig.PLAYERS.get(players[i].info.conf_id, {}).get("Job") == job), 0)
+        idx = ap.position if ap is not None and 0 <= ap.position < court else 0
+    logging.getLogger("hfh").info(f"  ASSIST {conf} on slot {idx} (assist_position: "
+             f"{'none' if ap is None else f'inst {ap.inst_id} position {ap.position} old {ap.old_inst_id}'})")
     if idx >= len(players):
         return None
     skills = gameconfig.new_card_fields(conf)[1] if gameconfig.new_card_fields(conf) else []

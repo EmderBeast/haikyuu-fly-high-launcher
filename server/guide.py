@@ -59,4 +59,17 @@ def forced_draw(gid: int, acc, count: int) -> list[int]:
     return [RECRUIT_CARD]
 
 
+def repair(gid: int, acc) -> bool:
+    """An account that did the guided recruit before forced_draw existed has group 3 done but no card
+    1140, and group 4 (level 1140 to 4) never ends (Emre 28.11.: "Level Up +3" pressed on and on).
+    Such an account gets the card at login. True when it was added."""
+    if acc.b is accounts.CAPTURED or RECRUIT_GROUP not in done(gid, acc):
+        return False
+    if RECRUIT_CARD in acc.owned_conf_ids():
+        return False
+    acc.add_card(RECRUIT_CARD)
+    acc.save()
+    return True
+
+
 HANDLERS = {MSG_DONE: handle_done}

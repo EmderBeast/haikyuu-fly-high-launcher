@@ -91,7 +91,26 @@ async def main():
     args = P.PVPRoomArgs(pvp_type=P.FIGHT_TOKYO, pvp_args=[0, 10101])
     room = matches.build_room(args.SerializeToString(), b2.account, 910003, "x")
     home = [p.info.conf_id for p in P.PVPCreateS2C.FromString(room[0]).info.home.formation.players[:7]]
-    assert 1102 in home, home
+    assert home[0] == 1102, home  # slot 0: serves and sets in the stage's script
+    args = P.PVPRoomArgs(pvp_type=P.FIGHT_TOKYO, pvp_args=[0, 10102])
+    room = matches.build_room(args.SerializeToString(), b2.account, 910003, "x")
+    home = [p.info.conf_id for p in P.PVPCreateS2C.FromString(room[0]).info.home.formation.players[:7]]
+    lineup = [P.PlayerCard.FromString(b2.account.get_card(i)).conf_id for i in matches._lineup(b2.account, P.FIGHT_TOKYO)[:7]]
+    assert home[0] == 1105 and home[1:6] == lineup[1:6], (home, lineup)  # line-up order kept, Tanaka on the serve place
+    # after the match the lent character leaves the line-up (next stage lends another one)
+    form = P.TeamInfoS2C.FromString(b2.account.team_info()).formations[0]
+    form.assist_position.CopyFrom(P.AssistBattle(conf_id=1102, position=0))
+    b2.account.save_formation(form.SerializeToString())
+    b2.sent.clear()
+    await server.clear_assist(b2)
+    assert not any(f.HasField("assist_position") for f in P.TeamInfoS2C.FromString(b2.account.team_info()).formations)
+    assert any(m == 0x0B03 for m, _ in b2.sent)
+    # an account with the recruit group done but no 1140 gets it at the next login
+    b4 = await login(910004)
+    guide._store()[str(910004)] = [guide.RECRUIT_GROUP]
+    assert guide.RECRUIT_CARD not in b4.account.owned_conf_ids()
+    b4 = await login(910004)
+    assert guide.RECRUIT_CARD in b4.account.owned_conf_ids()
     print("test_name: OK")
 
 
