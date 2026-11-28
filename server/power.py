@@ -16,8 +16,8 @@ Belegt (client decoded/analysis/hotfix_il_full.txt, checked on the captured room
     for the card's job
   Team shares (cheers, school bonds, coach) are not part of a card's power.
 Checked: the captured account's cards as Garena sent them (val / extrval from the room) - test_power.py.
-Open: 9 of the captured account's cards are exactly 150 above the formula (2513, 2701, 5101, 5102, 5203,
-5302, 5402, 5702, 5802), not explained by any table.
+The +150 that 9 captured cards showed was the Reflex base value (attribute.json DefCritRate 500, stat 12),
+now read in matches.card_attrs; left: 3 card states 90 / 108 below Garena.
 """
 import gameconfig
 import json

@@ -1,7 +1,7 @@
 """Offline test of the power formula (power.py) against the captured rooms (decoded/*match_msgs.json):
   - card power: matches.card_entry on the captured account's cards as they stood in the rooms, with the
-    account's records and gallery rows, = Garena's PlayerCardInfo.power (14 of 31 card states exact, 12
-    exactly 150 above - unexplained -, the rest within 150; before: about 3 800 below on average)
+    account's records and gallery rows, = Garena's PlayerCardInfo.power (28 of 31 card states exact since
+    DefCritRate is read; the other 3 are 90 / 108 below; before the formula: about 3 800 below on average)
   - team power: cards + weighted team shares (cheers from the tables + coach) + battle bonds + coach force
     = Garena's PVPTeamInfo.power (97 of 112 captured home rooms of the account within 4; 15 with -43 /
     +1 077 / +1 188, a rest that is open)
@@ -73,7 +73,7 @@ def main():
                                context=(records, awarded))
         diffs[pw - e.power] += 1
     near = sum(n for d, n in diffs.items() if abs(d) <= 150)
-    check("card power: exact on at least 14 card states, all within 150", diffs[0] >= 14 and near == sum(diffs.values()),
+    check("card power: exact on at least 28 of 31 card states, all within 150", diffs[0] >= 28 and near == sum(diffs.values()),
           sorted(diffs.items(), key=lambda kv: -kv[1]))
     ok = sum(n for d, n in teams.items() if abs(d) <= 4)
     check("team power: formula within 4 on all but the known -43 / +1 077 / +1 188 rooms",

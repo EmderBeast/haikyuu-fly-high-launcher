@@ -57,9 +57,12 @@ STATS = [
     (P.ATTR_SERVE, "Serve", "ServeRatio"),
     (P.ATTR_SAVE, "Save", "SaveRatio"),
 ]
+# crit / bonus stats 9-14 from attribute.json as the client reads them (TeamView.PlayerCardAttrUtils::GetAttr:
+# 9 AtkCritRate, 10 AtkCritDmg, 11 AtkBonus, 12 DefCritRate, 13 DefCritHit, 14 DefBonus); DefCritRate 500
+# (Reflex 5 %) was not read before - it is the +150 power on the captured cards that have it
 EXTRA = [(P.ATTR_MORALE, None), (P.ATTR_ENERGY, "Energy"), (P.ATTR_ATK_CRIT_RATE, "AtkCritRate"),
-         (P.ATTR_ATK_CRIT_DMG, None), (P.ATTR_ATK_BONUS, None), (P.ATTR_DEF_CRIT_RATE, None),
-         (P.ATTR_DEF_CRIT_HIT, None), (P.ATTR_DEF_BONUS, None)]
+         (P.ATTR_ATK_CRIT_DMG, "AtkCritDmg"), (P.ATTR_ATK_BONUS, "AtkBonus"), (P.ATTR_DEF_CRIT_RATE, "DefCritRate"),
+         (P.ATTR_DEF_CRIT_HIT, "DefCritHit"), (P.ATTR_DEF_BONUS, "DefBonus")]
 SCALE = 10000
 COACH_STATS = True  # the coach's stats and skills follow the team's coach (switch_coach)
 TEAM_SIZE = 13  # 7 on court + 6 bench slots
