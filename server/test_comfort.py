@@ -92,6 +92,31 @@ async def main():
     order = await ask(c)
     check("the next day it is given again", 0x0404 in order and c.account.get_currency(117) - coins == want[117])
 
+    # level pack (Emre 28.11.2026: claiming the Level Pack Lv.1 put the daily pack back to claimable)
+    await ask(c)  # take today's daily pack
+    daily_due = homestead.entry(c)["comfort_next"]
+    base_mask = P.HomeInfoS2C.FromString(c.account.b.pb("0x2301")).base_info.comfort_level_rewarded
+    check("captured account (level 20) has bits 1-20 set: bit <level> per claimed level pack", base_mask == (1 << 21) - 2,
+          f"{base_mask:b}")
+    homestead.entry(c)["comfort_rewarded"] = 0  # as an account that has not taken any level pack
+    gold = c.account.get_currency(100)
+    order = await ask(c, 1)
+    r1 = P.HomeComfortRewardS2C.FromString(c.sent[-1][1])
+    lp = dict(__import__("monthcard").pairs(homestead.COMFORT[0]["LevelGiftPack"]))
+    check("level pack 1: popup and reply with bit 1 set", 0x0404 in order and r1.err == 0 and r1.level == 1
+          and r1.comfort_level_rewarded >> 1 & 1, f"{order} mask {r1.comfort_level_rewarded:b}")
+    check("level pack 1 credited (100 x100000)", c.account.get_currency(100) - gold == lp[100])
+    check("the level reply carries no daily time (the client keeps its own)", r1.comfort_daily_reward_unix == 0)
+    check("daily pack stays taken", homestead.entry(c)["comfort_next"] == daily_due)
+    order = await ask(c, 1)
+    check("level pack 1 a second time: refused", P.HomeComfortRewardS2C.FromString(c.sent[-1][1]).err != 0
+          and 0x0404 not in order)
+    order = await ask(c, level["ID"] + 1)
+    check("a level not reached: refused", P.HomeComfortRewardS2C.FromString(c.sent[-1][1]).err != 0 and 0x0404 not in order)
+    li = P.HomeInfoS2C.FromString(homestead.patch_info(c, c.account.b.pb("0x2301"))).base_info
+    check("login HomeInfo: this account's daily time and level mask",
+          li.comfort_daily_reward_unix == daily_due and li.comfort_level_rewarded >> 1 & 1)
+
     print(f"\n{sum(checks)}/{len(checks)} checks passed")
     raise SystemExit(0 if all(checks) else 1)
 

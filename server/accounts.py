@@ -554,6 +554,16 @@ class Account:
         self.team = wire.build(out)
         self.save()
 
+    def set_formation_name(self, entry: bytes):
+        """Stores a FormationName {1=lineup 2=name} (0x0B05) in TeamInfoS2C.formation_name_sli (field 3),
+        in place of the one of the same line-up."""
+        lineup = wire.get(wire.parse(entry), 1, 0)
+        out = [(n, w, v) for n, w, v in wire.parse(self.team_info())
+               if not (n == 3 and wire.get(wire.parse(v), 1, 0) == lineup)]
+        out.append((3, 2, entry))
+        self.team = wire.build(out)
+        self.save()
+
     def login_updates(self) -> list[tuple[int, bytes]]:
         """Update messages that re-apply this account's changes after the baseline sync."""
         out = []

@@ -15,6 +15,12 @@ pvp.ACCOUNTS, pvp.STORE = TMP, TMP / "pvp.json"
 import server  # noqa: E402
 import homestead as H  # noqa: E402
 import wire  # noqa: E402
+import starter  # noqa: E402
+
+# the garden of the captured account: since new accounts start as a fresh Garena guest (no garden), the test
+# account must be an owner, who keeps the captured account
+_owners = starter.owner_gids
+starter.owner_gids = lambda: _owners() | {990801}
 
 P = H.P
 CAPTURE = Path(r"D:\2nd Brain\Haikyu-Fly-High-Analyse\capture\decrypted_3\0127_35_2.bin")

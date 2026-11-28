@@ -194,6 +194,7 @@ class LiveMatch:
                         GUEST: LIBERO_REPLACES.get(info.away.formation.libero_replace_type)}
         self.subs_left = {HOST: SUBS_PER_SET, GUEST: SUBS_PER_SET}
         self.pending_subs: list[tuple[int, int, int]] = []  # (team, on, off) for the next rally
+        self.cc = info.room_args.pvp_type == P.FIGHT_ASSOC_BOSS  # club boss rallies (engine.CC_*)
         self.auto_skill = False  # auto play (0x030C): the server releases the user's ultimates itself
         self.power_tot: dict[int, list[float]] = {}  # player -> [attack, defence] power this match
         # rally number -> (frames as sent, hand serve result or None): the last version of every rally,
@@ -364,7 +365,7 @@ class LiveMatch:
             energy0 = dict(self.battle.energy) if self.battle else None
             played = engine.simulate(court, self.serve, self.stats, rng=random.Random(self.seed),
                                      battle=self.battle, inputs=self.inputs, behind_libero=behind,
-                                     auto=self.auto_skill)
+                                     auto=self.auto_skill, cc=self.cc)
             point = played.winner
             for st in played.steps:  # attack / defence power of every touch, for the score display
                 tot = self.power_tot.setdefault(st.player, [0.0, 0.0])

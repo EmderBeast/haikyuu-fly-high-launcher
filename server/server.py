@@ -20,7 +20,7 @@ from missions import Missions
 import starter
 from accounts import (
     CAPTURED,
-    Account, MSG_CARD_CHANGE, MSG_CURRENCY_CHANGE, MSG_ITEM_CHANGE, MSG_LOTTERY_UPDATE, MSG_SIGN_INFO,
+    Account, MSG_CARD_CHANGE, MSG_CURRENCY_CHANGE, MSG_FLAGS, MSG_ITEM_CHANGE, MSG_LOTTERY_UPDATE, MSG_SIGN_INFO,
     MSG_TASK_CHANGE, STAMINA, TASK_FINISH,
     card_info, random_card_ids,
 )
@@ -837,8 +837,10 @@ async def mission_event(client: GameClient, code: int, amount: int = 1, params: 
         log.info(f"  MISSIONS progress code={code} +{amount} {params}")
 
 
-async def claim_tasks(client: GameClient, task_ids: list[int]) -> list[int]:
-    """Claim completed missions: credit taskdepotconfig rewards, book activity points, send TaskChange."""
+async def claim_tasks(client: GameClient, task_ids: list[int], open_chests: bool = False) -> list[int]:
+    """Claim completed missions: credit taskdepotconfig rewards, book activity points, send TaskChange.
+    open_chests (Quick Claim, Emre 28.11.2026): afterwards also open every activity chest (20/40/.../100) of the
+    claimed missions' kind (daily -> chest type 1, weekly -> 6) that the points now reach, in the same pop-up."""
     acc, m = client.account, client.missions
     claimed, rewards = [], []
     for tid in task_ids:
@@ -848,6 +850,16 @@ async def claim_tasks(client: GameClient, task_ids: list[int]) -> list[int]:
         m.changed_tasks.append(tid)
         rewards += m.on_claimed(tid, gameconfig.task_rewards(tid) or [])
         claimed.append(tid)
+    chests = []
+    if claimed and open_chests and gameconfig.AVAILABLE:
+        types = {gameconfig.TASKS.get(t, {}).get("TaskType") for t in claimed}
+        chest_types = {ct for tt, ct in ((missions.DAILY, 1), (missions.WEEKLY, 6)) if tt in types}
+        for cid in sorted(gameconfig.ACTIVITY_CHESTS):
+            if gameconfig.ACTIVITY_CHESTS[cid].get("Type") in chest_types:
+                got = m.claim_chest(cid)
+                if got is not None:
+                    chests.append(cid)
+                    rewards += got
     if claimed:
         m.save()
         # Garena (0x0E03 / 0x0E0A captures): the TaskChange with the claimed state first, then the items /
@@ -857,7 +869,7 @@ async def claim_tasks(client: GameClient, task_ids: list[int]) -> list[int]:
         for item, amount in rewards:
             merged[item] = merged.get(item, 0) + amount
         await grant_rewards(client, list(merged.items()))
-    log.info(f"  TASK claimed {len(claimed)} of {len(task_ids)}, rewards {rewards[:6]}, activation {m.activation}")
+    log.info(f"  TASK claimed {len(claimed)} of {len(task_ids)}, chests {chests}, rewards {rewards[:6]}, activation {m.activation}")
     return claimed
 
 
@@ -1295,8 +1307,9 @@ async def handle_task_yc_receive(client: GameClient, pb_data: bytes):
 
 
 async def handle_task_one_key(client: GameClient, pb_data: bytes):
-    """0x0E05 TaskReceiveOneKeyC2S: claim every completed mission of the named kinds."""
-    await claim_tasks(client, one_key_tasks(client.account, pb_data))
+    """0x0E05 TaskReceiveOneKeyC2S: claim every completed mission of the named kinds, then the activity chests
+    the new points reach (Emre's wish 28.11.2026; no Garena capture of 0x0E05 shows whether Garena does it)."""
+    await claim_tasks(client, one_key_tasks(client.account, pb_data), open_chests=True)
     await client.send_packet(0x0E05, b"")
 
 
@@ -1741,6 +1754,11 @@ async def handle_flag_set(client: GameClient, pb_data: bytes):
     if live:
         live.auto_skill = bool(acc.flags & 1)
     log.info(f"  FLAGS {[(P.FlagUnit.DESCRIPTOR.fields_by_name['flag'].enum_type.values_by_number[u.flag].name, u.open) for u in req.units]}")
+    # the client keeps the switches in infoData.flags, which only NotifyFlagsS2C (0x0403) sets
+    # (GamerBasicMessageHandler.OnFlagsChanged); the reply only fills changeFlags for the prompt
+    # (OnFlagSet, AutoFightViewLogic.UpdateViewModel reads Match.GetIsAutoSkill). Without the push every
+    # tap asked for "on" again and auto play never switched in the client (Emre 28.11.2026)
+    await client.send_packet(MSG_FLAGS, wire.build([(1, 0, acc.flags or 0)]))
     await client.send_packet(0x0203, rep.SerializeToString())
 
 
@@ -1873,6 +1891,20 @@ def refresh_snapshots(client: GameClient):
     pvp.save()
 
 
+async def handle_team_name(client: GameClient, pb_data: bytes):
+    """0x0B05 TeamNameC2S{1=formation_name{lineup, name}} -> TeamNameS2C{1=error 2=formation_name}. Had no
+    handler (empty reply: the client got no name back and the line-up kept its old name). No capture: assumed
+    the name is kept per line-up (in TeamInfoS2C.formation_name_sli at the next login) and sent back; an empty
+    name or one longer than 30 characters is refused."""
+    entry = matches.P.TeamNameC2S.FromString(pb_data).formation_name
+    if not entry.name.strip() or len(entry.name) > 30:
+        await client.send_packet(0x0B05, matches.P.TeamNameS2C(error=1, formation_name=entry).SerializeToString())
+        return
+    client.account.set_formation_name(entry.SerializeToString())
+    log.info(f"  TEAM line-up {entry.lineup} named {entry.name!r}")
+    await client.send_packet(0x0B05, matches.P.TeamNameS2C(formation_name=entry).SerializeToString())
+
+
 async def handle_team_save(client: GameClient, pb_data: bytes):
     """0x0B02 TeamFormationSaveC2S{1=formation 2=module}: keeps the line-up (players, libero preset,
     auto switch); matches are built from it. Answer: 0x0B03 with the line-up, then 0x0B02."""
@@ -1940,6 +1972,7 @@ MESSAGE_HANDLERS = {
     0x030C: handle_match_setting,
     0x0203: handle_flag_set,
     0x0B02: handle_team_save,
+    0x0B05: handle_team_name,
     0x030F: handle_pause,
     0x1103: handle_tokyo_reward,
 }

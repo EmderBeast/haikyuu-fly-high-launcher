@@ -158,6 +158,37 @@ async def handle_refresh(client, pb: bytes):
     log.info(f"  HOME refresh {req.schedule_level_id}: {n} earning(s)")
 
 
+# --- planning players into a schedule -------------------------------------------------------------------
+# 0x2307 HomeSchedulePlanC2S{schedule_level_id, players, friend_ids} -> HomeSchedulePlanS2C{err}. Had no
+# handler (empty reply): the players did not stay in the schedule. Shown by the capture of "plan all"
+# (0x2318, docs/garena-abgleich.md): planned players have 300 energy and the schedule's first earning comes
+# 900 s later; the state goes out as HomeUpdateS2C. Assumptions (no capture of 0x2307): the same for one
+# schedule - the named players replace the schedule's players, each gets 300 energy, the schedule starts
+# now (what it had earned stays); friends (friend_ids) are not served; an empty list stops the schedule.
+MSG_PLAN = 0x2307
+PLAN_ENERGY = 300
+
+
+async def handle_plan(client, pb: bytes):
+    req = P.HomeSchedulePlanC2S.FromString(pb)
+    d = entry(client)
+    advance(d)
+    now = int(time.time())
+    players = list(dict.fromkeys(req.players))
+    s = d["schedules"].setdefault(str(req.schedule_level_id), {"players": [], "first": 0, "last": now,
+                                                                "item": 0, "amount": 0, "running": False})
+    for other_level, other in d["schedules"].items():  # a player works in one schedule at a time
+        if other_level != str(req.schedule_level_id):
+            other["players"] = [p for p in other["players"] if p not in players]
+    s["players"], s["last"], s["running"] = players, now, bool(players)
+    for p in players:
+        d["players"][str(p)] = {"physical": PLAN_ENERGY, "reward": d["players"].get(str(p), {}).get("reward", False)}
+    pvp.save()
+    await client.send_packet(MSG_UPDATE, update(d).SerializeToString())
+    await client.send_packet(MSG_PLAN, P.HomeSchedulePlanS2C().SerializeToString())
+    log.info(f"  HOME plan {req.schedule_level_id}: players {players}")
+
+
 # --- collecting what the schedules earned --------------------------------------------------------------
 # 0x2317 HomeRewardC2S (no fields): take everything. Garena capture (decrypted_1, messages 0068-0071):
 #   - HomeUpdateS2C with the schedules only, now without rewards and without first / next reward time
@@ -239,8 +270,13 @@ async def handle_collect_one(client, pb: bytes):
 #   - order: currency change, NotifyRewardsS2C, TaskChangeS2C (weekly mission 6000015 "earn 117": +48),
 #     then HomeComfortRewardS2C{level = -1, comfort_daily_reward_unix = the next 06:00}
 # Assumptions: asked again before that time, the reply only repeats the time; the comfort value is the
-# account's baseline value (nothing on this server changes it yet). The level rewards (level >= 1) are
-# not served: no capture of such a claim.
+# account's baseline value (nothing on this server changes it yet).
+# Level rewards (level >= 1, "Level Pack" of the comfort info): no capture of such a claim. From the client
+# (HomesteadMessageHandler::OnReceiveClaimComfortReward / HomesteadBaseData::HasComfortLevelRewardClaimed):
+# the reply carries the new comfort_level_rewarded, a bit mask with bit <level> set per claimed level.
+# Assumed: a reached level that is not claimed yet gives its LevelGiftPack once (boxes that open by themselves
+# opened), in the same order as the daily reward. Both the next daily time and the mask are kept per account
+# and put into the login HomeInfoS2C (patch_info); before, a relog showed the daily pack as open again.
 MSG_COMFORT = 0x2315
 DAILY_REWARD, HOME_COIN, EARN_CURRENCY = -1, 117, 80104
 COMFORT = sorted(pvp._cfg("homesteadcomfort"), key=lambda r: r.get("ComfortNumber") or 0)
@@ -252,13 +288,13 @@ def comfort_row(total: int) -> dict | None:
     return reached[-1] if reached else None
 
 
-def daily_pack(row: dict, rng=None) -> list[tuple[int, int]]:
-    """DailyGiftPack of the level, boxes that open by themselves replaced by what they hold."""
+def daily_pack(row: dict, rng=None, field: str = "DailyGiftPack") -> list[tuple[int, int]]:
+    """DailyGiftPack (or LevelGiftPack) of the level, boxes that open by themselves replaced by what they hold."""
     import monthcard
     import pack
     import random
     won: dict[int, int] = {}
-    for item, n in monthcard.pairs(row.get("DailyGiftPack")):
+    for item, n in monthcard.pairs(row.get(field)):
         gift = pack.GIFTS.get(pack.ITEMS.get(item, {}).get("Itemresult"))             if isinstance(pack.ITEMS.get(item, {}).get("Itemresult"), int) else None
         if gift and gift.get("Autoopen") == 1 and pack.ITEMS[item].get("Droptype") == pack.DROP_GIFT:
             for i, k in pack.open_boxes(gift, n, rng or random):
@@ -271,15 +307,11 @@ def daily_pack(row: dict, rng=None) -> list[tuple[int, int]]:
 async def handle_comfort_reward(client, pb: bytes):
     import freepack
     req = P.HomeComfortRewardC2S.FromString(pb)
-    if req.level != DAILY_REWARD:
-        await pvp.HOOKS["generic"](client, pb, MSG_COMFORT)
-        return
-    info = P.HomeInfoS2C()
-    try:
-        info.ParseFromString(client.account.b.pb("0x2301"))
-    except Exception:
-        pass
+    info = _base_info(client)  # with this account's base level and comfort
     d = entry(client)
+    if req.level != DAILY_REWARD:
+        await _comfort_level_reward(client, req.level, info, d)
+        return
     now = int(time.time())
     due = d.get("comfort_next", info.base_info.comfort_daily_reward_unix)
     row = comfort_row(info.base_info.comfort.total)
@@ -298,6 +330,31 @@ async def handle_comfort_reward(client, pb: bytes):
         log.info(f"  HOME comfort level {row['ID']}: daily reward {rewards}")
     await client.send_packet(MSG_COMFORT, P.HomeComfortRewardS2C(
         level=DAILY_REWARD, comfort_daily_reward_unix=due).SerializeToString())
+
+
+async def _comfort_level_reward(client, level: int, info, d: dict):
+    mask = int(d.get("comfort_rewarded", info.base_info.comfort_level_rewarded))
+    row = next((r for r in COMFORT if r.get("ID") == level), None)
+    now_row = comfort_row(info.base_info.comfort.total)
+    if row is None or now_row is None or level > now_row["ID"] or level < 0 or level > 63 or mask >> level & 1:
+        log.info(f"  HOME comfort level reward {level}: refused (mask {mask:b})")
+        await client.send_packet(MSG_COMFORT, P.HomeComfortRewardS2C(
+            err=FAILED, level=level, comfort_level_rewarded=mask).SerializeToString())
+        return
+    rewards = daily_pack(row, field="LevelGiftPack")
+    d["comfort_rewarded"] = mask = mask | 1 << level
+    pvp.save()
+    await pvp.HOOKS["grant_rewards"](client, rewards, False)
+    popup = P.NotifyRewardsS2C()
+    for item, n in rewards:
+        popup.items.add(conf_id=item, number=n)
+    await client.send_packet(0x0404, popup.SerializeToString())
+    coins = sum(n for item, n in rewards if item == HOME_COIN)
+    if coins:
+        await pvp.HOOKS["mission_event"](client, EARN_CURRENCY, coins, (HOME_COIN,))
+    log.info(f"  HOME comfort level {level}: level reward {rewards}")
+    await client.send_packet(MSG_COMFORT, P.HomeComfortRewardS2C(
+        level=level, comfort_level_rewarded=mask).SerializeToString())
 
 
 # --- garden: sowing -----------------------------------------------------------------------------------
@@ -861,12 +918,93 @@ AREA_LEVELS = {(r["AreaID"], r["Level"]): r for r in pvp._cfg("homesteadindoorle
 
 
 def _base_info(client) -> "P.HomeInfoS2C":
+    """The baseline HomeInfoS2C with this account's base level and comfort (see handle_home_level_up)."""
     info = P.HomeInfoS2C()
     try:
         info.ParseFromString(client.account.b.pb("0x2301"))
     except Exception:
         pass
+    d = entry(client)
+    if "level" in d:
+        info.base_info.level = d["level"]
+        info.base_info.comfort.total = d["comfort"]
+    if "expansion" in d:
+        info.base_info.expansion_times = d["expansion"]
     return info
+
+
+# --- outdoor: expansion ------------------------------------------------------------------------------------
+# 0x2305 HomeOutdoorSpaceExpandC2S{} -> HomeOutdoorSpaceExpandS2C{err, expansion_times}. Had no handler (empty
+# reply = expansion_times 0). From the client (HomesteadExpandViewLogic::OnConfirmEvent): it asks only when the
+# base level reaches LevelLimit of homesteadoutdoorexpansion row expansion_times + 1 and the player has that
+# row's ExpansionConsume; OnReceivedOutdoorExpansion takes expansion_times and grows the outdoor scene.
+# Assumptions (no capture): that row's ExpansionConsume is taken; refused -> err FAILED, nothing taken.
+MSG_EXPAND = 0x2305
+EXPANSIONS = {r.get("ID", 0): r for r in pvp._cfg("homesteadoutdoorexpansion")}
+
+
+async def handle_outdoor_expand(client, pb: bytes):
+    import wire
+    info = _base_info(client)
+    times, level = info.base_info.expansion_times, info.base_info.level
+    row = EXPANSIONS.get(times + 1)
+    cost = (row.get("ExpansionConsume") or []) if row else []
+    item, number = (cost[1], cost[3]) if isinstance(cost, list) and len(cost) >= 4 else (0, 0)
+    acc = client.account
+    if row is None or level < (row.get("LevelLimit") or 0) or (item and acc.get_currency(item) < number):
+        log.info(f"  HOME outdoor expansion {times} -> {times + 1}: refused (base level {level})")
+        await client.send_packet(MSG_EXPAND, P.HomeOutdoorSpaceExpandS2C(err=FAILED, expansion_times=times).SerializeToString())
+        return
+    if item:
+        entry_ = acc.set_currency(item, acc.get_currency(item) - number)
+        await client.send_packet(0x0405, wire.build([(1, 2, entry_)]))
+    entry(client)["expansion"] = times + 1
+    acc.save()
+    pvp.save()
+    await client.send_packet(MSG_EXPAND, P.HomeOutdoorSpaceExpandS2C(expansion_times=times + 1).SerializeToString())
+    log.info(f"  HOME outdoor expansion {times} -> {times + 1} for {number} x {item}")
+
+
+# --- base: level up ----------------------------------------------------------------------------------------
+# 0x2303 HomeLevelUpC2S{} (HomesteadMessageHandler::RequestHomeLevelUp, upgrade pop-up with isBaseUpgrade).
+# The client (OnReceivedHomeLevelUp) takes level and comfort from HomeLevelUpS2C{err, level, comfort} and opens
+# HomesteadUpgradeSuccessView for that level. Before, the server sent an empty reply (level 0): the success
+# banner showed a room text and could not be closed, and the base stayed at its level (Emre 28.11.2026).
+# From the client: the button only asks when HomesteadBaseData.NextLevelConfig (homesteadlevel row level + 1,
+# none above the highest level) exists, and the pop-up shows that row's LevelUpConsume [8, item, 16, number] as
+# the cost. Assumptions (no capture): the cost is that row's LevelUpConsume; the comfort is the new level's
+# BasicComfort plus the furniture comfort the account had (comfort total minus the old BasicComfort);
+# not enough of the item or the highest level -> err FAILED, nothing taken.
+MSG_LEVEL_UP = 0x2303
+HOME_LEVELS = {r["ID"]: r for r in pvp._cfg("homesteadlevel")}
+
+
+async def handle_home_level_up(client, pb: bytes):
+    import wire
+    info = _base_info(client)
+    cur, total = info.base_info.level, info.base_info.comfort.total
+    row = HOME_LEVELS.get(cur + 1)
+    cost = (row.get("LevelUpConsume") or []) if row else []
+    item, number = (cost[1], cost[3]) if len(cost) >= 4 else (0, 0)
+    acc = client.account
+    if row is None or (item and acc.get_currency(item) < number):
+        log.info(f"  HOME base level {cur} -> {cur + 1}: refused")
+        await client.send_packet(MSG_LEVEL_UP, P.HomeLevelUpS2C(err=FAILED).SerializeToString())
+        return
+    if item:
+        entry_ = acc.set_currency(item, acc.get_currency(item) - number)
+        await client.send_packet(0x0405, wire.build([(1, 2, entry_)]))
+    old_basic = (HOME_LEVELS.get(cur) or {}).get("BasicComfort") or 0
+    d = entry(client)
+    d["level"] = cur + 1
+    d["comfort"] = max(total - old_basic, 0) + (row.get("BasicComfort") or 0)
+    acc.save()
+    pvp.save()
+    out = P.HomeLevelUpS2C(level=d["level"])
+    out.comfort.CopyFrom(info.base_info.comfort)
+    out.comfort.total = d["comfort"]
+    await client.send_packet(MSG_LEVEL_UP, out.SerializeToString())
+    log.info(f"  HOME base level {cur} -> {d['level']} for {number} x {item}, comfort {total} -> {d['comfort']}")
 
 
 def areas(client) -> dict:
@@ -878,14 +1016,24 @@ def areas(client) -> dict:
 
 
 def patch_info(client, body: bytes) -> bytes:
-    """The login HomeInfoS2C with this player's room levels."""
+    """The login HomeInfoS2C with this player's room levels and comfort rewards."""
     d = entry(client)
-    if "areas" not in d:
+    if not any(k in d for k in ("areas", "comfort_next", "comfort_rewarded", "level", "expansion")):
         return body
     info = P.HomeInfoS2C.FromString(body)
-    del info.areas_in[:]
-    for level_id in sorted(d["areas"].values()):
-        info.areas_in.add(level_id=level_id)
+    if "level" in d:  # base level and comfort after a base level up
+        info.base_info.level = d["level"]
+        info.base_info.comfort.total = d["comfort"]
+    if "areas" in d:
+        del info.areas_in[:]
+        for level_id in sorted(d["areas"].values()):
+            info.areas_in.add(level_id=level_id)
+    if "expansion" in d:  # outdoor expansions of this account
+        info.base_info.expansion_times = d["expansion"]
+    if "comfort_next" in d:  # the daily comfort pack this account already took
+        info.base_info.comfort_daily_reward_unix = d["comfort_next"]
+    if "comfort_rewarded" in d:  # the comfort level packs this account took (bit mask)
+        info.base_info.comfort_level_rewarded = d["comfort_rewarded"]
     return info.SerializeToString()
 
 
@@ -919,4 +1067,5 @@ async def handle_area_level_up(client, pb: bytes):
 HANDLERS = {MSG_REFRESH: handle_refresh, MSG_COMFORT: handle_comfort_reward, MSG_COLLECT: handle_collect,
             MSG_COLLECT_ONE: handle_collect_one,
             MSG_LAND_WEED: handle_land_weed, MSG_REPAIR: handle_repair, MSG_ORDER: handle_order,
-            MSG_AREA_UP: handle_area_level_up}
+            MSG_AREA_UP: handle_area_level_up, MSG_LEVEL_UP: handle_home_level_up,
+            MSG_EXPAND: handle_outdoor_expand, MSG_PLAN: handle_plan}

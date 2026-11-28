@@ -239,10 +239,54 @@ AI_CAST_CHANCE = 0.5
 # for ^1). Attack stat = the higher of Power and Quick Attack. Applies to the AI and to auto play.
 SET_RULE = True
 SET_POWER = 3
+# Club boss (CC, FIGHT_ASSOC_BOSS): Garena's boss plays differently from every other opponent. In the
+# captured boss match (decoded/match_msgs.json 2570-2752, stage 1000310) the user won all 11 rallies,
+# each the same way: the boss digs the user's first spike back, its own attacks are always kept in play
+# by the user's team, and the user's second spike scores (boss block no touch, dig 0). No touch of the
+# user's team failed (0 of ~190), its digs were all 4-5, and the boss's receive / sets / spikes / saves
+# never failed either. Chances below from the Fly High Hub's CC model (hfh-sim-repo engine.js
+# HFH.defaultCC), which agrees with the capture.
+CC_FIRST_SPIKE_SCORES = 0.04  # pSpikeScore.first: the boss misses the user's first spike of a rally
+CC_LATER_SPIKE_SCORES = 1.0  # pSpikeScore.later
+CC_BLOCK_KILL = (0.074, 0.24)  # blockKill1 / blockKill: the user's (first / later) block is a stuff block
+CC_BLOCK_BACK = 0.227  # blockBack1: the boss saves a stuff block anyway (1 of 4 captured)
+CC_BLOCK_TOUCH = 0.05  # the user's block touches the ball (1 of 21 captured)
+CC_BOSS_STUFF = 0.05  # the boss stuffs the user's first spike (1 of 11 captured)
+CC_DIG_MIN = 4  # the user's digs of the boss's spikes (20 of 20 captured: 4 or 5)
+
+
+def _cc_result(formula: int, team: int, user: int, result: int, steps: list, roll, rng) -> int:
+    """Result of a touch in a club boss match (see CC_*): roll() rolls the touch again."""
+    def kept(r):
+        for _ in range(8):
+            if r:
+                return r
+            r = roll()
+        return r or 3
+    spikes = sum(s.formula == SPIKE and team_of(s.player) == user for s in steps)
+    if team == user:
+        if formula == BLOCK:
+            blocks = sum(s.formula == BLOCK and team_of(s.player) == user for s in steps)
+            if rng.random() < CC_BLOCK_KILL[0 if blocks == 0 else 1]:
+                return 3
+            return 2 if rng.random() < CC_BLOCK_TOUCH else 1
+        result = kept(result)
+        return max(result, CC_DIG_MIN) if formula == DIG_SPIKE else result
+    last = steps[-1] if steps else None
+    user_spike = last is not None and team_of(last.player) == user and last.formula == SPIKE
+    if formula == BLOCK:
+        return 3 if user_spike and spikes <= 1 and rng.random() < CC_BOSS_STUFF else 1
+    if formula == DIG_SPIKE and last is not None and team_of(last.player) == team and last.formula == BLOCK:
+        miss = CC_FIRST_SPIKE_SCORES if spikes <= 1 else CC_LATER_SPIKE_SCORES
+        return 0 if rng.random() < miss else kept(result)
+    if (formula == SAVE and last is not None and team_of(last.player) == user and last.formula == BLOCK
+            and last.result == 3):
+        return kept(result) if rng.random() < CC_BLOCK_BACK else 0
+    return kept(result)
 
 
 def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, inputs=None, user=HOST,
-             behind_libero=(), auto=False) -> Rally:
+             behind_libero=(), auto=False, cc=False) -> Rally:
     """Plays one rally. court = rallygen.Court (stance, jobs, positions); battle = skills.Battle
     (optional) runs the players' skills and buffs around every touch. inputs = the user team's
     choices for this rally: {"hand": 1..3, "ults": {window index: [(player, skill)]},
@@ -302,11 +346,15 @@ def simulate(court, serve_team: int, stats: dict, rng=random, battle=None, input
         if (forced is None and result == 0 and formula == SAVE and sum(s.formula == SPIKE for s in steps) <= 1
                 and rng.random() < 0.7):  # saves behind the first attack: see FIRST_ATTACK
             result = roll_result(formula, last_result, link, x, rng) or 3
+        if cc and forced is None:  # club boss: see CC_*
+            result = _cc_result(formula, team, user, result, steps,
+                                lambda: roll_result(formula, last_result, link, x, rng), rng)
         if formula == SPIKE:
             result = min(max(result, 3), 6)
         st = Step(formula, pid, result, link, pw)
         if battle:
-            new = battle.override_result(pid, formula, result)
+            # club boss: the boss's result buffs did not show in the capture (its blocks were all no touch)
+            new = result if cc and team != user else battle.override_result(pid, formula, result)
             if new != result and forced is None:
                 st.original, st.result = result, new
             if ctx.skill_id != DEFAULT_SKILL[formula]:

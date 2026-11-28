@@ -97,6 +97,29 @@ async def main():
     await server.handle_task_one_key(c, request((missions.WEEKLY, 0)))
     check("weeklies claimed", all(acc.task_state(t) == accounts.TASK_OVER for t in weekly))
 
+    # Quick Claim also opens the activity chests the new points reach (Emre 28.11.2026)
+    m = c.missions
+    daily_chests = sorted((r.get("Active") or 0, cid) for cid, r in gameconfig.ACTIVITY_CHESTS.items() if r.get("Type") == 1)
+    reached = [cid for need, cid in daily_chests if need <= m.activation["daily"]]
+    check("chests reached by the daily points are open", reached and all(m.chests.get(cid) == missions.CHEST_RECEIVED for cid in reached),
+          f"points {m.activation['daily']}, chests {reached}")
+    later = [cid for need, cid in daily_chests if need > m.activation["daily"]]
+    check("chests not reached stay closed", all(m.chests.get(cid) != missions.CHEST_RECEIVED for cid in later))
+    # a second daily batch that passes the next threshold opens that chest too, in one TaskChange + pop-up
+    if later:
+        need = gameconfig.ACTIVITY_CHESTS[later[0]].get("Active")
+        more = []
+        while m.activation["daily"] + sum(r[1] for t in more for r in (gameconfig.task_rewards(t) or []) if r[0] == missions.DAILY_POINTS) < need:
+            got = finish(c, missions.DAILY, 1)
+            if not got:
+                break
+            more += got
+        c.sent.clear()
+        await server.handle_task_one_key(c, request((missions.DAILY, 0)))
+        check("next chest opened by Quick Claim", m.chests.get(later[0]) == missions.CHEST_RECEIVED or not more,
+              f"points {m.activation['daily']} / {need}")
+        check("one TaskChange for missions and chests", [i for i, _ in c.sent].count(server.MSG_TASK_CHANGE) == 1, [hex(i) for i, _ in c.sent])
+
     print("ALL OK" if all(checks) else f"{checks.count(False)} FAILED")
     return all(checks)
 
